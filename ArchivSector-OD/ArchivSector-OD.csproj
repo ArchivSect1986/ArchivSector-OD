@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<RootNamespace>ArchivSector_OD</RootNamespace>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UseWPF>true</UseWPF>
+		<ApplicationIcon>AppIcon.ico</ApplicationIcon>
+
+		<!-- Version shown in the .exe's Properties → Details tab -->
+		<Version>2.0.0</Version>
+
+		<!-- Only include English resource files, which drops the cs, de,
+		     fr, ja, etc. language folders from the build/publish output -->
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	</PropertyGroup>
+
+	<!-- Release builds only: don't produce a .pdb debug file. Debug
+	     builds still get one, so debugging in Visual Studio is unchanged. -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugType>none</DebugType>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="8.0.40" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
+		<None Update="AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
+</Project>

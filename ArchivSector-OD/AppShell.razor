@@ -1,0 +1,302 @@
+﻿@* Root component for the visual shell draft. Bay cards are
+   generated dynamically from whatever optical drives actually exist,
+   each keyed by drive letter. Each poll cycle computes real disc
+   metadata for whatever's in the drive -- category, format/capacity,
+   and (via DiscMetadataService) the disc's REAL title where one can
+   be parsed, falling back to the raw Windows volume label otherwise.
+   AACS version is also captured for Blu-ray discs when present.
+   Drive hardware is fetched once at startup. Settings, History, and
+   the ISO Verifier are all real, separate WPF windows opened with
+   Show(), not ShowDialog().
+
+   "🤖 Unattended Mode" is a header-level toggle (not a Settings
+   preference) -- the kind of thing flipped on right before leaving a
+   disc-swapping session unattended, off when back. Persists to
+   config.json like everything else, but lives here in the header,
+   matching where the Python app puts its own equivalent. Each
+   DriveBayCard reads this fresh on every disc insert to decide
+   whether to auto-start a rip. *@
+
+@implements IDisposable
+@using System.IO
+
+<div class="app-root" data-theme="@currentTheme">
+
+    <header class="app-header">
+        <div class="app-brand">
+            <h1>ARCHIVSECTOR-OD</h1>
+            <p>Optical Disc Ripping Control Center</p>
+        </div>
+        <div style="display: flex; align-items: center;">
+            <button class="shortcut-btn @(config.UnattendedAutoStart ? "active-toggle" : "")" @onclick="ToggleUnattendedMode"
+                    title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
+                🤖 Unattended Mode @(config.UnattendedAutoStart ? "ON" : "OFF")
+            </button>
+            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="OpenSettings">
+                ⚙️ Settings
+            </button>
+            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="ShowHistory">
+                📜 History
+            </button>
+            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="OpenIsoVerifier">
+                🔍 ISO Verifier
+            </button>
+            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="CreateShortcut" disabled="@isCreatingShortcut">
+                @(isCreatingShortcut ? "Creating…" : "📌 Create Desktop Shortcut")
+            </button>
+            @if (shortcutMessage is not null)
+            {
+                <span class="shortcut-message">@shortcutMessage</span>
+            }
+            <div class="theme-switch" style="margin-left: 16px;">
+                @foreach (var theme in Themes)
+                {
+                    <button class="@(theme == currentTheme ? "active" : "")"
+                            @onclick="() => SetTheme(theme)">
+                        @Capitalize(theme)
+                    </button>
+                }
+            </div>
+        </div>
+    </header>
+
+    @if (driveStates.Count == 0)
+    {
+        <div class="bays-grid">
+            <p style="color: var(--text-muted); padding: 20px;">
+                No optical drives detected on this machine.
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="bays-grid">
+            @foreach (var letter in driveStates.Keys.OrderBy(l => l))
+            {
+                var st = driveStates[letter];
+                var hw = driveHardware.TryGetValue(letter, out var h) ? h : null;
+                <DriveBayCard @key="letter"
+                              DriveLetter="@letter"
+                              MediaPresent="@st.MediaPresent"
+                              StatusText="@st.StatusText"
+                              Category="@st.Category"
+                              VolumeTitle="@st.VolumeTitle"
+                              FormatLabel="@st.FormatLabel"
+                              CapacityLabel="@st.CapacityLabel"
+                              AacsVersion="@st.AacsVersion"
+                              DriveModel="@(hw?.Caption ?? "")"
+                              DriveFirmware="@(hw?.Firmware ?? "")" />
+            }
+        </div>
+    }
+
+    <footer class="app-footer">
+        <span>Active Bays: @driveStates.Count &nbsp;•&nbsp; Discs Loaded: @LoadedCount/@driveStates.Count &nbsp;•&nbsp; Active Jobs: @BatchSyncService.ActiveCount @(BatchSyncService.QueuedCount > 0 ? $"(+{BatchSyncService.QueuedCount} queued)" : "")</span>
+        <span>ENGINE BUS: READY</span>
+    </footer>
+
+</div>
+
+@code {
+    private AppConfig config = new();
+    private string currentTheme = "midnight";
+    private readonly string[] Themes = { "midnight", "nova", "daylight" };
+
+    private bool isCreatingShortcut = false;
+    private string? shortcutMessage = null;
+
+    private readonly Dictionary<string, DriveHardwareInfo> driveHardware = new();
+
+    private class DriveState
+    {
+        public bool MediaPresent;
+        public string StatusText = "Checking…";
+        public DiscCategory Category = DiscCategory.Unknown;
+        public string VolumeTitle = "";
+        public string FormatLabel = "";
+        public string CapacityLabel = "";
+        public string AacsVersion = "";
+    }
+
+    private readonly Dictionary<string, DriveState> driveStates = new();
+    private Timer? driveWatchTimer;
+
+    private int LoadedCount => driveStates.Values.Count(d => d.MediaPresent);
+
+    protected override void OnInitialized()
+    {
+        config = ConfigService.Load();
+        currentTheme = config.Theme;
+
+        BatchSyncService.StateChanged += OnBatchSyncStateChanged;
+
+        RefreshDriveList();
+
+        driveWatchTimer = new Timer(_ => InvokeAsync(() =>
+        {
+            RefreshDriveList();
+            StateHasChanged();
+        }), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+
+        _ = Task.Run(() =>
+        {
+            var hw = DriveHardwareService.GetAllDriveModelsAndFirmware();
+            InvokeAsync(() =>
+            {
+                foreach (var kv in hw) driveHardware[kv.Key] = kv.Value;
+                StateHasChanged();
+            });
+        });
+    }
+
+    private void OnBatchSyncStateChanged() => InvokeAsync(StateHasChanged);
+
+    private void ToggleUnattendedMode()
+    {
+        config.UnattendedAutoStart = !config.UnattendedAutoStart;
+        ConfigService.Save(config);
+    }
+
+    private void OpenSettings()
+    {
+        var window = new SettingsWindow(config)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        window.Show();
+    }
+
+    private void ShowHistory()
+    {
+        var window = new HistoryWindow
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        window.Show();
+    }
+
+    private void OpenIsoVerifier()
+    {
+        var window = new IsoVerifierWindow
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        window.Show();
+    }
+
+    private async Task CreateShortcut()
+    {
+        isCreatingShortcut = true;
+        shortcutMessage = null;
+        StateHasChanged();
+
+        var result = await Task.Run(() => ShortcutService.CreateDesktopShortcut());
+
+        isCreatingShortcut = false;
+        shortcutMessage = result.Success ? $"Created: {result.Path}" : result.ErrorMessage;
+        StateHasChanged();
+    }
+
+    private void RefreshDriveList()
+    {
+        var optical = DriveInfo.GetDrives()
+            .Where(d => d.DriveType == DriveType.CDRom)
+            .ToList();
+
+        var currentLetters = optical.Select(d => LetterOf(d)).ToHashSet();
+
+        foreach (var stale in driveStates.Keys.Except(currentLetters).ToList())
+            driveStates.Remove(stale);
+
+        foreach (var di in optical)
+        {
+            var letter = LetterOf(di);
+            if (!driveStates.TryGetValue(letter, out var state))
+            {
+                state = new DriveState();
+                driveStates[letter] = state;
+            }
+            UpdateState(di, letter, state);
+        }
+    }
+
+    private static string LetterOf(DriveInfo di) => di.Name.TrimEnd('\\', ':');
+
+    private static void UpdateState(DriveInfo di, string letter, DriveState state)
+    {
+        try
+        {
+            state.MediaPresent = di.IsReady;
+            if (di.IsReady)
+            {
+                state.VolumeTitle = SafeVolumeLabel(di);
+                state.StatusText = $"DISC PRESENT — {state.VolumeTitle}";
+                state.Category = DiscDetectionService.DetectDiscCategory(letter);
+
+                try
+                {
+                    var root = $"{letter}:\\";
+                    var realTitle = DiscMetadataService.GetRealTitle(root, state.Category);
+                    if (!string.IsNullOrWhiteSpace(realTitle.Title))
+                    {
+                        state.VolumeTitle = realTitle.Title;
+                        state.StatusText = $"DISC PRESENT — {realTitle.Title}";
+                    }
+                    state.AacsVersion = realTitle.AacsVersion ?? "";
+                }
+                catch
+                {
+                    state.AacsVersion = "";
+                }
+
+                try
+                {
+                    state.CapacityLabel = $"{di.TotalSize / Math.Pow(1024, 3):F2} GB";
+                    state.FormatLabel = DiscDetectionService.ClassifyCapacity(di.TotalSize);
+                }
+                catch
+                {
+                    state.CapacityLabel = "";
+                    state.FormatLabel = "";
+                }
+            }
+            else
+            {
+                state.StatusText = "STANDBY // MEDIA ABSENT";
+                state.Category = DiscCategory.Unknown;
+                state.VolumeTitle = "";
+                state.FormatLabel = "";
+                state.CapacityLabel = "";
+                state.AacsVersion = "";
+            }
+        }
+        catch (Exception ex)
+        {
+            state.StatusText = $"ERROR: {ex.Message}";
+            state.MediaPresent = false;
+            state.Category = DiscCategory.Unknown;
+        }
+    }
+
+    private static string SafeVolumeLabel(DriveInfo di)
+    {
+        try { return string.IsNullOrWhiteSpace(di.VolumeLabel) ? "UNLABELED" : di.VolumeLabel; }
+        catch { return "UNLABELED"; }
+    }
+
+    private void SetTheme(string theme)
+    {
+        currentTheme = theme;
+        config.Theme = theme;
+        ConfigService.Save(config);
+    }
+
+    private static string Capitalize(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1);
+
+    public void Dispose()
+    {
+        driveWatchTimer?.Dispose();
+        BatchSyncService.StateChanged -= OnBatchSyncStateChanged;
+    }
+}

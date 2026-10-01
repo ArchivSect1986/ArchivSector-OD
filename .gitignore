@@ -1,0 +1,29 @@
+# ---- Build output ----
+bin/
+obj/
+publish/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.pdb
+
+# ---- Visual Studio ----
+.vs/
+*.user
+*.suo
+*.userprefs
+*.rsuser
+
+# Publish profiles store your own local folder paths (like your
+# Desktop), so they're kept off GitHub. Each person sets their own.
+**/Properties/PublishProfiles/
+
+# ---- Released app zips ----
+# Release builds go on the GitHub Releases page, not in the source code.
+*.zip
+
+# ---- OS clutter ----
+Thumbs.db
+desktop.ini
+.DS_Store

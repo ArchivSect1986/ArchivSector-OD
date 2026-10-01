@@ -1,0 +1,1628 @@
+﻿@* One drive bay card. Blu-ray/4K and DVD Movie Disc both open a
+   mode-choice popup; Movie-Only MKV is disc-agnostic; DVD's popup has
+   three real options (MakeMKV backup, Redumper raw ISO, Movie-Only).
+   Every mode button is gated by the real detected disc Category. A
+   Cancel button appears while running; Retry Last Rip appears after
+   a completed operation -- now goes through BatchSyncService's gate
+   the same as any other rip start, so it can't bypass Multi-Drive
+   Batch Sync's concurrent-rip cap the way it previously could. The
+   Open Output Folder button sits next to Eject/Close Tray. Bay title
+   is click-to-rename and persists to config.json. Tray control tracks
+   trayIsOpen as real app-managed state -- Eject is always available
+   (opens an empty tray too), Close only once the tray is actually
+   open. Shows real disc metadata and drive hardware info, plus an
+   OmniDrive/LibreDrive compatibility badge with a persisted
+   confirmation checkbox. Has a collapsible log console, and writes a
+   CSV history record on every completed (non-cancelled) operation.
+
+   Output naming: every ripping method names its output after the
+   disc's real title, falling back to a DriveLetter_Tag_Timestamp
+   scheme when no usable title exists, with a real duplicate-output
+   confirmation guarding against silently overwriting a prior rip.
+   PickMovieOnly specifically lets the user edit that suggested name
+   in TrackPickerWindow before extraction starts -- MakeMKV still
+   creates the file under its own auto-generated name as always, and
+   MakeMkvService.RenameNewestMkv renames it to the chosen name
+   afterward (picking the most-recently-written .mkv, not just the
+   first one found, so a stale leftover file can't get renamed by
+   mistake). Movie-Only output now always gets a real SHA1/MD5 (it
+   didn't before), with the Redump *match* step correctly skipped --
+   a re-muxed .mkv could never match Redump's raw-disc-dump database,
+   so checking anyway would misleadingly read as a bad rip. DVD's
+   MakeMKV-backup internal .iso filename now uses the same chosen
+   name too, instead of a hardcoded DriveLetter-based one.
+
+   Metadata & artwork: for movie/DVD discs, AutoFetchArtSilently()
+   fires automatically on insert when no real cover image is cached
+   yet (TMDB only -- skipped with a log line if no TMDB key is set). The cached poster shows inline as a base64 data URI. A "Show
+   details" toggle reveals the cached description text.
+
+   Multi-Drive Batch Sync / Unattended Mode: TryAutoStart() fires on
+   disc insert when either config.UnattendedAutoStart or
+   config.BatchQueueMode is on, gated through BatchSyncService's
+   shared slot/queue when Multi-Drive Batch Sync is on. Every
+   preflight check passes config.UnattendedAutoStart through globally.
+   Full backups go into a size-based subfolder (BD-25 / BD-50 /
+   DVD-5 / DVD-9) whenever Auto-categorize or Unattended Mode is on,
+   and Movie-Only MKVs go into their own MKV subfolder. In Unattended
+   Mode a name collision saves as "Title (2)" instead of overwriting. Every successful rip beeps (config.SoundAlerts) and, in Batch
+   Queue Mode, bumps a per-drive "N DONE" session counter. Manual
+   button clicks also go through the Multi-Drive Batch Sync gate
+   (StartGated), same as auto-starts and Retry Last Rip.
+
+   Blu-ray Full Backup has an automatic ImgBurn stage 2 when ImgBurn
+   is available. DVD's raw ISO dump falls back to ImgBurn when
+   Redumper isn't found. *@
+
+@implements IDisposable
+@using System.Threading.Tasks
+@using System.IO
+@using System.Diagnostics
+
+<div class="bay-card">
+    @if (isEditingLabel)
+    {
+        <input class="label-input" @bind="labelDraft" @bind:event="oninput"
+               @onkeydown="HandleLabelKeydown" autofocus />
+        <button class="label-confirm-btn" @onclick="ConfirmLabel">✓</button>
+    }
+    else
+    {
+        <h2 style="cursor: pointer;" title="Click to rename" @onclick="StartEditLabel">
+            @(customLabel ?? $"DRIVE BAY {DriveLetter}:")
+        </h2>
+    }
+    <p class="bay-subtitle">Optical Ripping &amp; Decryption Module</p>
+
+    @if (MediaPresent || !string.IsNullOrEmpty(DriveModel))
+    {
+        <p class="bay-meta">
+            @if (!string.IsNullOrEmpty(DriveModel))
+            {
+                <text>@DriveModel@(!string.IsNullOrEmpty(DriveFirmware) ? $" (FW {DriveFirmware})" : "")</text>
+            }
+            @if (MediaPresent && !string.IsNullOrEmpty(FormatLabel))
+            {
+                <text> • @FormatLabel • @CapacityLabel</text>
+            }
+            @if (MediaPresent && !string.IsNullOrEmpty(AacsVersion))
+            {
+                <text> • @AacsVersion</text>
+            }
+        </p>
+    }
+
+    @if (!string.IsNullOrEmpty(DriveModel))
+    {
+        <p class="bay-meta" style="margin-top: -6px; display: flex; align-items: center; gap: 10px;">
+            @if (OmnidriveCompatible == true)
+            {
+                <span style="color: var(--success);">✓ MT1959-compatible (flash unverified)</span>
+            }
+            else
+            {
+                <span>✕ Not on OmniDrive list</span>
+            }
+            <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="checkbox" checked="@omnidriveConfirmed" @onchange="ToggleOmnidriveConfirmed" />
+                OmniDrive confirmed
+            </label>
+            @if (libreDriveSeen)
+            {
+                <span style="color: var(--success);">✓ LibreDrive mode (MakeMKV)</span>
+            }
+        </p>
+    }
+
+    @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game))
+    {
+        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 4px; flex-wrap: wrap;">
+            @if (coverDataUri is not null)
+            {
+                <img src="@coverDataUri" alt="Cover art"
+                     style="width: 50px; height: 70px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); flex: 0 0 auto;" />
+            }
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+                <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">
+                    🎨 Fetch Metadata &amp; Artwork
+                </button>
+                @if (hasCachedCover && cachedArt?.Metadata is not null)
+                {
+                    <span class="tray-message" style="color: var(--success); cursor: pointer;"
+                          @onclick="OpenArtCacheFolder" title="Click to open cached artwork folder">
+                        ✓ Cached: @cachedArt.Metadata.Title (@cachedArt.Metadata.Source)
+                    </span>
+                    @if (!string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
+                    {
+                        <span class="tray-message" style="cursor: pointer; text-decoration: underline;"
+                              @onclick="() => showMetadataDetails = !showMetadataDetails">
+                            @(showMetadataDetails ? "▾ Hide details" : "▸ Show details")
+                        </span>
+                    }
+                }
+            </div>
+        </div>
+        @if (showMetadataDetails && cachedArt?.Metadata is not null && !string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
+        {
+            <p class="bay-subtitle" style="margin: 0 0 8px; max-width: 100%;">@cachedArt.Metadata.Detail</p>
+        }
+    }
+
+    @if (isQueuedForBatch)
+    {
+        <p class="bay-meta" style="margin-top: -4px; margin-bottom: 8px; color: var(--amber);">
+            ⏳ Queued for Multi-Drive Batch Sync -- waiting for a free slot
+        </p>
+    }
+
+    <div class="tray-control">
+        <button class="bay-btn tray-btn" @onclick="ToggleTray" disabled="@isTrayBusy">
+            @if (isTrayBusy)
+            {
+                <text>⏳ Working…</text>
+            }
+            else if (trayIsOpen)
+            {
+                <text>⏏ Close Tray</text>
+            }
+            else
+            {
+                <text>⏏ Eject Tray</text>
+            }
+        </button>
+        @if (trayMessage is not null)
+        {
+            <span class="tray-message">@trayMessage</span>
+        }
+        <button class="bay-btn tray-btn" style="margin-left: auto;"
+                @onclick="OpenOutputFolder"
+                title="@(lastOutputFolder is not null ? "Open Last Output Folder" : "Open Output Folder")">
+            📂 Output Folder
+        </button>
+    </div>
+
+    <div class="bay-actions">
+        <button class="bay-btn bd @(selectedMode == "Blu-ray / 4K UHD" ? "selected" : "")"
+                disabled="@(Category != DiscCategory.BluRay)"
+                title="@(Category != DiscCategory.BluRay ? "Insert a Blu-ray/4K disc to enable this" : "")"
+                @onclick='() => OpenModeDialog("bd")'>
+            🎬 Blu-ray / 4K UHD (MakeMKV Backup Decrypt)
+        </button>
+        <button class="bay-btn dvd @(selectedMode == "DVD Movie Disc" ? "selected" : "")"
+                disabled="@(Category != DiscCategory.Dvd)"
+                title="@(Category != DiscCategory.Dvd ? "Insert a DVD to enable this" : "")"
+                @onclick='() => OpenModeDialog("dvd")'>
+            📀 DVD Movie Disc (ISO Dump / Movie-Only MKV)
+        </button>
+        <button class="bay-btn game @(selectedMode == "Game Disc" ? "selected" : "")"
+                disabled="@(Category != DiscCategory.Game)"
+                title="@(Category != DiscCategory.Game ? "Insert a game disc to enable this" : "")"
+                @onclick='() => StartGated(() => RunRedumperDump("Game", "Game Disc", "Games"))'>
+            🎮 Game Disc / Raw ISO (Redumper)
+        </button>
+    </div>
+
+    <div class="bay-status">
+        <span>
+            <span class="standby-dot" style="background: @(MediaPresent ? "var(--success)" : "var(--text-muted))")"></span>
+            @StatusText
+        </span>
+        <span>
+            @if (isResolving)
+            {
+                <text>Resolving MakeMKV disc index…</text>
+            }
+            else if (notBuiltMessage is not null)
+            {
+                <span style="color: var(--amber);">@notBuiltMessage</span>
+            }
+            else if (redumperResult is not null)
+            {
+                @if (isRunning)
+                {
+                    <text>@runningLabel</text>
+                }
+                else if (wasCancelled)
+                {
+                    <span style="color: var(--danger);">● CANCELED &amp; CLEANED UP</span>
+                }
+                else if (redumperResult.Success)
+                {
+                    <span style="color: var(--success);">ISO dumped: @redumperResult.IsoPath</span>
+                }
+                else
+                {
+                    <span style="color: var(--danger);">@redumperResult.ErrorMessage</span>
+                }
+            }
+            else if (makeMkvResult is not null)
+            {
+                @if (!makeMkvResult.Success)
+                {
+                    <span style="color: var(--danger);">@makeMkvResult.ErrorMessage</span>
+                }
+                else if (isRunning)
+                {
+                    <text>@runningLabel</text>
+                }
+                else if (wasCancelled)
+                {
+                    <span style="color: var(--danger);">● CANCELED &amp; CLEANED UP</span>
+                }
+                else if (backupResult is not null)
+                {
+                    @if (backupResult.Success)
+                    {
+                        <span style="color: var(--success);">Backup complete: @backupResult.OutputFolder</span>
+                    }
+                    else
+                    {
+                        <span style="color: var(--danger);">@backupResult.ErrorMessage</span>
+                    }
+                }
+                else if (movieOnlyResult is not null)
+                {
+                    @if (movieOnlyResult.Success)
+                    {
+                        <span style="color: var(--success);">Movie extracted (@FormatDuration(selectedTitleSeconds)): @movieOnlyResult.OutputFolder</span>
+                    }
+                    else
+                    {
+                        <span style="color: var(--danger);">@movieOnlyResult.ErrorMessage</span>
+                    }
+                }
+                else
+                {
+                    <text>MakeMKV disc index: @makeMkvResult.DiscIndex</text>
+                }
+            }
+            else if (preflightBlockedReason is not null)
+            {
+                <span style="color: var(--danger);">Preflight: @preflightBlockedReason</span>
+            }
+            else if (selectedMode is not null)
+            {
+                <text>Selected: @selectedMode</text>
+            }
+            else
+            {
+                <text>@(MediaPresent ? "Disc detected" : "Ready for Disc Insertion")</text>
+            }
+        </span>
+    </div>
+
+    @if (batchQueueCount > 0 && !isRunning)
+    {
+        <p class="bay-meta" style="margin-top: 6px; color: var(--success);">
+            ● BATCH QUEUE: @batchQueueCount DONE — WAITING FOR NEXT DISC
+        </p>
+    }
+
+    @if (isVerifying)
+    {
+        <p class="bay-subtitle" style="margin-top: 4px;">Computing SHA1/MD5…</p>
+    }
+    else if (verificationMessage is not null)
+    {
+        <p class="bay-subtitle" style="margin-top: 4px; color: @verificationColor;">@verificationMessage</p>
+    }
+    else if (trimMessage is not null)
+    {
+        <p class="bay-subtitle" style="margin-top: 4px;">@trimMessage</p>
+    }
+
+    @if (isRunning)
+    {
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: @(progressPercent?.ToString() ?? "0")%"></div>
+        </div>
+        <p class="bay-subtitle" style="margin-top: 4px;">
+            @if (progressPercent is null)
+            {
+                <text>Working… (no live progress available for this step)</text>
+            }
+            else if (runningKind == "redumper")
+            {
+                <text>@progressPercent%</text>
+            }
+            else if (runningKind == "makemkv")
+            {
+                <text>@FormatGb(writtenBytes) / @FormatGb(targetBytes) (@progressPercent%)</text>
+            }
+        </p>
+        <button class="bay-btn cancel-btn" @onclick="CancelRun">✖ Cancel</button>
+    }
+    else if (lastAction is not null && !showModeDialog)
+    {
+        <button class="bay-btn retry-btn" @onclick="RetryLast">🔁 Retry Last Rip</button>
+    }
+
+    <button class="log-toggle-btn" @onclick="() => showLog = !showLog">
+        @(showLog ? "▾" : "▸") Process Telemetry [@logLines.Count]
+    </button>
+    @if (showLog)
+    {
+        <div class="log-console">
+            @if (logLines.Count == 0)
+            {
+                <div class="log-line log-empty">No activity yet.</div>
+            }
+            else
+            {
+                @foreach (var line in logLines)
+                {
+                    <div class="log-line">@line</div>
+                }
+            }
+        </div>
+    }
+</div>
+
+@if (showModeDialog)
+{
+    <div class="modal-backdrop" @onclick="CloseModeDialog">
+        <div class="modal-box" @onclick:stopPropagation="true">
+            <h3>@(dialogKind == "bd" ? "Blu-ray / 4K UHD" : "DVD Movie Disc") — Drive @DriveLetter:</h3>
+            <div class="modal-actions">
+                @if (dialogKind == "bd")
+                {
+                    <button class="modal-btn" @onclick="ManualFullBackup">Full Backup (decrypted, everything)</button>
+                }
+                else
+                {
+                    <button class="modal-btn" @onclick="ManualFullBackup">MakeMKV Decrypted Backup (not a raw sector ISO)</button>
+                    <button class="modal-btn" @onclick='() => StartGated(() => RunRedumperDump("DVD_RawISO", "DVD Raw Sector ISO", "DVD_Movies"))'>Raw Sector ISO Dump (Redumper / ImgBurn)</button>
+                }
+                <button class="modal-btn" @onclick="ManualMovieOnly">Movie-Only MKV</button>
+                <button class="modal-btn cancel" @onclick="CloseModeDialog">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string DriveLetter { get; set; } = "?";
+
+    [Parameter]
+    public bool MediaPresent { get; set; } = false;
+
+    [Parameter]
+    public string StatusText { get; set; } = "STANDBY // MEDIA ABSENT";
+
+    [Parameter]
+    public DiscCategory Category { get; set; } = DiscCategory.Unknown;
+
+    [Parameter]
+    public string VolumeTitle { get; set; } = "";
+
+    [Parameter]
+    public string FormatLabel { get; set; } = "";
+
+    [Parameter]
+    public string CapacityLabel { get; set; } = "";
+
+    [Parameter]
+    public string DriveModel { get; set; } = "";
+
+    [Parameter]
+    public string DriveFirmware { get; set; } = "";
+
+    [Parameter]
+    public string AacsVersion { get; set; } = "";
+
+    private bool? OmnidriveCompatible => DriveHardwareService.CheckOmniDriveCompatibility(DriveModel);
+    private bool omnidriveConfirmed = false;
+    private bool libreDriveSeen = false;
+
+    private MetadataFetchService.CachedArt? cachedArt = null;
+    private string? coverDataUri = null;
+    private bool hasCachedCover => !string.IsNullOrEmpty(cachedArt?.CoverPath);
+    private bool showMetadataDetails = false;
+
+    private bool isQueuedForBatch => BatchSyncService.IsQueued(DriveLetter);
+
+    private string? selectedMode = null;
+    private bool previousMediaPresent = false;
+    private bool isResolving = false;
+    private bool isRunning = false;
+    private string runningLabel = "";
+    private string runningKind = "makemkv";
+    private bool showModeDialog = false;
+    private string dialogKind = "bd";
+    private bool wasCancelled = false;
+    private string? notBuiltMessage = null;
+    private string? preflightBlockedReason = null;
+    private MakeMkvService.DiscIndexResult? makeMkvResult = null;
+    private MakeMkvService.BackupResult? backupResult = null;
+    private MakeMkvService.ExtractResult? movieOnlyResult = null;
+    private RedumperService.DumpResult? redumperResult = null;
+    private int selectedTitleSeconds = 0;
+    private Func<Task>? lastAction = null;
+    private string? lastOutputFolder = null;
+    private string? trimMessage = null;
+
+    private bool isVerifying = false;
+    private string? verificationMessage = null;
+    private string verificationColor = "var(--text-muted)";
+    private string lastSha1 = "";
+    private string lastMd5 = "";
+    private string lastRedumpMatch = "";
+
+    private long targetBytes = 0;
+    private long writtenBytes = 0;
+    private int? progressPercent = null;
+    private string? progressFolder = null;
+    private Timer? progressTimer;
+    private Process? currentProcess = null;
+
+    private bool isTrayBusy = false;
+    private string? trayMessage = null;
+    private bool trayIsOpen = false;
+
+    private string? customLabel = null;
+    private bool isEditingLabel = false;
+    private string labelDraft = "";
+
+    private int batchQueueCount = 0;
+
+    private List<string> logLines = new();
+    private bool showLog = false;
+
+    protected override void OnInitialized()
+    {
+        var config = ConfigService.Load();
+        if (config.BayLabels.TryGetValue(DriveLetter, out var savedLabel))
+            customLabel = savedLabel;
+        omnidriveConfirmed = config.ConfirmedOmniDriveLetters.Contains(DriveLetter.ToUpperInvariant());
+
+        BatchSyncService.StateChanged += OnBatchSyncStateChanged;
+    }
+
+    private void OnBatchSyncStateChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task TryAutoStart()
+    {
+        if (isRunning || showModeDialog) return;
+        if (Category != DiscCategory.BluRay && Category != DiscCategory.Dvd && Category != DiscCategory.Game) return;
+
+        var config = ConfigService.Load();
+        bool unattended = config.UnattendedAutoStart;
+        bool batch = config.BatchQueueMode;
+        if (!unattended && !batch) return;
+
+        AddLog(unattended ? "Unattended Auto-Start triggered." : "Batch Queue: disc detected, auto-starting.");
+
+        Func<Task> pipeline = Category switch
+        {
+            DiscCategory.BluRay => unattended
+                ? (Func<Task>)(() => { dialogKind = "bd"; return RunFullBackup(); })
+                : (Func<Task>)(() => { OpenModeDialog("bd"); return Task.CompletedTask; }),
+            DiscCategory.Dvd => unattended
+                ? (Func<Task>)(() => RunRedumperDump("DVD_RawISO", "DVD Raw Sector ISO", "DVD_Movies"))
+                : (Func<Task>)(() => { OpenModeDialog("dvd"); return Task.CompletedTask; }),
+            DiscCategory.Game => () => RunRedumperDump("Game", "Game Disc", "Games"),
+            _ => () => Task.CompletedTask,
+        };
+
+        if (config.MultiDriveBatchSync)
+        {
+            bool claimed = BatchSyncService.ClaimOrQueue(DriveLetter, config.MaxConcurrentRips, async () =>
+            {
+                await InvokeAsync(pipeline);
+                BatchSyncService.ReleaseSlot();
+            });
+            if (!claimed)
+            {
+                AddLog($"Multi-Drive Batch Sync: queued (all {Math.Max(1, config.MaxConcurrentRips)} slot(s) busy) -- will auto-start once a slot frees up.");
+                StateHasChanged();
+                return;
+            }
+            await pipeline();
+            BatchSyncService.ReleaseSlot();
+        }
+        else
+        {
+            await pipeline();
+        }
+    }
+
+    private void ToggleOmnidriveConfirmed(ChangeEventArgs e)
+    {
+        omnidriveConfirmed = e.Value is bool b && b;
+        var config = ConfigService.Load();
+        var letter = DriveLetter.ToUpperInvariant();
+        if (omnidriveConfirmed) config.ConfirmedOmniDriveLetters.Add(letter);
+        else config.ConfirmedOmniDriveLetters.Remove(letter);
+        ConfigService.Save(config);
+    }
+
+    // Ported from the Python app's _parse_makemkv_progress(): when
+    // MakeMKV reports "Using LibreDrive mode", the bay shows it for the
+    // rest of the session. This deliberately does NOT tick the
+    // "OmniDrive confirmed" box -- LibreDrive mode and an OmniDrive
+    // flash aren't the same thing, so only the user sets that box.
+    private void NoteLibreDrive(string? line)
+    {
+        if (line is null || libreDriveSeen) return;
+        libreDriveSeen = true;
+        AddLog($"LibreDrive confirmed: {line}");
+    }
+
+    private void LoadCoverDataUri()
+    {
+        try
+        {
+            if (hasCachedCover && File.Exists(cachedArt!.CoverPath))
+            {
+                var bytes = File.ReadAllBytes(cachedArt.CoverPath);
+                coverDataUri = $"data:image/jpeg;base64,{Convert.ToBase64String(bytes)}";
+            }
+            else
+            {
+                coverDataUri = null;
+            }
+        }
+        catch
+        {
+            coverDataUri = null;
+        }
+    }
+
+    private async Task AutoFetchArtSilently()
+    {
+        if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
+        var config = ConfigService.Load();
+        if (!config.AutoFetchMetadataArt) return;
+
+        // TMDB-only: the iTunes no-key fallback was removed after it
+        // stopped returning movie results at all. With no TMDB key,
+        // auto-fetch just skips and says why in the log.
+        if (string.IsNullOrWhiteSpace(config.TmdbApiKey))
+        {
+            AddLog("Auto-fetch skipped: no TMDB API key set (add a free one in Settings).");
+            return;
+        }
+
+        var query = MetadataFetchService.BuildSearchQuery(VolumeTitle, Category);
+        AddLog($"Auto-fetching artwork for \"{query}\" via TMDB…");
+
+        try
+        {
+            var results = await MetadataFetchService.SearchTmdb(query, config.TmdbApiKey);
+
+            if (results.Count == 0)
+            {
+                AddLog($"Auto-fetch: no results found for \"{query}\".");
+                return;
+            }
+
+            var top = results[0];
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(VolumeTitle, top);
+            LoadCoverDataUri();
+            AddLog(hasCachedCover
+                ? $"Auto-fetch: saved \"{top.Title}\" ({top.Source})"
+                : $"Auto-fetch: saved metadata for \"{top.Title}\" but no cover image was available -- will retry next insert.");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Auto-fetch failed: {ex.Message}");
+        }
+    }
+
+    private async Task FetchMetadata()
+    {
+        if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
+
+        var config = ConfigService.Load();
+        var query = MetadataFetchService.BuildSearchQuery(VolumeTitle, Category);
+        AddLog($"Metadata search: \"{query}\"");
+
+        var window = new MetadataSearchWindow(query, Category, config)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        window.Show();
+        var chosen = await window.ResultTask;
+
+        if (chosen is null)
+        {
+            AddLog("Metadata search: cancelled, nothing saved");
+            return;
+        }
+
+        AddLog($"Metadata search: saving \"{chosen.Title}\" ({chosen.Source}) to art cache");
+        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(VolumeTitle, chosen);
+        LoadCoverDataUri();
+        AddLog($"Metadata saved: {MetadataFetchService.GetArtCacheDir(VolumeTitle)}");
+        StateHasChanged();
+    }
+
+    private void OpenArtCacheFolder()
+    {
+        if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
+        try
+        {
+            var dir = MetadataFetchService.GetArtCacheDir(VolumeTitle);
+            if (Directory.Exists(dir))
+                Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Couldn't open art cache folder: {ex.Message}");
+        }
+    }
+
+    private void AddLog(string text)
+    {
+        logLines.Add($"[{DateTime.Now:HH:mm:ss}] {text}");
+        if (logLines.Count > 200) logLines.RemoveAt(0);
+    }
+
+    private void RecordHistory(string operation, string outputPath, string sha1 = "", string md5 = "", string redumpMatch = "")
+    {
+        HistoryService.Append(new HistoryEntry
+        {
+            Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            DriveLetter = DriveLetter,
+            DriveModel = DriveModel,
+            Title = string.IsNullOrEmpty(VolumeTitle) ? "UNKNOWN" : VolumeTitle,
+            System = operation,
+            OutputPath = outputPath,
+            Capacity = CapacityLabel,
+            Sha1 = sha1,
+            Md5 = md5,
+            RedumpMatch = redumpMatch,
+        });
+    }
+
+    private static string GetOutputBaseFolder(AppConfig config) =>
+        string.IsNullOrWhiteSpace(config.OutputBaseFolder)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "ArchivSector-OD-Test")
+            : config.OutputBaseFolder;
+
+    private static string CategoryFolder(AppConfig config, string category) =>
+        config.AutoCategorize ? category : "";
+
+    private static void AutoEjectIfEnabled(AppConfig config, string driveLetter)
+    {
+        if (!config.AutoEject) return;
+        _ = Task.Run(() => TrayControlService.Eject(driveLetter));
+    }
+
+    private static void NotifyIfEnabled(AppConfig config, bool success, string operation, string? detail)
+    {
+        if (!config.ToastNotifications) return;
+        NotificationService.Show(
+            success ? "ArchivSector-OD — Rip Complete" : "ArchivSector-OD — Rip Failed",
+            success ? $"{operation} finished successfully." : $"{operation} failed: {detail}");
+    }
+
+    // Unattended Mode has no one to answer "overwrite?", so instead of
+    // replacing an existing archive it appends " (2)", " (3)", etc. --
+    // ported from the Python app's force_full collision handling.
+    private string UniqueUnattendedName(string dir, string baseName)
+    {
+        var name = baseName;
+        int n = 2;
+        while (Directory.Exists(Path.Combine(dir, name)) || File.Exists(Path.Combine(dir, $"{name}.iso")))
+        {
+            name = $"{baseName} ({n})";
+            n++;
+        }
+        if (name != baseName)
+            AddLog($"Unattended Mode: '{baseName}' already exists here -- saving as '{name}' instead.");
+        return name;
+    }
+
+    // Full backups (Blu-ray backup, DVD MakeMKV backup, DVD raw ISO)
+    // are sorted into a size-based subfolder (BD-25 / BD-50 / BD-100 /
+    // DVD-5 / DVD-9) using the same capacity classification shown on
+    // the card. The Python app only did this in Unattended Mode; here
+    // it also applies whenever Auto-categorize is on, so attended and
+    // unattended backups end up in the same place. Falls back to plain
+    // "BD" / "DVD" if no size could be classified.
+    private string SizeSubfolder(bool isBd)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(FormatLabel ?? "", @"\b(BD|DVD)-\d+\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return m.Success ? m.Value.ToUpperInvariant() : (isBd ? "BD" : "DVD");
+    }
+
+    // Shared success-side effects ported from the Python app's
+    // _rip_finished(): the completion beep (sound_alerts, on by
+    // default) and the Batch Queue per-drive session counter.
+    private void OnRipSucceeded(AppConfig config)
+    {
+        if (config.SoundAlerts)
+        {
+            try { System.Media.SystemSounds.Asterisk.Play(); }
+            catch { /* no sound device -- not worth surfacing */ }
+        }
+        if (config.BatchQueueMode)
+        {
+            batchQueueCount++;
+            AddLog($"Batch Queue: {batchQueueCount} disc(s) completed this session on drive {DriveLetter}:.");
+        }
+    }
+
+    private void OpenOutputFolder()
+    {
+        try
+        {
+            string target;
+            if (lastOutputFolder is not null)
+            {
+                target = Directory.Exists(lastOutputFolder) ? lastOutputFolder : Path.GetDirectoryName(lastOutputFolder) ?? lastOutputFolder;
+            }
+            else
+            {
+                var config = ConfigService.Load();
+                target = GetOutputBaseFolder(config);
+                Directory.CreateDirectory(target);
+            }
+            Process.Start(new ProcessStartInfo { FileName = target, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Couldn't open output folder: {ex.Message}");
+        }
+    }
+
+    private void StartEditLabel()
+    {
+        labelDraft = customLabel ?? "";
+        isEditingLabel = true;
+    }
+
+    private void ConfirmLabel()
+    {
+        customLabel = string.IsNullOrWhiteSpace(labelDraft) ? null : labelDraft.Trim();
+        isEditingLabel = false;
+
+        var config = ConfigService.Load();
+        if (customLabel is null)
+            config.BayLabels.Remove(DriveLetter);
+        else
+            config.BayLabels[DriveLetter] = customLabel;
+        ConfigService.Save(config);
+    }
+
+    private void HandleLabelKeydown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") ConfirmLabel();
+        else if (e.Key == "Escape") isEditingLabel = false;
+    }
+
+    private async Task ToggleTray()
+    {
+        isTrayBusy = true;
+        trayMessage = null;
+        StateHasChanged();
+
+        bool wasOpen = trayIsOpen;
+        AddLog(wasOpen ? "Close tray requested" : "Eject requested");
+        var result = await Task.Run(() => wasOpen
+            ? TrayControlService.Close(DriveLetter)
+            : TrayControlService.Eject(DriveLetter));
+
+        isTrayBusy = false;
+        trayMessage = $"{(wasOpen ? "Close" : "Eject")}: {result.Detail}";
+        AddLog(trayMessage);
+
+        if (result.Success)
+            trayIsOpen = !wasOpen;
+
+        StateHasChanged();
+    }
+
+    private void OpenModeDialog(string kind)
+    {
+        ResetResultState();
+        dialogKind = kind;
+        selectedMode = kind == "bd" ? "Blu-ray / 4K UHD" : "DVD Movie Disc";
+        showModeDialog = true;
+    }
+
+    private void CloseModeDialog() => showModeDialog = false;
+
+    private void ResetResultState()
+    {
+        selectedMode = null;
+        makeMkvResult = null;
+        backupResult = null;
+        movieOnlyResult = null;
+        redumperResult = null;
+        wasCancelled = false;
+        notBuiltMessage = null;
+        preflightBlockedReason = null;
+        currentProcess = null;
+        runningKind = "makemkv";
+        isVerifying = false;
+        verificationMessage = null;
+        trimMessage = null;
+        lastSha1 = "";
+        lastMd5 = "";
+        lastRedumpMatch = "";
+        StopProgressTimer();
+        targetBytes = 0;
+        writtenBytes = 0;
+        progressPercent = null;
+    }
+
+    private void StartProgressTimer(string folder, long target)
+    {
+        progressFolder = folder;
+        targetBytes = target;
+        writtenBytes = 0;
+        progressPercent = target > 0 ? 0 : null;
+        progressTimer = new Timer(_ => InvokeAsync(() =>
+        {
+            if (progressFolder is null) return;
+            writtenBytes = MakeMkvService.GetFolderSizeBytes(progressFolder);
+            progressPercent = targetBytes > 0
+                ? Math.Clamp((int)Math.Round((double)writtenBytes / targetBytes * 100), 0, 100)
+                : (int?)null;
+            StateHasChanged();
+        }), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    private void StopProgressTimer()
+    {
+        progressTimer?.Dispose();
+        progressTimer = null;
+        progressFolder = null;
+    }
+
+    private void CancelRun()
+    {
+        wasCancelled = true;
+        AddLog("Cancel requested by user");
+        try { currentProcess?.Kill(entireProcessTree: true); }
+        catch { /* already exited, or couldn't be killed -- either way, proceed */ }
+    }
+
+    // Ported from the Python app's _start_pipeline_gated(): rips
+    // started by clicking a button go through the same Multi-Drive
+    // Batch Sync gate as auto-starts and Retry, so the concurrent-rip
+    // limit applies no matter how a rip was started. A click that
+    // can't start right away is queued and starts itself once a slot
+    // frees up, instead of being refused.
+    private async Task StartGated(Func<Task> action)
+    {
+        var config = ConfigService.Load();
+        if (!config.MultiDriveBatchSync)
+        {
+            await action();
+            return;
+        }
+
+        bool claimed = BatchSyncService.ClaimOrQueue(DriveLetter, config.MaxConcurrentRips, async () =>
+        {
+            await InvokeAsync(action);
+            BatchSyncService.ReleaseSlot();
+        });
+        if (!claimed)
+        {
+            showModeDialog = false;
+            AddLog($"Multi-Drive Batch Sync: queued (all {Math.Max(1, config.MaxConcurrentRips)} slot(s) busy) -- will start once a slot frees up.");
+            StateHasChanged();
+            return;
+        }
+        await action();
+        BatchSyncService.ReleaseSlot();
+    }
+
+    // The mode dialog's Blu-ray/DVD choice is captured at click time,
+    // so a queued rip still runs as the disc type that was clicked even
+    // if the dialog is reopened for something else before it starts.
+    private Task ManualFullBackup()
+    {
+        var kind = dialogKind;
+        showModeDialog = false;
+        return StartGated(() => { dialogKind = kind; return RunFullBackup(); });
+    }
+
+    private Task ManualMovieOnly()
+    {
+        var kind = dialogKind;
+        showModeDialog = false;
+        return StartGated(() => { dialogKind = kind; return PickMovieOnly(); });
+    }
+
+    // Now goes through BatchSyncService the same as TryAutoStart, so a
+    // retry can't bypass Multi-Drive Batch Sync's concurrent-rip cap.
+    // The action is captured into a local before any queueing, since
+    // lastAction itself gets reassigned by the very operation it
+    // points to (e.g. RunFullBackup sets lastAction = RunFullBackup
+    // right before returning) -- referencing the field directly inside
+    // a callback that might fire much later, after further reassignment,
+    // would risk retrying the wrong thing.
+    private async Task RetryLast()
+    {
+        var actionToRetry = lastAction;
+        if (actionToRetry is null) return;
+
+        var config = ConfigService.Load();
+        AddLog("Retrying last operation");
+
+        if (config.MultiDriveBatchSync)
+        {
+            bool claimed = BatchSyncService.ClaimOrQueue(DriveLetter, config.MaxConcurrentRips, async () =>
+            {
+                await InvokeAsync(actionToRetry);
+                BatchSyncService.ReleaseSlot();
+            });
+            if (!claimed)
+            {
+                AddLog($"Multi-Drive Batch Sync: retry queued (all {Math.Max(1, config.MaxConcurrentRips)} slot(s) busy) -- will start once a slot frees up.");
+                StateHasChanged();
+                return;
+            }
+            await actionToRetry();
+            BatchSyncService.ReleaseSlot();
+        }
+        else
+        {
+            await actionToRetry();
+        }
+    }
+
+    private async Task VerifyOutput(string isoPath)
+    {
+        isVerifying = true;
+        AddLog("Computing SHA1/MD5…");
+        StateHasChanged();
+
+        try
+        {
+            var (sha1, md5) = await Task.Run(() => VerificationService.ComputeChecksums(isoPath));
+            if (sha1 is null)
+            {
+                verificationMessage = "⚠ Couldn't compute checksums (file not found?)";
+                verificationColor = "var(--danger)";
+                AddLog(verificationMessage);
+                return;
+            }
+
+            lastSha1 = sha1;
+            lastMd5 = md5 ?? "";
+            AddLog($"SHA1: {sha1}");
+
+            var match = await Task.Run(() => VerificationService.VerifyAgainstRedump(sha1));
+            if (match is not null)
+            {
+                lastRedumpMatch = match.Name;
+                verificationMessage = $"✓ Redump match: {match.Name} (from {match.SourceDat})";
+                verificationColor = "var(--success)";
+            }
+            else if (!VerificationService.HasAnyDatImported())
+            {
+                lastRedumpMatch = "No DAT imported";
+                verificationMessage = "ℹ Redump: no DAT file imported yet (see Settings)";
+                verificationColor = "var(--text-muted)";
+            }
+            else
+            {
+                lastRedumpMatch = "No match";
+                verificationMessage = "⚠ No Redump match found for this dump (doesn't necessarily mean it's bad)";
+                verificationColor = "var(--amber)";
+            }
+            AddLog(verificationMessage);
+        }
+        finally
+        {
+            isVerifying = false;
+            StateHasChanged();
+        }
+    }
+
+    // Movie-Only always gets a real checksum, but the Redump *match*
+    // step is deliberately skipped -- Redump only catalogs raw,
+    // unmodified disc dumps, and a re-muxed .mkv could never match
+    // one no matter how good the rip is, so checking anyway would
+    // misleadingly read as a bad rip when nothing is wrong.
+    private async Task VerifyMovieOnlyOutput(string mkvPath)
+    {
+        isVerifying = true;
+        AddLog("Computing SHA1/MD5…");
+        StateHasChanged();
+
+        try
+        {
+            var (sha1, md5) = await Task.Run(() => VerificationService.ComputeChecksums(mkvPath));
+            if (sha1 is null)
+            {
+                verificationMessage = "⚠ Couldn't compute checksums (file not found?)";
+                verificationColor = "var(--danger)";
+                AddLog(verificationMessage);
+                return;
+            }
+
+            lastSha1 = sha1;
+            lastMd5 = md5 ?? "";
+            lastRedumpMatch = "N/A (re-muxed)";
+            AddLog($"SHA1: {sha1}");
+            AddLog("Redump check skipped: this is a re-muxed .mkv, not a raw disc dump, so its hash could never match Redump's database.");
+            verificationMessage = "ℹ Checksums computed (Redump check N/A -- re-muxed file)";
+            verificationColor = "var(--text-muted)";
+        }
+        finally
+        {
+            isVerifying = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RunRedumperDump(string folderPrefix, string operationLabel, string category)
+    {
+        showModeDialog = false;
+        ResetResultState();
+        selectedMode = folderPrefix == "Game" ? "Game Disc" : "DVD Movie Disc (Raw Sector ISO)";
+        AddLog($"{operationLabel}: locating redumper.exe");
+        StateHasChanged();
+
+        var config = ConfigService.Load();
+        var exe = RedumperService.FindExecutable(config.RedumperPathOverride);
+
+        string? imgBurnFallbackExe = null;
+        if (exe is null && folderPrefix == "DVD_RawISO")
+        {
+            AddLog($"{operationLabel}: redumper.exe not found, checking for ImgBurn fallback");
+            imgBurnFallbackExe = ImgBurnService.FindExecutable(config.ImgBurnPathOverride);
+        }
+
+        if (exe is null && imgBurnFallbackExe is null)
+        {
+            redumperResult = new RedumperService.DumpResult
+            {
+                ErrorMessage = folderPrefix == "DVD_RawISO"
+                    ? "Neither redumper.exe nor ImgBurn.exe were found -- checked Settings overrides, PATH, and standard install locations for both."
+                    : "redumper.exe not found -- checked Settings override, PATH, and C:\\redumper\\redumper.exe."
+            };
+            AddLog(redumperResult.ErrorMessage!);
+            StateHasChanged();
+            return;
+        }
+
+        var outputBase = GetOutputBaseFolder(config);
+        var preflight = PreflightService.Check(MediaPresent, outputBase, null, AddLog, unattended: config.UnattendedAutoStart);
+        if (!preflight.Ok)
+        {
+            preflightBlockedReason = preflight.BlockedReason;
+            StateHasChanged();
+            return;
+        }
+
+        var categoryDir = Path.Combine(outputBase, CategoryFolder(config, category));
+
+        // Ported from the Python app's _start_game_pipeline(): game
+        // dumps go into Games\<system folder>, named after the bay's
+        // custom label when one is set (e.g. "PS3"), else General_Games.
+        // (Python's middle fallback -- the disc's detected system name --
+        // isn't available here, since this app doesn't extract one.)
+        if (config.AutoCategorize && folderPrefix == "Game")
+        {
+            var sysFolder = !string.IsNullOrWhiteSpace(customLabel)
+                ? FileNamingService.SanitizeFilename(customLabel)
+                : "General_Games";
+            categoryDir = Path.Combine(categoryDir, sysFolder);
+        }
+
+        if (folderPrefix == "DVD_RawISO" && (config.AutoCategorize || config.UnattendedAutoStart))
+        {
+            categoryDir = Path.Combine(categoryDir, SizeSubfolder(isBd: false));
+            AddLog($"Destination: {categoryDir}");
+        }
+        var fallbackName = $"{folderPrefix}_{DriveLetter}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
+        var isoName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
+
+        if (config.UnattendedAutoStart)
+        {
+            isoName = UniqueUnattendedName(categoryDir, isoName);
+        }
+        else if (!FileNamingService.CheckDuplicateOrConfirm(categoryDir, isoName, false, AddLog))
+        {
+            preflightBlockedReason = "Cancelled due to duplicate output";
+            StateHasChanged();
+            return;
+        }
+
+        var outputFolder = Path.Combine(categoryDir, isoName);
+
+        isRunning = true;
+        progressPercent = 0;
+        StateHasChanged();
+
+        if (exe is not null)
+        {
+            runningKind = "redumper";
+            runningLabel = "Redumper dumping raw sectors…";
+            AddLog($"{operationLabel}: dump started (Redumper)");
+            StateHasChanged();
+
+            redumperResult = await Task.Run(() => RedumperService.RunDump(
+                exe, DriveLetter, outputFolder, isoName,
+                onProgress: pct => InvokeAsync(() => { progressPercent = pct; StateHasChanged(); }),
+                onProcessStarted: p => currentProcess = p));
+        }
+        else
+        {
+            runningKind = "imgburn";
+            runningLabel = "Reading DVD via ImgBurn (fallback -- no live progress or Cancel support for this step)…";
+            progressPercent = null;
+            AddLog($"{operationLabel}: dump started (ImgBurn fallback)");
+            StateHasChanged();
+
+            var imgResult = await Task.Run(() => ImgBurnService.ReadDiscToIso(imgBurnFallbackExe!, DriveLetter, outputFolder, isoName));
+            redumperResult = new RedumperService.DumpResult
+            {
+                Success = imgResult.Success,
+                IsoPath = imgResult.IsoPath,
+                ErrorMessage = imgResult.ErrorMessage,
+            };
+        }
+
+        isRunning = false;
+
+        if (wasCancelled)
+        {
+            AddLog($"{operationLabel}: cancelled, cleaning up");
+            await CleanUpCancelledFolder(outputFolder);
+        }
+        else
+        {
+            AddLog(redumperResult.Success ? $"{operationLabel}: complete -- {redumperResult.IsoPath}" : $"{operationLabel}: failed -- {redumperResult.ErrorMessage}");
+
+            if (redumperResult.Success && redumperResult.IsoPath is not null)
+            {
+                lastOutputFolder = redumperResult.IsoPath;
+                await VerifyOutput(redumperResult.IsoPath);
+            }
+
+            NotifyIfEnabled(config, redumperResult.Success, operationLabel, redumperResult.Success ? redumperResult.IsoPath : redumperResult.ErrorMessage);
+            RecordHistory(operationLabel, redumperResult.Success ? (redumperResult.IsoPath ?? "") : "", lastSha1, lastMd5, lastRedumpMatch);
+            if (redumperResult.Success)
+            {
+                OnRipSucceeded(config);
+                AutoEjectIfEnabled(config, DriveLetter);
+            }
+        }
+
+        lastAction = () => RunRedumperDump(folderPrefix, operationLabel, category);
+        StateHasChanged();
+    }
+
+    private async Task RunFullBackup()
+    {
+        showModeDialog = false;
+        var kind = dialogKind;
+        ResetResultState();
+        selectedMode = kind == "bd"
+            ? "Blu-ray / 4K UHD (Full Backup)"
+            : "DVD Movie Disc (MakeMKV Decrypted Backup)";
+        var opLabel = kind == "bd" ? "Blu-ray Full Backup" : "DVD MakeMKV Backup";
+        runningKind = "makemkv";
+        isResolving = true;
+        AddLog($"{opLabel}: resolving MakeMKV disc index");
+        StateHasChanged();
+
+        var config = ConfigService.Load();
+        var exe = MakeMkvService.FindExecutable(config.MakeMkvPathOverride);
+        if (exe is null)
+        {
+            makeMkvResult = new MakeMkvService.DiscIndexResult
+            {
+                ErrorMessage = "makemkvcon.exe not found -- checked Settings override, PATH, and standard install locations."
+            };
+            AddLog(makeMkvResult.ErrorMessage!);
+            isResolving = false;
+            StateHasChanged();
+            return;
+        }
+
+        var outputBase = GetOutputBaseFolder(config);
+        var preflight = PreflightService.Check(MediaPresent, outputBase, exe, AddLog, unattended: config.UnattendedAutoStart);
+        if (!preflight.Ok)
+        {
+            preflightBlockedReason = preflight.BlockedReason;
+            isResolving = false;
+            StateHasChanged();
+            return;
+        }
+
+        var imgBurnExe = kind == "bd" ? ImgBurnService.FindExecutable(config.ImgBurnPathOverride) : null;
+        if (kind == "bd")
+            AddLog(imgBurnExe is not null
+                ? "Blu-ray Full Backup: ImgBurn found -- will build a single-file ISO as stage 2/2 after decrypt"
+                : "Blu-ray Full Backup: ImgBurn not configured -- the decrypted folder will be the final output");
+
+        var indexResult = await Task.Run(() => MakeMkvService.ResolveDiscIndex(exe, DriveLetter));
+        makeMkvResult = indexResult;
+        isResolving = false;
+        AddLog(indexResult.Success ? $"{opLabel}: disc index {indexResult.DiscIndex}" : $"{opLabel}: {indexResult.ErrorMessage}");
+        StateHasChanged();
+
+        if (!indexResult.Success) return;
+
+        long capacity = 0;
+        try { capacity = new DriveInfo(DriveLetter).TotalSize; }
+        catch { /* leave at 0 -- progress bar falls back to "size unknown" */ }
+
+        var folderTag = kind == "bd" ? "FullBackup" : "DVD_MakeMkvBackup";
+        var category = kind == "bd" ? "BluRay_Movies" : "DVD_Movies";
+        var categoryDir = Path.Combine(outputBase, CategoryFolder(config, category));
+        if (config.AutoCategorize || config.UnattendedAutoStart)
+        {
+            categoryDir = Path.Combine(categoryDir, SizeSubfolder(isBd: kind == "bd"));
+            AddLog($"Destination: {categoryDir}");
+        }
+        var fallbackName = $"{DriveLetter}_{folderTag}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
+        var baseName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
+
+        if (config.UnattendedAutoStart)
+        {
+            baseName = UniqueUnattendedName(categoryDir, baseName);
+        }
+        else if (!FileNamingService.CheckDuplicateOrConfirm(categoryDir, baseName, false, AddLog))
+        {
+            preflightBlockedReason = "Cancelled due to duplicate output";
+            StateHasChanged();
+            return;
+        }
+
+        var outputFolder = Path.Combine(categoryDir, baseName);
+
+        var destinationOverride = kind == "dvd"
+            ? Path.Combine(outputFolder, $"{baseName}.iso")
+            : null;
+
+        var decryptTarget = (kind == "bd" && imgBurnExe is not null)
+            ? Path.Combine(outputFolder, "_temp_decrypt")
+            : outputFolder;
+
+        runningLabel = kind == "bd"
+            ? $"Backing up (disc index {indexResult.DiscIndex})… this may take a while"
+            : $"MakeMKV decrypted backup (disc index {indexResult.DiscIndex})… this may take a while";
+        isRunning = true;
+        StartProgressTimer(decryptTarget, capacity);
+        StateHasChanged();
+
+        backupResult = await Task.Run(() =>
+            MakeMkvService.RunBackup(exe, indexResult.DiscIndex!, decryptTarget, destinationOverride, p => currentProcess = p));
+        NoteLibreDrive(backupResult.LibreDriveLine);
+
+        StopProgressTimer();
+        isRunning = false;
+
+        if (wasCancelled)
+        {
+            AddLog($"{opLabel}: cancelled, cleaning up");
+            await CleanUpCancelledFolder(decryptTarget);
+        }
+        else if (kind == "bd" && backupResult.Success && imgBurnExe is not null)
+        {
+            AddLog("Blu-ray Full Backup: MakeMKV decrypt complete, starting ImgBurn stage 2/2 (build single ISO)");
+            runningLabel = "Building single-file ISO via ImgBurn (stage 2/2, no live progress)…";
+            runningKind = "imgburn";
+            isRunning = true;
+            progressPercent = null;
+            StateHasChanged();
+
+            var imgBurnResult = await Task.Run(() => ImgBurnService.BuildSingleIso(imgBurnExe, decryptTarget, outputFolder, baseName));
+            isRunning = false;
+
+            if (imgBurnResult.Success)
+            {
+                AddLog($"ImgBurn complete: {imgBurnResult.IsoPath}");
+                try { Directory.Delete(decryptTarget, recursive: true); } catch { /* best-effort cleanup */ }
+                lastOutputFolder = imgBurnResult.IsoPath;
+                await VerifyOutput(imgBurnResult.IsoPath!);
+                NotifyIfEnabled(config, true, opLabel, imgBurnResult.IsoPath);
+                RecordHistory(opLabel, imgBurnResult.IsoPath!, lastSha1, lastMd5, lastRedumpMatch);
+                OnRipSucceeded(config);
+                AutoEjectIfEnabled(config, DriveLetter);
+            }
+            else
+            {
+                AddLog($"[WARNING] ImgBurn did not produce a valid ISO: {imgBurnResult.ErrorMessage} -- keeping the decrypted folder instead.");
+                trimMessage = "⚠ ImgBurn step failed -- decrypted folder kept as final output";
+                lastOutputFolder = decryptTarget;
+                NotifyIfEnabled(config, false, opLabel, "ImgBurn step failed, folder kept");
+                RecordHistory(opLabel, decryptTarget);
+            }
+        }
+        else
+        {
+            AddLog(backupResult.Success ? $"{opLabel}: complete -- {backupResult.OutputFolder}" : $"{opLabel}: failed -- {backupResult.ErrorMessage}");
+            if (backupResult.Success) lastOutputFolder = backupResult.OutputFolder;
+            NotifyIfEnabled(config, backupResult.Success, opLabel,
+                backupResult.Success ? backupResult.OutputFolder : backupResult.ErrorMessage);
+            RecordHistory(opLabel, backupResult.Success ? (backupResult.OutputFolder ?? "") : "");
+            if (backupResult.Success)
+            {
+                OnRipSucceeded(config);
+                AutoEjectIfEnabled(config, DriveLetter);
+            }
+        }
+
+        lastAction = RunFullBackup;
+        StateHasChanged();
+    }
+
+    private async Task PickMovieOnly()
+    {
+        showModeDialog = false;
+        var kind = dialogKind;
+        var kindForFolder = kind == "bd" ? "BD_MovieOnly" : "DVD_MovieOnly";
+        var category = kind == "bd" ? "BluRay_Movies" : "DVD_Movies";
+        ResetResultState();
+        selectedMode = (kind == "bd" ? "Blu-ray / 4K UHD" : "DVD Movie Disc") + " (Movie-Only)";
+        runningKind = "makemkv";
+        isResolving = true;
+        AddLog("Movie-Only: resolving MakeMKV disc index");
+        StateHasChanged();
+
+        var config = ConfigService.Load();
+        var exe = MakeMkvService.FindExecutable(config.MakeMkvPathOverride);
+        if (exe is null)
+        {
+            makeMkvResult = new MakeMkvService.DiscIndexResult
+            {
+                ErrorMessage = "makemkvcon.exe not found -- checked Settings override, PATH, and standard install locations."
+            };
+            AddLog(makeMkvResult.ErrorMessage!);
+            isResolving = false;
+            StateHasChanged();
+            return;
+        }
+
+        var outputBase = GetOutputBaseFolder(config);
+        var preflight = PreflightService.Check(MediaPresent, outputBase, exe, AddLog, unattended: config.UnattendedAutoStart);
+        if (!preflight.Ok)
+        {
+            preflightBlockedReason = preflight.BlockedReason;
+            isResolving = false;
+            StateHasChanged();
+            return;
+        }
+
+        var indexResult = await Task.Run(() => MakeMkvService.ResolveDiscIndex(exe, DriveLetter));
+        makeMkvResult = indexResult;
+        isResolving = false;
+        AddLog(indexResult.Success ? $"Movie-Only: disc index {indexResult.DiscIndex}" : $"Movie-Only: {indexResult.ErrorMessage}");
+        StateHasChanged();
+
+        if (!indexResult.Success) return;
+
+        runningLabel = "Scanning disc titles…";
+        isRunning = true;
+        AddLog("Movie-Only: scanning titles");
+        StateHasChanged();
+
+        var titles = await Task.Run(() => MakeMkvService.ScanTitles(exe, indexResult.DiscIndex!));
+
+        isRunning = false;
+        StateHasChanged();
+
+        if (titles.Count == 0)
+        {
+            movieOnlyResult = new MakeMkvService.ExtractResult { ErrorMessage = "MakeMKV found no titles on this disc." };
+            AddLog("Movie-Only: no titles found");
+            NotifyIfEnabled(config, false, "Movie-Only extraction", "no titles found on disc");
+            RecordHistory("Movie-Only extraction", "");
+            lastAction = PickMovieOnly;
+            StateHasChanged();
+            return;
+        }
+
+        AddLog($"Movie-Only: {titles.Count} title(s) found, waiting for selection");
+
+        var titlePicker = new TitlePickerWindow(titles) { Owner = System.Windows.Application.Current.MainWindow };
+        titlePicker.Show();
+        var movie = await titlePicker.ResultTask;
+
+        if (movie is null)
+        {
+            AddLog("Movie-Only: cancelled at title selection");
+            selectedMode = null;
+            StateHasChanged();
+            return;
+        }
+
+        selectedTitleSeconds = movie.Seconds;
+        AddLog($"Movie-Only: selected \"{movie.Name}\" ({FormatDuration(movie.Seconds)}), {movie.Tracks.Count} track(s) found");
+
+        var scannedAudio = movie.Tracks.Where(t => t.Type == "Audio").ToList();
+        var scannedSub = movie.Tracks.Where(t => t.Type == "Subtitles").ToList();
+
+        // Movie-Only MKVs get their own "MKV" folder (e.g.
+        // BluRay_Movies\MKV\Movie Name\) so they don't mix with full
+        // backups, and a full backup and an MKV of the same movie can
+        // sit side by side without tripping the duplicate check. Not
+        // size-sorted: BD-50 describes the disc, not the MKV file.
+        var categoryDir = Path.Combine(outputBase, CategoryFolder(config, category));
+        if (config.AutoCategorize)
+            categoryDir = Path.Combine(categoryDir, "MKV");
+        var fallbackName = $"{DriveLetter}_{kindForFolder}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
+        var suggestedName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
+
+        HashSet<string> chosenAudioIds;
+        HashSet<string> chosenSubIds;
+        string baseName;
+
+        if (scannedAudio.Count == 0 && scannedSub.Count == 0)
+        {
+            AddLog("Movie-Only: no per-track data available, using MakeMKV's default track selection");
+            chosenAudioIds = new HashSet<string>();
+            chosenSubIds = new HashSet<string>();
+            baseName = suggestedName;
+        }
+        else
+        {
+            var trackPicker = new TrackPickerWindow(movie.Tracks, suggestedName) { Owner = System.Windows.Application.Current.MainWindow };
+            trackPicker.Show();
+            var trackSelection = await trackPicker.ResultTask;
+
+            if (trackSelection is null)
+            {
+                AddLog("Movie-Only: cancelled at track selection");
+                selectedMode = null;
+                StateHasChanged();
+                return;
+            }
+
+            chosenAudioIds = trackSelection.ChosenAudioIds;
+            chosenSubIds = trackSelection.ChosenSubIds;
+            baseName = string.IsNullOrWhiteSpace(trackSelection.ChosenOutputName) ? suggestedName : trackSelection.ChosenOutputName;
+            AddLog($"Movie-Only: keeping {chosenAudioIds.Count}/{scannedAudio.Count} audio, {chosenSubIds.Count}/{scannedSub.Count} subtitle track(s), output name \"{baseName}\"");
+        }
+
+        if (config.UnattendedAutoStart)
+        {
+            baseName = UniqueUnattendedName(categoryDir, baseName);
+        }
+        else if (!FileNamingService.CheckDuplicateOrConfirm(categoryDir, baseName, false, AddLog))
+        {
+            preflightBlockedReason = "Cancelled due to duplicate output";
+            StateHasChanged();
+            return;
+        }
+
+        var outputFolder = Path.Combine(categoryDir, baseName);
+
+        runningLabel = $"Extracting movie-only (disc index {indexResult.DiscIndex})… this may take a while";
+        isRunning = true;
+        StartProgressTimer(outputFolder, movie.SizeBytes);
+        StateHasChanged();
+
+        movieOnlyResult = await Task.Run(() =>
+            MakeMkvService.ExtractTitle(exe, indexResult.DiscIndex!, movie.Index, outputFolder, p => currentProcess = p));
+        NoteLibreDrive(movieOnlyResult.LibreDriveLine);
+
+        StopProgressTimer();
+        isRunning = false;
+
+        if (wasCancelled)
+        {
+            AddLog("Movie-Only: cancelled, cleaning up");
+            await CleanUpCancelledFolder(outputFolder);
+        }
+        else
+        {
+            AddLog(movieOnlyResult.Success ? $"Movie-Only: complete -- {movieOnlyResult.OutputFolder}" : $"Movie-Only: failed -- {movieOnlyResult.ErrorMessage}");
+
+            string? finalMkvPath = null;
+            if (movieOnlyResult.Success)
+            {
+                lastOutputFolder = movieOnlyResult.OutputFolder;
+                var renamed = MakeMkvService.RenameNewestMkv(outputFolder, baseName, AddLog);
+                finalMkvPath = renamed ?? Directory.GetFiles(outputFolder, "*.mkv").FirstOrDefault();
+                if (renamed is not null)
+                {
+                    AddLog($"Renamed to: {renamed}");
+                    lastOutputFolder = renamed;
+                }
+            }
+
+            bool wantsTrim = movieOnlyResult.Success &&
+                (chosenAudioIds.Count < scannedAudio.Count || chosenSubIds.Count < scannedSub.Count) &&
+                (scannedAudio.Count > 0 || scannedSub.Count > 0);
+
+            if (wantsTrim && finalMkvPath is not null)
+            {
+                var mkvmergeExe = MkvmergeService.FindExecutable(config.MkvmergePathOverride);
+                if (mkvmergeExe is null)
+                {
+                    AddLog("[WARNING] Exact track selection was requested but mkvmerge isn't configured in Settings -- keeping MakeMKV's full extraction instead.");
+                    trimMessage = "ℹ mkvmerge not configured (see Settings) -- kept all tracks";
+                }
+                else
+                {
+                    var trimResult = await Task.Run(() => MkvmergeService.TrimTracks(
+                        mkvmergeExe, finalMkvPath, scannedAudio, scannedSub, chosenAudioIds, chosenSubIds,
+                        log: msg => AddLog(msg)));
+                    trimMessage = trimResult.Trimmed
+                        ? $"✓ {trimResult.Message}"
+                        : $"ℹ {trimResult.Message}";
+                }
+                StateHasChanged();
+            }
+            else if (wantsTrim && finalMkvPath is null)
+            {
+                AddLog("[WARNING] Could not find the extracted .mkv file to trim.");
+                trimMessage = "⚠ Extraction succeeded but the file couldn't be found for trimming.";
+            }
+
+            if (movieOnlyResult.Success && finalMkvPath is not null)
+            {
+                await VerifyMovieOnlyOutput(finalMkvPath);
+            }
+
+            NotifyIfEnabled(config, movieOnlyResult.Success, "Movie-Only extraction",
+                movieOnlyResult.Success ? movieOnlyResult.OutputFolder : movieOnlyResult.ErrorMessage);
+            RecordHistory("Movie-Only extraction", movieOnlyResult.Success ? (finalMkvPath ?? movieOnlyResult.OutputFolder ?? "") : "", lastSha1, lastMd5, lastRedumpMatch);
+            if (movieOnlyResult.Success)
+            {
+                OnRipSucceeded(config);
+                AutoEjectIfEnabled(config, DriveLetter);
+            }
+        }
+
+        lastAction = PickMovieOnly;
+        StateHasChanged();
+    }
+
+    private static async Task CleanUpCancelledFolder(string folder)
+    {
+        await Task.Delay(500);
+        try { Directory.Delete(folder, recursive: true); }
+        catch { /* best-effort */ }
+    }
+
+    private static string FormatDuration(int totalSeconds)
+    {
+        var span = TimeSpan.FromSeconds(totalSeconds);
+        return span.Hours > 0 ? $"{span.Hours}h {span.Minutes}m" : $"{span.Minutes}m {span.Seconds}s";
+    }
+
+    private static string FormatGb(long bytes) => $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+
+    protected override void OnParametersSet()
+    {
+        if (previousMediaPresent && !MediaPresent)
+        {
+            ResetResultState();
+            lastAction = null;
+            cachedArt = null;
+            coverDataUri = null;
+            showMetadataDetails = false;
+            BatchSyncService.RemoveQueued(DriveLetter);
+        }
+        else if (!previousMediaPresent && MediaPresent)
+        {
+            trayIsOpen = false;
+
+            if (!string.IsNullOrWhiteSpace(VolumeTitle))
+            {
+                cachedArt = MetadataFetchService.GetCachedArt(VolumeTitle);
+                LoadCoverDataUri();
+
+                if (!hasCachedCover && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd))
+                {
+                    _ = AutoFetchArtSilently();
+                }
+
+                _ = TryAutoStart();
+            }
+        }
+        previousMediaPresent = MediaPresent;
+    }
+
+    public void Dispose()
+    {
+        StopProgressTimer();
+        BatchSyncService.StateChanged -= OnBatchSyncStateChanged;
+    }
+}

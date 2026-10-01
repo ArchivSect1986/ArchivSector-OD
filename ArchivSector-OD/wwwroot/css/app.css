@@ -1,0 +1,600 @@
+﻿/* ============================================================
+   Theme variables — pulled directly from the current Tkinter
+   app's THEMES dict, so this draft is an honest visual
+   comparison, not a fresh invented palette.
+   Applied via a data-theme attribute on the app's root wrapper
+   in AppShell.razor, scoped with these attribute selectors so
+   no JS interop is needed for this first draft.
+   ============================================================ */
+
+[data-theme="midnight"] {
+    --bg-root: #0b1120;
+    --bg-panel: #141b2d;
+    --bg-panel-alt: #1b2438;
+    --border: #2a3550;
+    --text-primary: #e5e9f5;
+    --text-secondary: #8b93a8;
+    --text-muted: #5b6478;
+    --accent: #22d3ee;
+    --accent-hover: #5fe3f7;
+    --success: #10b981;
+    --success-hover: #34d399;
+    --neutral: #3b4560;
+    --neutral-hover: #4b5680;
+    --danger: #ef4444;
+    --danger-hover: #f87171;
+    --amber: #f59e0b;
+}
+
+[data-theme="nova"] {
+    --bg-root: #070d1a;
+    --bg-panel: #0f1729;
+    --bg-panel-alt: #16213a;
+    --border: #243255;
+    --text-primary: #eef2fb;
+    --text-secondary: #93a0c2;
+    --text-muted: #5a6690;
+    --accent: #2dd4bf;
+    --accent-hover: #5eead4;
+    --success: #22c55e;
+    --success-hover: #4ade80;
+    --neutral: #33415f;
+    --neutral-hover: #40507a;
+    --danger: #dc2626;
+    --danger-hover: #ef4444;
+    --amber: #fbbf24;
+}
+
+[data-theme="daylight"] {
+    --bg-root: #d8dce6;
+    --bg-panel: #eef0f5;
+    --bg-panel-alt: #dde1ea;
+    --border: #b7c0d1;
+    --text-primary: #141a2e;
+    --text-secondary: #4b5570;
+    --text-muted: #8791a8;
+    --accent: #0891b2;
+    --accent-hover: #0aa5c2;
+    --success: #16a34a;
+    --success-hover: #22c55e;
+    --neutral: #64748b;
+    --neutral-hover: #475569;
+    --danger: #dc2626;
+    --danger-hover: #ef4444;
+    --amber: #d97706;
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+
+* {
+    box-sizing: border-box;
+}
+
+html, body, #app {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg-root);
+    color: var(--text-primary);
+}
+
+.app-root {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--bg-root);
+    transition: background-color 0.25s ease;
+}
+
+    .app-root h1,
+    .app-root h2,
+    .app-root p,
+    .app-root span {
+        color: var(--text-primary);
+    }
+
+/* ============================================================
+   Header
+   ============================================================ */
+
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+}
+
+.app-brand h1 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text-primary);
+}
+
+.app-brand p {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: var(--accent);
+}
+
+.theme-switch {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+    .theme-switch button {
+        border: none;
+        padding: 6px 14px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--bg-panel-alt);
+        color: var(--text-secondary);
+        transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+        .theme-switch button:hover {
+            background: var(--neutral-hover);
+        }
+
+        .theme-switch button.active {
+            background: var(--accent);
+            color: #000;
+        }
+
+/* ============================================================
+   Drive bay grid
+   ============================================================ */
+
+.bays-grid {
+    flex: 1;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    padding: 20px;
+    align-content: start;
+    background: var(--bg-root);
+}
+
+.bay-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+    .bay-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+    }
+
+    .bay-card h2 {
+        margin: 0;
+        font-size: 15px;
+        color: var(--text-primary);
+    }
+
+    .bay-card .bay-subtitle {
+        margin: 2px 0 12px;
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+
+.bay-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.bay-btn {
+    border: none;
+    border-radius: 6px;
+    padding: 9px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+    color: #042114;
+    transition: background-color 0.15s ease, transform 0.08s ease;
+}
+
+    .bay-btn:active {
+        transform: scale(0.99);
+    }
+
+    .bay-btn.bd {
+        background: var(--success);
+    }
+
+        .bay-btn.bd:hover {
+            background: var(--success-hover);
+        }
+
+    .bay-btn.dvd {
+        background: var(--danger);
+        color: white;
+    }
+
+        .bay-btn.dvd:hover {
+            background: var(--danger-hover);
+        }
+
+    .bay-btn.game {
+        background: var(--accent);
+    }
+
+        .bay-btn.game:hover {
+            background: var(--accent-hover);
+        }
+
+    .bay-btn.selected {
+        outline: 2px solid var(--text-primary);
+        outline-offset: -2px;
+    }
+
+    .bay-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+    }
+
+    .bay-btn.bd:disabled:hover {
+        background: var(--success);
+    }
+
+    .bay-btn.dvd:disabled:hover {
+        background: var(--danger);
+    }
+
+    .bay-btn.game:disabled:hover {
+        background: var(--accent);
+    }
+
+.bay-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg-panel-alt);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+    .bay-status .standby-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        margin-right: 6px;
+    }
+
+.bay-meta {
+    margin: -8px 0 10px;
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+}
+
+/* ============================================================
+   Modals (mode-selection popup, History, Settings)
+   ============================================================ */
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-box {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    width: 320px;
+    text-align: center;
+}
+
+    .modal-box h3 {
+        margin: 0 0 16px;
+        color: var(--text-primary);
+        font-size: 16px;
+    }
+
+.modal-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.modal-btn {
+    border: none;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    color: #042114;
+    background: var(--accent);
+}
+
+    .modal-btn:hover {
+        background: var(--accent-hover);
+    }
+
+    .modal-btn.cancel {
+        background: var(--neutral);
+        color: var(--text-primary);
+    }
+
+        .modal-btn.cancel:hover {
+            background: var(--neutral-hover);
+        }
+
+.history-box {
+    width: 640px;
+    max-width: 90vw;
+    text-align: left;
+}
+
+.history-scroll {
+    max-height: 400px;
+    overflow: auto;
+    margin: 12px 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+
+    .history-table th {
+        position: sticky;
+        top: 0;
+        background: var(--bg-panel-alt);
+        color: var(--text-primary);
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+    }
+
+    .history-table td {
+        padding: 6px 8px;
+        color: var(--text-secondary);
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+    }
+
+    .history-table tr:hover td {
+        background: var(--bg-panel-alt);
+    }
+
+.settings-box {
+    width: 420px;
+    max-width: 90vw;
+    text-align: left;
+}
+
+.settings-label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 12px 0 4px;
+}
+
+.settings-input {
+    width: 100%;
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    padding: 8px 10px;
+}
+
+.settings-message {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* ============================================================
+   Cancel / Retry / Tray / Rename / Log console controls
+   ============================================================ */
+
+.cancel-btn {
+    margin-top: 8px;
+    background: var(--danger);
+    color: white;
+    text-align: center;
+}
+
+    .cancel-btn:hover {
+        background: var(--danger-hover);
+    }
+
+.retry-btn {
+    margin-top: 8px;
+    background: var(--amber);
+    color: #1a1200;
+    text-align: center;
+}
+
+    .retry-btn:hover {
+        filter: brightness(1.1);
+    }
+
+.tray-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.tray-btn {
+    background: var(--neutral);
+    color: var(--text-primary);
+    padding: 6px 10px;
+    font-size: 11px;
+    flex: 0 0 auto;
+}
+
+    .tray-btn:hover {
+        background: var(--neutral-hover);
+    }
+
+.tray-message {
+    font-size: 11px;
+    color: var(--danger);
+}
+
+.label-input {
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 700;
+    padding: 2px 6px;
+    width: 60%;
+}
+
+.label-confirm-btn {
+    border: none;
+    background: var(--success);
+    color: #042114;
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin-left: 4px;
+    cursor: pointer;
+}
+
+.shortcut-btn {
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--bg-panel-alt);
+    color: var(--text-secondary);
+}
+
+    .shortcut-btn:hover {
+        background: var(--neutral-hover);
+    }
+
+.shortcut-message {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 8px;
+}
+
+.log-toggle-btn {
+    margin-top: 10px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 4px 0;
+}
+
+    .log-toggle-btn:hover {
+        color: var(--text-primary);
+    }
+
+.log-console {
+    margin-top: 4px;
+    max-height: 140px;
+    overflow-y: auto;
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-family: Consolas, monospace;
+    font-size: 10px;
+}
+
+.log-line {
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 1px 0;
+}
+
+.log-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* ============================================================
+   Progress bar
+   ============================================================ */
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-panel-alt);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 6px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.4s ease;
+}
+
+/* ============================================================
+   Footer
+   ============================================================ */
+
+.app-footer {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 24px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.shortcut-btn.active-toggle {
+    background: var(--success);
+    color: #042114;
+    font-weight: 700;
+}
+
+    .shortcut-btn.active-toggle:hover {
+        filter: brightness(1.1);
+    }
+
+#blazor-error-ui {
+    display: none;
+}

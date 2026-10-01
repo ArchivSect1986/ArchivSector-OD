@@ -1,0 +1,55 @@
+﻿<Window x:Class="ArchivSector_OD.TitlePickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Choose a Title to Extract"
+        Height="440" Width="560"
+        Background="#141b2d"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="#8b93a8" FontSize="11" Margin="0,0,0,10"
+                   Text="MakeMKV found these titles on the disc, longest first. The longest is usually the actual movie -- extras, menus, and alternate cuts are usually much shorter."/>
+
+        <ListBox Grid.Row="1" x:Name="TitleList"
+                  Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1"
+                  ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="8,7"/>
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                    <Setter Property="BorderBrush" Value="#2a3550"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="#22d3ee"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="80"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="{Binding Name}" Foreground="#e5e9f5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Duration}" Foreground="#8b93a8" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="2" Text="{Binding SizeGb}" Foreground="#8b93a8" VerticalAlignment="Center"/>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="CancelButton" Content="Cancel" Width="90" Height="32" Margin="0,0,8,0" Click="CancelButton_Click"/>
+            <Button x:Name="ExtractButton" Content="Extract Selected Title" Background="#10b981" Foreground="Black" FontWeight="Bold" Width="160" Height="32" Click="ExtractButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

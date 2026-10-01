@@ -1,0 +1,43 @@
+﻿<Window x:Class="ArchivSector_OD.IsoVerifierWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Verify ISO Against Redump"
+        Height="560" Width="680"
+        Background="#141b2d"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="#8b93a8" FontSize="11" Margin="0,0,0,10"
+                   Text="Select a single ISO, or a whole folder to check every ISO inside it -- even ones ripped outside this app -- against your imported Redump DAT files."/>
+
+        <Border Grid.Row="1" Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1" Padding="8" Margin="0,0,0,10">
+            <TextBlock x:Name="PathText" Text="No file or folder selected." Foreground="#e5e9f5" FontFamily="Consolas" FontSize="10" TextWrapping="Wrap"/>
+        </Border>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button x:Name="SelectFileButton" Content="Select ISO File..." Padding="8,4" Click="SelectFileButton_Click"/>
+            <Button x:Name="SelectFolderButton" Content="Verify Folder..." Padding="8,4" Margin="8,0,0,0" Click="SelectFolderButton_Click"/>
+            <Button x:Name="VerifyButton" Content="Verify" Background="#22d3ee" Foreground="Black" FontWeight="Bold" Padding="8,4" Margin="8,0,0,0" IsEnabled="False" Click="VerifyButton_Click"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" x:Name="StatusText" Foreground="#8b93a8" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+        <TextBlock Grid.Row="4" x:Name="ResultText" Foreground="#22d3ee" FontWeight="Bold" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+        <TextBox Grid.Row="5" x:Name="ResultsBox" Background="#050811" Foreground="#cbd5e1" FontFamily="Consolas" FontSize="10"
+                  IsReadOnly="True" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                  Visibility="Collapsed" Margin="0,0,0,10"/>
+
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Close" Width="90" Height="32" Click="CloseButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
