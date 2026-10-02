@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -19,9 +19,9 @@ namespace ArchivSector_OD
     // Filtered to CSV, Open CSV File, Search Redump.org, and Clear
     // History with an explicit confirmation.
     //
-    // Deliberate deviation: Python filters on Title / System / Serial ID
-    // / Redump Match. This app's history CSV has no Serial ID column,
-    // so Drive Model takes its place.
+    // The filter searches Title / System / Serial ID / Redump Match like
+    // Python, plus Drive Model. Columns are looked up by name, so older
+    // history files without a Serial ID column still filter fine.
     public partial class HistoryWindow : Window
     {
         // Same path HistoryService writes to. Duplicated here so
@@ -30,7 +30,7 @@ namespace ArchivSector_OD
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "ArchivSector-OD", "history.csv");
 
-        private static readonly string[] SearchFields = { "Title", "System", "Drive Model", "Redump Match" };
+        private static readonly string[] SearchFields = { "Title", "System", "Serial ID", "Drive Model", "Redump Match" };
         private static readonly Regex CapacityRegex = new(@"([\d.]+)\s*GB", RegexOptions.IgnoreCase);
 
         private List<string> header = new();

@@ -1,4 +1,4 @@
-﻿@* One drive bay card. Blu-ray/4K and DVD Movie Disc both open a
+@* One drive bay card. Blu-ray/4K and DVD Movie Disc both open a
    mode-choice popup; Movie-Only MKV is disc-agnostic; DVD's popup has
    three real options (MakeMKV backup, Redumper raw ISO, Movie-Only).
    Every mode button is gated by the real detected disc Category. A
@@ -50,6 +50,13 @@
    button clicks also go through the Multi-Drive Batch Sync gate
    (StartGated), same as auto-starts and Retry Last Rip.
 
+   Game discs get a "File name" box on the bay. Typed before a dump,
+   it names the output; changed during a dump (e.g. one that Batch
+   Queue or Unattended Mode auto-started), the new name is applied
+   when the dump finishes; after a dump, the Rename button renames the
+   folder, every file in it, the .cue sheet's file references, and the
+   History record.
+
    Blu-ray Full Backup has an automatic ImgBurn stage 2 when ImgBurn
    is available. DVD's raw ISO dump falls back to ImgBurn when
    Redumper isn't found. *@
@@ -88,6 +95,14 @@
             @if (MediaPresent && !string.IsNullOrEmpty(AacsVersion))
             {
                 <text> • @AacsVersion</text>
+            }
+            @if (MediaPresent && !string.IsNullOrEmpty(GameSystem))
+            {
+                <text> • @GameSystem</text>
+            }
+            @if (MediaPresent && !string.IsNullOrEmpty(Serial))
+            {
+                <text> • @Serial</text>
             }
         </p>
     }
@@ -146,6 +161,43 @@
         {
             <p class="bay-subtitle" style="margin: 0 0 8px; max-width: 100%;">@cachedArt.Metadata.Detail</p>
         }
+    }
+
+    @if ((MediaPresent && Category == DiscCategory.Game) || lastGameFolder is not null)
+    {
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
+            <span class="bay-meta" style="margin: 0;">💾 File name:</span>
+            <input class="label-input" style="flex: 1 1 200px; min-width: 160px; font-size: 13px;"
+                   value="@gameNameDraft"
+                   placeholder="@(string.IsNullOrWhiteSpace(VolumeTitle) ? "Disc title" : VolumeTitle)"
+                   @oninput="OnGameNameInput"
+                   @onkeydown="OnGameNameKeydown" />
+            @if (lastGameFolder is not null && !isRunning && !isVerifying)
+            {
+                <button class="bay-btn tray-btn" style="width: auto;"
+                        disabled="@(!CanRenameFinished)" @onclick="RenameFinishedGame">
+                    ✏️ Rename
+                </button>
+            }
+        </div>
+        <p class="bay-subtitle" style="margin: 0 0 8px;">
+            @if (gameNameNote is not null)
+            {
+                @gameNameNote
+            }
+            else if (isRunning)
+            {
+                <text>You can change the name while it dumps. The new name is applied when the dump finishes.</text>
+            }
+            else if (lastGameFolder is not null)
+            {
+                <text>Type a new name and click Rename to rename the finished dump.</text>
+            }
+            else
+            {
+                <text>Leave blank to use the disc title.</text>
+            }
+        </p>
     }
 
     @if (isQueuedForBatch)
@@ -411,6 +463,14 @@
     [Parameter]
     public string AacsVersion { get; set; } = "";
 
+    // Game discs only, from DiscMetadataService via AppShell: the
+    // console (e.g. "PlayStation 2") and serial (e.g. "SLUS-20062").
+    [Parameter]
+    public string GameSystem { get; set; } = "";
+
+    [Parameter]
+    public string Serial { get; set; } = "";
+
     private bool? OmnidriveCompatible => DriveHardwareService.CheckOmniDriveCompatibility(DriveModel);
     private bool omnidriveConfirmed = false;
     private bool libreDriveSeen = false;
@@ -465,6 +525,15 @@
     private string labelDraft = "";
 
     private int batchQueueCount = 0;
+
+    // Game disc naming: the name box on the bay. Before a dump it sets
+    // the name; during a dump, an edit is applied when it finishes;
+    // after, the Rename button renames the finished folder and files.
+    private string gameNameDraft = "";
+    private string? gameNameNote = null;
+    private string? lastGameFolder = null; // folder of the last finished game dump
+    private string? lastGameName = null;   // name its files currently use
+    private string? lastGameIso = null;    // its .iso path
 
     private List<string> logLines = new();
     private bool showLog = false;
@@ -667,8 +736,17 @@
             Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             DriveLetter = DriveLetter,
             DriveModel = DriveModel,
-            Title = string.IsNullOrEmpty(VolumeTitle) ? "UNKNOWN" : VolumeTitle,
-            System = operation,
+            // A game dump records the file name it was saved under, so a
+            // name typed in the bay's name box shows up in History.
+            Title = Category == DiscCategory.Game && !string.IsNullOrEmpty(lastGameName)
+                ? lastGameName
+                : string.IsNullOrEmpty(VolumeTitle) ? "UNKNOWN" : VolumeTitle,
+            // Game dumps record the detected console (e.g. "PlayStation 2")
+            // as their System, like the Python app did, so History's
+            // per-system stats count PS1/PS2/PS3 separately.
+            System = Category == DiscCategory.Game && !string.IsNullOrWhiteSpace(GameSystem) ? GameSystem : operation,
+            Serial = Serial,
+            AacsVersion = AacsVersion,
             OutputPath = outputPath,
             Capacity = CapacityLabel,
             Sha1 = sha1,
@@ -728,6 +806,126 @@
         var m = System.Text.RegularExpressions.Regex.Match(FormatLabel ?? "", @"\b(BD|DVD)-\d+\b",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         return m.Success ? m.Value.ToUpperInvariant() : (isBd ? "BD" : "DVD");
+    }
+
+    // ---- Game disc naming ----
+
+    private void OnGameNameInput(ChangeEventArgs e)
+    {
+        gameNameDraft = e.Value?.ToString() ?? "";
+        gameNameNote = null;
+    }
+
+    private void OnGameNameKeydown(Microsoft.AspNetCore.Components.Web.KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !isRunning && !isVerifying && CanRenameFinished)
+            RenameFinishedGame();
+    }
+
+    // Turns what was typed into a safe file/folder name, or null if
+    // nothing usable is left.
+    private static string? CleanGameName(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var cleaned = FileNamingService.SanitizeFilename(text.Trim()).Trim().TrimEnd('.', ' ');
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
+    }
+
+    private bool CanRenameFinished =>
+        lastGameFolder is not null
+        && CleanGameName(gameNameDraft) is string wanted
+        && wanted != lastGameName;
+
+    private void RenameFinishedGame()
+    {
+        var wanted = CleanGameName(gameNameDraft);
+        if (wanted is null || wanted == lastGameName) return;
+
+        var oldIso = lastGameIso;
+        if (RenameGameOutput(wanted))
+        {
+            if (oldIso is not null && lastGameIso is not null)
+                HistoryService.UpdateRenamed(oldIso, lastGameIso, wanted);
+            gameNameNote = $"✓ Renamed to '{wanted}'";
+        }
+        StateHasChanged();
+    }
+
+    // Renames a finished game dump: every file in its folder that starts
+    // with the old name (.iso, .log, .cue, "Name (Track 1).bin", ...),
+    // the file names written inside any .cue sheet, and then the folder
+    // itself. Returns false (with a note on the bay) if it couldn't.
+    private bool RenameGameOutput(string newName)
+    {
+        if (lastGameFolder is null || lastGameName is null) return false;
+        var parent = Path.GetDirectoryName(lastGameFolder);
+        if (parent is null) return false;
+
+        var oldName = lastGameName;
+        var oldFolder = lastGameFolder;
+        var newFolder = Path.Combine(parent, newName);
+        bool caseOnly = string.Equals(newFolder, oldFolder, StringComparison.OrdinalIgnoreCase);
+
+        if (!caseOnly && (Directory.Exists(newFolder) || File.Exists(newFolder)))
+        {
+            gameNameNote = $"⚠ '{newName}' already exists in {parent} -- pick a different name.";
+            AddLog($"Rename: '{newName}' already exists, nothing was renamed.");
+            return false;
+        }
+
+        try
+        {
+            foreach (var file in Directory.GetFiles(oldFolder))
+            {
+                var fileName = Path.GetFileName(file);
+                if (!fileName.StartsWith(oldName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                if (Path.GetExtension(file).Equals(".cue", StringComparison.OrdinalIgnoreCase))
+                {
+                    var cue = File.ReadAllText(file);
+                    File.WriteAllText(file, cue.Replace($"\"{oldName}", $"\"{newName}"));
+                }
+
+                var target = Path.Combine(oldFolder, newName + fileName.Substring(oldName.Length));
+                if (!string.Equals(file, target, StringComparison.Ordinal))
+                    File.Move(file, target);
+            }
+
+            if (!string.Equals(newFolder, oldFolder, StringComparison.Ordinal))
+            {
+                if (caseOnly)
+                {
+                    // Windows won't rename a folder when only the capital
+                    // letters change, so go through a temporary name.
+                    var temp = oldFolder + "_renaming";
+                    Directory.Move(oldFolder, temp);
+                    Directory.Move(temp, newFolder);
+                }
+                else
+                {
+                    Directory.Move(oldFolder, newFolder);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            gameNameNote = $"⚠ Couldn't finish renaming: {ex.Message} (some files may already have the new name)";
+            AddLog($"Rename failed: {ex.Message}");
+            return false;
+        }
+
+        if (lastGameIso is not null)
+            lastGameIso = Path.Combine(newFolder, newName + Path.GetFileName(lastGameIso).Substring(oldName.Length));
+
+        lastGameFolder = newFolder;
+        lastGameName = newName;
+        gameNameDraft = newName;
+        lastOutputFolder = lastGameIso ?? newFolder;
+        if (redumperResult is not null && redumperResult.Success)
+            redumperResult.IsoPath = lastGameIso;
+
+        AddLog($"Renamed to '{newName}': {lastGameIso ?? newFolder}");
+        return true;
     }
 
     // Shared success-side effects ported from the Python app's
@@ -1098,15 +1296,17 @@
         var categoryDir = Path.Combine(outputBase, CategoryFolder(config, category));
 
         // Ported from the Python app's _start_game_pipeline(): game
-        // dumps go into Games\<system folder>, named after the bay's
-        // custom label when one is set (e.g. "PS3"), else General_Games.
-        // (Python's middle fallback -- the disc's detected system name --
-        // isn't available here, since this app doesn't extract one.)
+        // dumps go into Games\<system folder>, chosen in the same order
+        // as Python -- the bay's custom label when one is set (e.g.
+        // "PS3"), else the console detected from the disc (e.g.
+        // "PlayStation 2"), else General_Games.
         if (config.AutoCategorize && folderPrefix == "Game")
         {
             var sysFolder = !string.IsNullOrWhiteSpace(customLabel)
                 ? FileNamingService.SanitizeFilename(customLabel)
-                : "General_Games";
+                : !string.IsNullOrWhiteSpace(GameSystem)
+                    ? FileNamingService.SanitizeFilename(GameSystem)
+                    : "General_Games";
             categoryDir = Path.Combine(categoryDir, sysFolder);
         }
 
@@ -1117,6 +1317,20 @@
         }
         var fallbackName = $"{folderPrefix}_{DriveLetter}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
         var isoName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
+
+        if (folderPrefix == "Game")
+        {
+            lastGameFolder = null;
+            lastGameName = null;
+            lastGameIso = null;
+            gameNameNote = null;
+            var chosen = CleanGameName(gameNameDraft);
+            if (chosen is not null && chosen != isoName)
+            {
+                isoName = chosen;
+                AddLog($"{operationLabel}: using your file name '{isoName}'");
+            }
+        }
 
         if (config.UnattendedAutoStart)
         {
@@ -1130,6 +1344,9 @@
         }
 
         var outputFolder = Path.Combine(categoryDir, isoName);
+
+        // Show the real name in the box, so it can be edited mid-dump.
+        if (folderPrefix == "Game") gameNameDraft = isoName;
 
         isRunning = true;
         progressPercent = 0;
@@ -1177,6 +1394,25 @@
 
             if (redumperResult.Success && redumperResult.IsoPath is not null)
             {
+                if (folderPrefix == "Game")
+                {
+                    lastGameFolder = outputFolder;
+                    lastGameName = isoName;
+                    lastGameIso = redumperResult.IsoPath;
+
+                    var wanted = CleanGameName(gameNameDraft);
+                    if (wanted is not null && wanted != isoName)
+                    {
+                        AddLog($"{operationLabel}: applying the name '{wanted}' you typed during the dump");
+                        if (RenameGameOutput(wanted))
+                            gameNameNote = $"✓ Saved as '{wanted}'";
+                    }
+                    else
+                    {
+                        gameNameDraft = isoName;
+                    }
+                }
+
                 lastOutputFolder = redumperResult.IsoPath;
                 await VerifyOutput(redumperResult.IsoPath);
             }
@@ -1603,6 +1839,13 @@
         else if (!previousMediaPresent && MediaPresent)
         {
             trayIsOpen = false;
+
+            // A new disc starts with a blank name box.
+            gameNameDraft = "";
+            gameNameNote = null;
+            lastGameFolder = null;
+            lastGameName = null;
+            lastGameIso = null;
 
             if (!string.IsNullOrWhiteSpace(VolumeTitle))
             {

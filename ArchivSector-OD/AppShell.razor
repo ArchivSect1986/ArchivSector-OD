@@ -1,10 +1,11 @@
-﻿@* Root component for the visual shell draft. Bay cards are
+@* Root component for the visual shell draft. Bay cards are
    generated dynamically from whatever optical drives actually exist,
    each keyed by drive letter. Each poll cycle computes real disc
    metadata for whatever's in the drive -- category, format/capacity,
    and (via DiscMetadataService) the disc's REAL title where one can
    be parsed, falling back to the raw Windows volume label otherwise.
-   AACS version is also captured for Blu-ray discs when present.
+   AACS version is also captured for Blu-ray discs when present, and
+   for game discs the console and serial number (DiscMetadataService).
    Drive hardware is fetched once at startup. Settings, History, and
    the ISO Verifier are all real, separate WPF windows opened with
    Show(), not ShowDialog().
@@ -84,6 +85,8 @@
                               FormatLabel="@st.FormatLabel"
                               CapacityLabel="@st.CapacityLabel"
                               AacsVersion="@st.AacsVersion"
+                              GameSystem="@st.GameSystem"
+                              Serial="@st.Serial"
                               DriveModel="@(hw?.Caption ?? "")"
                               DriveFirmware="@(hw?.Firmware ?? "")" />
             }
@@ -116,6 +119,8 @@
         public string FormatLabel = "";
         public string CapacityLabel = "";
         public string AacsVersion = "";
+        public string GameSystem = "";
+        public string Serial = "";
     }
 
     private readonly Dictionary<string, DriveState> driveStates = new();
@@ -243,10 +248,14 @@
                         state.StatusText = $"DISC PRESENT — {realTitle.Title}";
                     }
                     state.AacsVersion = realTitle.AacsVersion ?? "";
+                    state.GameSystem = realTitle.GameSystem ?? "";
+                    state.Serial = realTitle.Serial ?? "";
                 }
                 catch
                 {
                     state.AacsVersion = "";
+                    state.GameSystem = "";
+                    state.Serial = "";
                 }
 
                 try
@@ -268,6 +277,8 @@
                 state.FormatLabel = "";
                 state.CapacityLabel = "";
                 state.AacsVersion = "";
+                state.GameSystem = "";
+                state.Serial = "";
             }
         }
         catch (Exception ex)

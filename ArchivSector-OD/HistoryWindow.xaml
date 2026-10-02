@@ -1,4 +1,4 @@
-﻿<Window x:Class="ArchivSector_OD.HistoryWindow"
+<Window x:Class="ArchivSector_OD.HistoryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Archival Session History"
@@ -38,7 +38,7 @@
         </Border>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,8">
-            <TextBlock Text="Filter (title, system, drive model, or Redump match):" Foreground="#8b93a8"
+            <TextBlock Text="Filter (title, system, serial, drive model, or Redump match):" Foreground="#8b93a8"
                        FontSize="11" VerticalAlignment="Center"/>
             <TextBox x:Name="FilterBox" Width="280" Margin="8,0,8,0" Padding="4,2"
                      Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550"

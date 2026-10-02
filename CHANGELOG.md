@@ -4,7 +4,15 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
-## v2.0.1 - 2026-10-01
+## v2.1 - 2026-10-01
+
+### ✨ Added
+* Game discs are now identified by console from their own files (PlayStation 1, PlayStation 2, PlayStation 3, Original Xbox, Xbox 360), the same way v1.1 did. The console and the game's serial number (e.g. `SLUS-20062`, `BLUS-30001`) show on the drive bay, and game dumps go into `Games\<console>\` when the bay has no custom label. A bay label still wins, and discs that can't be identified still go to `Games\General_Games\`.
+* Game discs: a "File name" box on the drive bay. Type a name before the dump starts to use it instead of the disc title, or change it while a dump is running (including one that Batch Queue Mode or Unattended Mode started on its own) and it's applied when the dump finishes. After a dump, type a new name and click **Rename** to rename the folder and all its files; the History record is updated to match.
+* Archival History: a new Serial ID column, filled in for PlayStation games (Xbox discs have no readable serial). Game rips record their console as the System, so the "By System" stats count PS1, PS2 and PS3 separately. The AACS Version column is now filled in for Blu-ray rips, and the filter also searches serial numbers.
+
+### ⚙️ Changed
+* The history file now uses the same columns, in the same order, as v1.1 ("Serial ID" added, "Output Path" renamed to "ISO File Path"). A history file from v2.0 is converted automatically the next time a rip is recorded, and a copy of the original is kept as `history.csv.v2.0-backup`.
 
 ### 🐛 Fixed
 * Tool paths pasted into Settings with quotation marks around them (which Windows adds when you use "Copy as path", e.g. `"C:\redumper\redumper.exe"`) were quietly ignored, so the app fell back to searching the usual install locations instead. The quotes are now removed when you click Save Preferences, for the output folder and all four tool paths.

@@ -1,4 +1,5 @@
-﻿using System.IO;
+using System.IO;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace ArchivSector_OD
@@ -153,14 +154,27 @@ namespace ArchivSector_OD
         {
             public string? Title;
             public string? AacsVersion;
+            // Game discs only: the console (e.g. "PlayStation 2") and the
+            // game's serial number (e.g. "SLUS-20062"), when the disc's
+            // own files say what they are.
+            public string? GameSystem;
+            public string? Serial;
         }
 
         // Combines the above into one call matching each disc
         // Category's real source of truth: BDMV's own bdmt_eng.xml for
         // Blu-ray, PS3_GAME\PARAM.SFO's TITLE key for PS3 games. DVD
-        // and other game platforms have no equivalent parsed here yet
+        // and other game platforms have no title source parsed here yet
         // -- falls back to null, letting the caller keep the volume
         // label it already has.
+        //
+        // For game discs it also reports the console and serial number,
+        // ported from read_full_disc_info_worker: PS3 serials come from
+        // PARAM.SFO's TITLE_ID ("BLUS30001" -> "BLUS-30001"), PS1/PS2
+        // serials from the boot line in SYSTEM.CNF ("SLUS_200.62" ->
+        // "SLUS-20062"). Xbox discs have no readable serial, so theirs
+        // stays null (the Python app made one up from the volume label;
+        // leaving it blank is more honest).
         public static RealTitleResult GetRealTitle(string discRoot, DiscCategory category)
         {
             var result = new RealTitleResult();
@@ -172,6 +186,8 @@ namespace ArchivSector_OD
             }
             else if (category == DiscCategory.Game)
             {
+                result.GameSystem = DiscDetectionService.DetectGameSystem(discRoot);
+
                 var sfoPath = Path.Combine(discRoot, "PS3_GAME", "PARAM.SFO");
                 if (File.Exists(sfoPath))
                 {
@@ -181,10 +197,32 @@ namespace ArchivSector_OD
                         var sfo = ParseSfo(blob);
                         if (sfo.TryGetValue("TITLE", out var titleVal) && !string.IsNullOrWhiteSpace(titleVal.Text))
                             result.Title = titleVal.Text;
+                        if (sfo.TryGetValue("TITLE_ID", out var idVal) && !string.IsNullOrWhiteSpace(idVal.Text))
+                        {
+                            var id = idVal.Text.Trim();
+                            var m = Regex.Match(id, @"^([A-Z]{4})(\d{5})$");
+                            result.Serial = m.Success ? $"{m.Groups[1].Value}-{m.Groups[2].Value}" : id;
+                        }
                     }
                     catch
                     {
                         // Best-effort -- leave Title null, caller keeps the volume label.
+                    }
+                }
+
+                var cnfPath = Path.Combine(discRoot, "SYSTEM.CNF");
+                if (result.Serial is null && File.Exists(cnfPath))
+                {
+                    try
+                    {
+                        var cnf = File.ReadAllText(cnfPath).ToUpperInvariant();
+                        var m = Regex.Match(cnf, @"([A-Z]{4})[-_](\d{3})\.?(\d{2})");
+                        if (m.Success)
+                            result.Serial = $"{m.Groups[1].Value}-{m.Groups[2].Value}{m.Groups[3].Value}";
+                    }
+                    catch
+                    {
+                        // Best-effort -- leave Serial null.
                     }
                 }
             }

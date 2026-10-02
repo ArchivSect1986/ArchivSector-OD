@@ -1,9 +1,9 @@
-🌟 [RELEASE] ArchivSector-OD v2.0 | Optical Disc Ripping & Archival Control Center 🌟
+🌟 [RELEASE] ArchivSector-OD v2.1 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v2.0**! This is a complete rewrite: the app is
-now a native Windows program built in C# (.NET 8), replacing the old
+Welcome to **ArchivSector-OD v2.1**! Version 2.0 was a complete rewrite: the
+app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
 batch ripping, and the searchable archival history — with a new look and a
@@ -20,6 +20,27 @@ handful of improvements on top.
    (Full explanation under "How to Run" below.)
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
+
+Updating from v2.0? Just replace your old folder with this one. Your
+settings, history, and cached artwork are kept — they're stored
+separately in your AppData folder.
+
+========================================================================
+🔧 NEW IN V2.1 (since v2.0)
+========================================================================
+
+• Game discs are identified by console (PlayStation 1/2/3, Original
+  Xbox, Xbox 360). The console and serial number show on the drive bay,
+  and dumps go into \Games\<console> unless the bay has its own label.
+• Name your game dumps: a "File name" box on the drive bay. Type a
+  name before the dump, change it while it's running (even if Batch
+  Queue or Unattended Mode started it), or rename it after it's done.
+• History gets a Serial ID column, game rips are counted per console in
+  the stats, and the filter searches serial numbers. Your existing
+  history is converted automatically (a backup copy is kept).
+• Fixed: tool paths pasted into Settings with quotation marks around
+  them (which Windows adds when you use "Copy as path") were quietly
+  ignored. The quotes are now removed automatically when you save.
 
 ========================================================================
 🆕 NEW IN V2.0 (since v1.1)
@@ -139,8 +160,12 @@ handful of improvements on top.
 
 🎮 Game Disc Archival
 • Dedicated Redumper-driven pipeline for game discs, saved into
-  \Games\<bay label> — rename a drive bay (e.g. "PS3") and its games go
-  into a matching folder, or \Games\General_Games if it has no label.
+  \Games\<console> — PlayStation 1/2/3, Original Xbox and Xbox 360 discs
+  are recognized automatically, and their serial number is recorded.
+  Rename a drive bay (e.g. "Retro") and its games go into a folder with
+  that name instead. Unrecognized discs go to \Games\General_Games.
+• File name box on the drive bay: name a game dump before, during, or
+  after it rips.
 
 🖼️ Metadata & Artwork
 • Automatically looks up movie discs on insertion via TMDB and shows the

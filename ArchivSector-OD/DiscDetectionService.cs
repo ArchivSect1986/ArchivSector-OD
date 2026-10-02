@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 
 namespace ArchivSector_OD
 {
@@ -13,6 +13,9 @@ namespace ArchivSector_OD
     // (as the Python app checks) misses every Xbox 360 disc read on a
     // normal drive. $SystemUpdate is visible to a normal drive and
     // present on essentially every retail Xbox 360 disc.
+    //
+    // DetectGameSystem names the console (PlayStation 1/2/3, Original
+    // Xbox, Xbox 360) for sorting game dumps into per-system folders.
     //
     // ClassifyCapacity ports the Python app's size-ladder for
     // labeling a disc's format from its real reported capacity (not
@@ -45,6 +48,38 @@ namespace ArchivSector_OD
             }
 
             return DiscCategory.Unknown;
+        }
+
+        // Which console a game disc is for, from the same marker files
+        // the Python app's read_full_disc_info_worker checked, in the
+        // same order (plus $SystemUpdate for Xbox 360, see above).
+        // Returns null for game discs it can't identify -- Nintendo
+        // discs, for example, have no files Windows can see -- and for
+        // every non-game disc.
+        public static string? DetectGameSystem(string discRoot)
+        {
+            try
+            {
+                if (File.Exists(Path.Combine(discRoot, "PS3_GAME", "PARAM.SFO"))) return "PlayStation 3";
+                if (File.Exists(Path.Combine(discRoot, "default.xbe"))) return "Original Xbox";
+                if (File.Exists(Path.Combine(discRoot, "default.xex")) ||
+                    Directory.Exists(Path.Combine(discRoot, "$SystemUpdate"))) return "Xbox 360";
+
+                // PS1 and PS2 both boot from SYSTEM.CNF. "BOOT2 =" is the
+                // PS2-only line (PS1 uses plain "BOOT ="), which is how the
+                // Python app told them apart too.
+                var cnfPath = Path.Combine(discRoot, "SYSTEM.CNF");
+                if (File.Exists(cnfPath))
+                {
+                    var cnf = File.ReadAllText(cnfPath);
+                    return cnf.ToUpperInvariant().Contains("BOOT2") ? "PlayStation 2" : "PlayStation 1";
+                }
+            }
+            catch
+            {
+                // Unreadable disc or file -- treat as unidentified.
+            }
+            return null;
         }
 
         public static string ClassifyCapacity(long totalBytes)
