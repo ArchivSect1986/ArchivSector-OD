@@ -29,9 +29,12 @@ separately in your AppData folder.
 🔧 NEW IN V2.1 (since v2.0)
 ========================================================================
 
-• Game discs are identified by console (PlayStation 1/2/3, Original
-  Xbox, Xbox 360). The console and serial number show on the drive bay,
-  and dumps go into \Games\<console> unless the bay has its own label.
+• PlayStation 1/2/3 game discs are identified automatically. The
+  console and serial number show on the drive bay, and dumps go into
+  \Games\<console> unless the bay has its own label. (Original Xbox and
+  Xbox 360 discs usually can't be identified on a standard PC drive,
+  because Windows can't see their game files -- name the bay "Xbox 360"
+  to send them to their own folder.)
 • Name your game dumps: a "File name" box on the drive bay. Type a
   name before the dump, change it while it's running (even if Batch
   Queue or Unattended Mode started it), or rename it after it's done.
@@ -160,10 +163,12 @@ separately in your AppData folder.
 
 🎮 Game Disc Archival
 • Dedicated Redumper-driven pipeline for game discs, saved into
-  \Games\<console> — PlayStation 1/2/3, Original Xbox and Xbox 360 discs
-  are recognized automatically, and their serial number is recorded.
-  Rename a drive bay (e.g. "Retro") and its games go into a folder with
+  \Games\<console> — PlayStation 1/2/3 discs are recognized
+  automatically, and their serial number is recorded. Rename a drive
+  bay (e.g. "Xbox 360" or "Retro") and its games go into a folder with
   that name instead. Unrecognized discs go to \Games\General_Games.
+  Original Xbox and Xbox 360 discs usually show up as unrecognized on a
+  standard PC drive, since Windows can't see their game files.
 • File name box on the drive bay: name a game dump before, during, or
   after it rips.
 
