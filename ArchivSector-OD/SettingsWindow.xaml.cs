@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 
@@ -183,11 +183,11 @@ namespace ArchivSector_OD
 
         private void SaveButton_Click(object sender, RoutedEventArgs e)
         {
-            config.OutputBaseFolder = OutputFolderBox.Text.Trim();
-            config.MakeMkvPathOverride = MakeMkvPathBox.Text.Trim();
-            config.RedumperPathOverride = RedumperPathBox.Text.Trim();
-            config.ImgBurnPathOverride = ImgBurnPathBox.Text.Trim();
-            config.MkvmergePathOverride = MkvmergePathBox.Text.Trim();
+            config.OutputBaseFolder = CleanPath(OutputFolderBox.Text);
+            config.MakeMkvPathOverride = CleanPath(MakeMkvPathBox.Text);
+            config.RedumperPathOverride = CleanPath(RedumperPathBox.Text);
+            config.ImgBurnPathOverride = CleanPath(ImgBurnPathBox.Text);
+            config.MkvmergePathOverride = CleanPath(MkvmergePathBox.Text);
             config.RawgApiKey = RawgKeyBox.Password.Trim();
             config.TmdbApiKey = TmdbKeyBox.Password.Trim();
 
@@ -204,6 +204,12 @@ namespace ArchivSector_OD
             ConfigService.Save(config);
             MessageText.Text = "Saved.";
         }
+
+        // Windows' "Copy as path" wraps paths in quotes ("C:\...\tool.exe"),
+        // and a quoted path never matches a real file, so the app would
+        // quietly ignore it and fall back to auto-detect. Strip them.
+        private static string CleanPath(string text) =>
+            text.Trim().Trim('"').Trim();
 
         private void CancelButton_Click(object sender, RoutedEventArgs e)
         {
