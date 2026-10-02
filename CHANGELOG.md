@@ -4,6 +4,13 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v2.0.1 - 2026-10-01
+
+### 🐛 Fixed
+* Tool paths pasted into Settings with quotation marks around them (which Windows adds when you use "Copy as path", e.g. `"C:\redumper\redumper.exe"`) were quietly ignored, so the app fell back to searching the usual install locations instead. The quotes are now removed when you click Save Preferences, for the output folder and all four tool paths.
+
+---
+
 ## v2.0 - 2026-09-29
 
 ### 🔖 Version
