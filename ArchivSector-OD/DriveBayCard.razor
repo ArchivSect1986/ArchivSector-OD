@@ -57,6 +57,12 @@
    folder, every file in it, the .cue sheet's file references, and the
    History record.
 
+   Original Xbox / Xbox 360 discs can't be identified before a dump
+   (Windows can't see their game files), so after a game dump
+   ApplyRedumperLogDetection() reads Redumper's log for its "XGD
+   detected (version: N)" line, records the console, and moves a dump
+   that landed in Games\General_Games into Games\<console>.
+
    Blu-ray Full Backup has an automatic ImgBurn stage 2 when ImgBurn
    is available. DVD's raw ISO dump falls back to ImgBurn when
    Redumper isn't found. *@
@@ -96,9 +102,9 @@
             {
                 <text> • @AacsVersion</text>
             }
-            @if (MediaPresent && !string.IsNullOrEmpty(GameSystem))
+            @if (MediaPresent && !string.IsNullOrEmpty(EffectiveGameSystem))
             {
-                <text> • @GameSystem</text>
+                <text> • @EffectiveGameSystem</text>
             }
             @if (MediaPresent && !string.IsNullOrEmpty(Serial))
             {
@@ -535,6 +541,13 @@
     private string? lastGameName = null;   // name its files currently use
     private string? lastGameIso = null;    // its .iso path
 
+    // Console found in Redumper's log after a dump (Xbox discs, which
+    // Windows can't identify beforehand). GameSystem from the disc's
+    // own files wins when there is one.
+    private string? logGameSystem = null;
+    private string EffectiveGameSystem =>
+        !string.IsNullOrWhiteSpace(GameSystem) ? GameSystem : logGameSystem ?? "";
+
     private List<string> logLines = new();
     private bool showLog = false;
 
@@ -744,7 +757,7 @@
             // Game dumps record the detected console (e.g. "PlayStation 2")
             // as their System, like the Python app did, so History's
             // per-system stats count PS1/PS2/PS3 separately.
-            System = Category == DiscCategory.Game && !string.IsNullOrWhiteSpace(GameSystem) ? GameSystem : operation,
+            System = Category == DiscCategory.Game && !string.IsNullOrWhiteSpace(EffectiveGameSystem) ? EffectiveGameSystem : operation,
             Serial = Serial,
             AacsVersion = AacsVersion,
             OutputPath = outputPath,
@@ -806,6 +819,96 @@
         var m = System.Text.RegularExpressions.Regex.Match(FormatLabel ?? "", @"\b(BD|DVD)-\d+\b",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         return m.Success ? m.Value.ToUpperInvariant() : (isBd ? "BD" : "DVD");
+    }
+
+    // ---- Console detection from Redumper's log ----
+
+    // Original Xbox and Xbox 360 discs hide their game files from
+    // Windows, so they can't be identified before the dump. Redumper
+    // can read them on a drive that supports it (e.g. OmniDrive
+    // firmware) and writes a line like
+    //   omnidrive: XGD detected (version: 2, security sector: incomplete)
+    // to "<name>.log". XGD version 1 = Original Xbox, 2 or 3 = Xbox 360.
+    private static readonly System.Text.RegularExpressions.Regex XgdRegex =
+        new(@"XGD detected \(version:\s*(\d+)(?:,\s*security sector:\s*([a-z]+))?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    // After a successful game dump: if the console wasn't known, read
+    // Redumper's log. When it names an Xbox console, record it, and if
+    // the dump landed in Games\General_Games (no bay label), move it
+    // into Games\<console> instead.
+    private void ApplyRedumperLogDetection(AppConfig config, string operationLabel)
+    {
+        if (!string.IsNullOrWhiteSpace(GameSystem)) return;
+        if (lastGameFolder is null || lastGameName is null) return;
+
+        string logText;
+        try
+        {
+            var logPath = Path.Combine(lastGameFolder, $"{lastGameName}.log");
+            if (!File.Exists(logPath)) return;
+            logText = File.ReadAllText(logPath);
+        }
+        catch { return; }
+
+        var matches = XgdRegex.Matches(logText);
+        if (matches.Count == 0) return;
+        var m = matches[matches.Count - 1]; // newest run in the log
+
+        var system = m.Groups[1].Value == "1" ? "Original Xbox" : "Xbox 360";
+        logGameSystem = system;
+        AddLog($"{operationLabel}: Redumper identified this as an {system} disc (XGD{m.Groups[1].Value}).");
+
+        if (m.Groups[2].Success && !m.Groups[2].Value.Equals("complete", StringComparison.OrdinalIgnoreCase))
+            AddLog($"[NOTE] Redumper reports the Xbox security sector as \"{m.Groups[2].Value}\" -- the game data is dumped, but this dump may not match Redump's database.");
+
+        // Only re-sort dumps that went to General_Games because the
+        // console wasn't known. A bay label means the user chose the
+        // folder, and with Auto-categorize off there are no console
+        // folders at all.
+        if (!config.AutoCategorize || !string.IsNullOrWhiteSpace(customLabel)) return;
+
+        var generalDir = Path.GetDirectoryName(lastGameFolder);
+        if (generalDir is null || !Path.GetFileName(generalDir).Equals("General_Games", StringComparison.OrdinalIgnoreCase)) return;
+        var gamesDir = Path.GetDirectoryName(generalDir);
+        if (gamesDir is null) return;
+
+        var consoleDir = Path.Combine(gamesDir, FileNamingService.SanitizeFilename(system));
+        var folderName = Path.GetFileName(lastGameFolder);
+        var target = Path.Combine(consoleDir, folderName);
+        int n = 2;
+        while (Directory.Exists(target) || File.Exists(target))
+        {
+            target = Path.Combine(consoleDir, $"{folderName} ({n})");
+            n++;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(consoleDir);
+            Directory.Move(lastGameFolder, target);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Couldn't move the dump into {consoleDir}: {ex.Message} -- it stays in General_Games.");
+            return;
+        }
+
+        if (lastGameIso is not null)
+            lastGameIso = Path.Combine(target, Path.GetFileName(lastGameIso));
+        lastGameFolder = target;
+        if (redumperResult is not null && redumperResult.Success)
+            redumperResult.IsoPath = lastGameIso;
+
+        // Leave General_Games behind only if it's now empty.
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(generalDir).Any())
+                Directory.Delete(generalDir);
+        }
+        catch { /* not important */ }
+
+        AddLog($"Moved to {target}");
     }
 
     // ---- Game disc naming ----
@@ -1400,6 +1503,8 @@
                     lastGameName = isoName;
                     lastGameIso = redumperResult.IsoPath;
 
+                    ApplyRedumperLogDetection(config, operationLabel);
+
                     var wanted = CleanGameName(gameNameDraft);
                     if (wanted is not null && wanted != isoName)
                     {
@@ -1840,7 +1945,9 @@
         {
             trayIsOpen = false;
 
-            // A new disc starts with a blank name box.
+            // A new disc starts with a blank name box and no console
+            // carried over from the last disc's Redumper log.
+            logGameSystem = null;
             gameNameDraft = "";
             gameNameNote = null;
             lastGameFolder = null;

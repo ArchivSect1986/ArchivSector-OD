@@ -1,8 +1,8 @@
-🌟 [RELEASE] ArchivSector-OD v2.1 | Optical Disc Ripping & Archival Control Center 🌟
+🌟 [RELEASE] ArchivSector-OD v2.2 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v2.1**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v2.2**! Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -21,9 +21,24 @@ handful of improvements on top.
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
 
-Updating from v2.0? Just replace your old folder with this one. Your
+Updating from v2.0 or v2.1? Just replace your old folder with this one. Your
 settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
+
+========================================================================
+🎮 NEW IN V2.2 (since v2.1)
+========================================================================
+
+• Original Xbox and Xbox 360 discs are now identified after the dump,
+  from Redumper's log. Windows can't see their game files, so the bay
+  can't show the console beforehand -- but once the dump finishes, the
+  console is shown on the bay and recorded in History, and a dump that
+  went into \Games\General_Games is moved into \Games\Original Xbox or
+  \Games\Xbox 360. This needs a drive Redumper can read Xbox discs on
+  (e.g. one with OmniDrive firmware); on other drives they still go to
+  General_Games.
+• If Redumper reports the Xbox security sector as incomplete, the log
+  says so: the game data is dumped, but the dump may not match Redump.
 
 ========================================================================
 🔧 NEW IN V2.1 (since v2.0)
@@ -31,10 +46,7 @@ separately in your AppData folder.
 
 • PlayStation 1/2/3 game discs are identified automatically. The
   console and serial number show on the drive bay, and dumps go into
-  \Games\<console> unless the bay has its own label. (Original Xbox and
-  Xbox 360 discs usually can't be identified on a standard PC drive,
-  because Windows can't see their game files -- name the bay "Xbox 360"
-  to send them to their own folder.)
+  \Games\<console> unless the bay has its own label.
 • Name your game dumps: a "File name" box on the drive bay. Type a
   name before the dump, change it while it's running (even if Batch
   Queue or Unattended Mode started it), or rename it after it's done.
@@ -167,8 +179,9 @@ separately in your AppData folder.
   automatically, and their serial number is recorded. Rename a drive
   bay (e.g. "Xbox 360" or "Retro") and its games go into a folder with
   that name instead. Unrecognized discs go to \Games\General_Games.
-  Original Xbox and Xbox 360 discs usually show up as unrecognized on a
-  standard PC drive, since Windows can't see their game files.
+  Original Xbox and Xbox 360 discs are identified once the dump
+  finishes (from Redumper's log, on a drive that can read them, e.g.
+  OmniDrive) and moved into their own console folder.
 • File name box on the drive bay: name a game dump before, during, or
   after it rips.
 

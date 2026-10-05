@@ -4,6 +4,14 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v2.2 - 2026-10-05
+
+### ✨ Added
+* Original Xbox and Xbox 360 discs are now identified after the dump. Windows can't see their game files, so they can't be identified beforehand, but Redumper can read them on a supported drive (e.g. OmniDrive firmware) and writes `XGD detected (version: N)` to its log. After each game dump the app reads that line (XGD1 = Original Xbox, XGD2/XGD3 = Xbox 360), shows the console on the drive bay, records it in History, and moves a dump that landed in `Games\General_Games\` into `Games\Original Xbox\` or `Games\Xbox 360\`. Dumps in a folder chosen by a bay label, or with Auto-categorize off, are left where they are.
+* When Redumper reports an Xbox security sector as incomplete, the log notes that the game data was dumped but the dump may not match Redump's database.
+
+---
+
 ## v2.1 - 2026-10-01
 
 ### ✨ Added
