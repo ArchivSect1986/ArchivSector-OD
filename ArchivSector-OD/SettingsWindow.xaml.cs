@@ -34,6 +34,7 @@ namespace ArchivSector_OD
             AutoEjectCheck.IsChecked = config.AutoEject;
             ToastCheck.IsChecked = config.ToastNotifications;
             SoundCheck.IsChecked = config.SoundAlerts;
+            StartupUpdateCheck.IsChecked = config.CheckForUpdatesOnStartup;
 
             AutoFetchArtCheck.IsChecked = config.AutoFetchMetadataArt;
             BatchQueueCheck.IsChecked = config.BatchQueueMode;
@@ -164,14 +165,8 @@ namespace ArchivSector_OD
 
             if (result.Status == UpdateCheckService.UpdateStatus.UpdateAvailable)
             {
-                var open = MessageBox.Show(this,
-                    $"{result.Message}\n\nOpen the download page?",
-                    "Update Available", MessageBoxButton.YesNo, MessageBoxImage.Information);
-                if (open == MessageBoxResult.Yes)
-                {
-                    try { Process.Start(new ProcessStartInfo(result.ReleaseUrl) { UseShellExecute = true }); }
-                    catch { /* no browser available -- the status line still shows the result */ }
-                }
+                // Asks first; on Yes it downloads, installs and restarts.
+                await UpdateInstallService.OfferAndRunAsync(result, this);
             }
         }
 
@@ -195,6 +190,7 @@ namespace ArchivSector_OD
             config.AutoEject = AutoEjectCheck.IsChecked ?? true;
             config.ToastNotifications = ToastCheck.IsChecked ?? true;
             config.SoundAlerts = SoundCheck.IsChecked ?? true;
+            config.CheckForUpdatesOnStartup = StartupUpdateCheck.IsChecked ?? true;
 
             config.AutoFetchMetadataArt = AutoFetchArtCheck.IsChecked ?? true;
             config.BatchQueueMode = BatchQueueCheck.IsChecked ?? false;

@@ -4,6 +4,22 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v2.3 - 2026-10-05
+
+### ✨ Added
+* PlayStation 4 discs are recognized as game discs (a `PS4` folder next to `app` or `bd`). Before, they were classified as Unknown and every rip button stayed disabled. The bay shows "PlayStation 4", the serial from the `app\<serial>` folder (e.g. `CUSA-36842`) and the real game name from `bd\param.sfo`, the ISO is named after the game, and dumps go into `Games\PlayStation 4\`.
+* Xbox One discs are recognized as game discs (an `MSXC` folder). The real game name is read from `MSXC\Metadata\catalog.js`, with " (Disc N)" added for multi-disc games so each disc gets its own name, and dumps go into `Games\Xbox One\`. Xbox One discs have no serial like PlayStation discs, so that stays blank. Xbox Series X|S discs likely use the same layout and would show as Xbox One.
+* PS4 and Xbox One dumps are encrypted exact copies of the disc, for preservation and Redump verification; they can't be played or installed directly. The README says so.
+
+* **One-click updates.** The app checks GitHub for a newer release when it starts (a few seconds after opening, silently if there's nothing new or no internet). If there is one, it asks; on **Yes** it downloads the release zip, checks it against GitHub's SHA-256 checksum, closes, installs the new files and reopens by itself. Check for Updates in Settings offers the same. It won't update while a rip or checksum is running, backs up the app folder first and restores it if installing fails, and leaves settings, history and artwork (in `%AppData%`) untouched. If the app's folder can't be written to (e.g. Program Files), it offers the download page instead. Turn the startup check off with "Check for updates when the app starts" in Settings. Updating *to* v2.3 is still done by hand, since older versions don't have this.
+* Original Xbox discs are recognized as game discs before the dump. On a PC drive they only show a small video partition (a `VIDEO_TS` folder), so they were taken for DVD movies. The app now spots the factory timestamp volume label they use (month + 11 digits, e.g. `SEP13011042072`) and shows "Original Xbox" right away; a disc with only a tiny `VIDEO_TS` (under 50 MB) is treated as a game disc and identified from Redumper's log after the dump.
+
+### 🐛 Fixed
+* An Xbox disc dumped through the DVD menu's Raw Sector ISO option is now recognized from Redumper's log ("XGD detected") and moved from `DVD_Movies` into `Games\Original Xbox\` or `Games\Xbox 360\`.
+* Saved artwork was looked up by the disc's volume label, so the last game saved under a generic label such as `DVD_ROM` showed its cover for every disc with that label. Discs with a generic label (`DVD_ROM`, `PS4VOLUME`, `XBOX360` and similar) now look up saved art by their serial, or skip it when there's no serial.
+
+---
+
 ## v2.2 - 2026-10-05
 
 ### ✨ Added

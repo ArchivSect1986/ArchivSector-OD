@@ -6,10 +6,11 @@ using System.Text.RegularExpressions;
 namespace ArchivSector_OD
 {
     // "Check for Updates": asks GitHub for the latest published release
-    // and compares its tag (e.g. "v2.1") to this build's version. Only
-    // reports -- never downloads or replaces files itself. A self-updating
-    // exe is a lot more moving parts, and antivirus tools often flag apps
-    // that rewrite their own files.
+    // and compares its tag (e.g. "v2.1") to this build's version. It also
+    // picks out the release's .zip download (and its SHA-256 checksum,
+    // when GitHub provides one) so UpdateInstallService can install it.
+    // Runs automatically at startup (Settings can turn that off) and from
+    // the Settings window's Check for Updates button.
     //
     // This build's version comes from <Version> in the .csproj, so that
     // one line is the single place to bump it for a new release -- the
@@ -45,6 +46,13 @@ namespace ArchivSector_OD
             public string LatestVersion = "";
             public string ReleaseUrl = "";
             public string Message = "";
+
+            // The release's .zip download, for installing it in place.
+            // Empty when the release has no .zip attached.
+            public string DownloadUrl = "";
+            public string AssetName = "";
+            public long AssetSize;
+            public string Sha256 = ""; // lowercase hex, or "" if GitHub gave none
         }
 
         public static async Task<UpdateResult> CheckAsync()
@@ -92,13 +100,15 @@ namespace ArchivSector_OD
 
                 if (latest > CurrentVersion)
                 {
-                    return new UpdateResult
+                    var result = new UpdateResult
                     {
                         Status = UpdateStatus.UpdateAvailable,
                         LatestVersion = Display(latest),
                         ReleaseUrl = url,
                         Message = $"Version {Display(latest)} is available (you have {CurrentVersionDisplay}).",
                     };
+                    ReadZipAsset(root, result);
+                    return result;
                 }
 
                 return new UpdateResult
@@ -116,6 +126,27 @@ namespace ArchivSector_OD
                     Status = UpdateStatus.Failed,
                     Message = $"Couldn't check for updates: {ex.Message}",
                 };
+            }
+        }
+
+        // Finds the first .zip attached to the release. GitHub lists a
+        // "digest" ("sha256:<hex>") for uploaded files, used to check the
+        // download wasn't corrupted.
+        private static void ReadZipAsset(JsonElement release, UpdateResult result)
+        {
+            if (!release.TryGetProperty("assets", out var assets) || assets.ValueKind != JsonValueKind.Array) return;
+            foreach (var a in assets.EnumerateArray())
+            {
+                var name = a.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
+
+                result.AssetName = name;
+                result.DownloadUrl = a.TryGetProperty("browser_download_url", out var d) ? d.GetString() ?? "" : "";
+                result.AssetSize = a.TryGetProperty("size", out var sz) && sz.TryGetInt64(out var len) ? len : 0;
+                var digest = a.TryGetProperty("digest", out var dg) && dg.ValueKind == JsonValueKind.String ? dg.GetString() ?? "" : "";
+                if (digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                    result.Sha256 = digest.Substring(7).Trim().ToLowerInvariant();
+                return;
             }
         }
 

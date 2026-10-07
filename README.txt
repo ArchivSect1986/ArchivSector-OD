@@ -1,8 +1,8 @@
-🌟 [RELEASE] ArchivSector-OD v2.2 | Optical Disc Ripping & Archival Control Center 🌟
+🌟 [RELEASE] ArchivSector-OD v2.3 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v2.2**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v2.3**! Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -21,9 +21,35 @@ handful of improvements on top.
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
 
-Updating from v2.0 or v2.1? Just replace your old folder with this one. Your
+Updating from an older v2 version? Just replace your old folder with this one. Your
 settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
+
+========================================================================
+🕹️ NEW IN V2.3 (since v2.2)
+========================================================================
+
+• PlayStation 4 discs are recognized as game discs (before, every rip
+  button stayed greyed out for them). The bay shows the real game name,
+  "PlayStation 4" and the serial (e.g. CUSA-36842), the ISO is named
+  after the game, and dumps go into \Games\PlayStation 4.
+• Xbox One discs are recognized too, with the real game name read from
+  the disc. Multi-disc games get "(Disc 1)", "(Disc 2)" added so the
+  discs don't overwrite each other. Dumps go into \Games\Xbox One.
+• Original Xbox discs are recognized as game discs right away (before,
+  they showed up as DVD movies), and an Xbox disc dumped through the
+  DVD menu is moved to the right Games folder afterwards.
+• One-click updates: the app checks for a new version when it starts
+  and, if you say yes, downloads it, installs it and restarts by
+  itself. Your settings and history are kept. You can turn the check
+  off in Settings. (This works from v2.3 on -- getting to v2.3 is still
+  a manual download.)
+• Note: PS4 and Xbox One dumps are encrypted exact copies of the disc,
+  for preservation and Redump verification. They can't be played or
+  installed directly.
+• Fixed: saved artwork was looked up by the disc's label, so one game's
+  cover showed for every disc with a generic label like "DVD_ROM". Discs
+  with a generic label now use their serial instead, or no saved art.
 
 ========================================================================
 🎮 NEW IN V2.2 (since v2.1)
@@ -175,8 +201,12 @@ separately in your AppData folder.
 
 🎮 Game Disc Archival
 • Dedicated Redumper-driven pipeline for game discs, saved into
-  \Games\<console> — PlayStation 1/2/3 discs are recognized
-  automatically, and their serial number is recorded. Rename a drive
+  \Games\<console> — PlayStation 1/2/3/4 and Xbox One discs are
+  recognized automatically, with the serial number recorded for
+  PlayStation and the real game name read from PS3, PS4 and Xbox One
+  discs. PS4 and Xbox One dumps are encrypted exact copies for
+  preservation and Redump verification -- they can't be played or
+  installed directly. Rename a drive
   bay (e.g. "Xbox 360" or "Retro") and its games go into a folder with
   that name instead. Unrecognized discs go to \Games\General_Games.
   Original Xbox and Xbox 360 discs are identified once the dump
@@ -209,8 +239,9 @@ separately in your AppData folder.
   Batch Sync live in a collapsible "Extra Features" section.
 • Redump DAT import, config folder shortcut, and a write diagnostic for
   tracking down antivirus/sandbox problems saving files.
-• Check for Updates: asks GitHub whether a newer version is out and
-  offers to open its download page.
+• Check for Updates (also automatic at startup, can be turned off):
+  asks GitHub whether a newer version is out and offers to download,
+  install and restart into it with one click.
 
 ========================================================================
 📁 PACKAGE CONTENTS & FILE EXPLANATIONS
@@ -275,6 +306,8 @@ APIs (tray eject, registry, system sounds), so it only runs on Windows.
 • Blu-ray (BD-25 / BD-50) ------------------ (1:1 Decrypt or Movie-Only MKV)
 • 4K UHD Blu-ray (LibreDrive-detected) ----- (1:1 Decrypt or Movie-Only MKV)
 • Game Discs (PC / console, via Redumper) — (1:1 archival dump)
+  Recognized: PS1, PS2, PS3, PS4, Xbox One; Original Xbox and Xbox 360
+  after the dump (drive must be able to read them, e.g. OmniDrive)
 
 ========================================================================
 🔮 PLANNED — NOT YET BUILT

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
@@ -150,6 +151,92 @@ namespace ArchivSector_OD
             return result;
         }
 
+        // A PS3 PARAM.SFO starts with the "\0PSF" signature, but a PS4
+        // disc's bd\param.sfo has an extra header in front of it. Find
+        // the signature and return the bytes from there on, so ParseSfo
+        // reads both. Returns the blob unchanged if it's already at the
+        // start or isn't found at all.
+        private static byte[] SkipToPsfHeader(byte[] blob)
+        {
+            for (int i = 0; i + 4 <= blob.Length; i++)
+            {
+                if (blob[i] == 0x00 && blob[i + 1] == (byte)'P' && blob[i + 2] == (byte)'S' && blob[i + 3] == (byte)'F')
+                    return i == 0 ? blob : blob[i..];
+            }
+            return blob;
+        }
+
+        // Xbox One discs list their game in MSXC\Metadata\catalog.js, a
+        // JSON file: packages[0].titles is a list of { locale, title }.
+        // Picks en-US, then "default", then the first one listed. When
+        // the game spans several discs (discCount > 1), adds
+        // " (Disc N)" so disc 2 doesn't get the same name as disc 1.
+        public static string? ExtractXboxOneTitle(string discRoot)
+        {
+            var catalogPath = Path.Combine(discRoot, "MSXC", "Metadata", "catalog.js");
+            if (!File.Exists(catalogPath)) return null;
+
+            try
+            {
+                var json = ReadTextAnyEncoding(catalogPath).Trim('\0', '﻿', ' ', '\r', '\n', '\t');
+                using var doc = JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("packages", out var packages) || packages.ValueKind != JsonValueKind.Array
+                    || packages.GetArrayLength() == 0)
+                    return null;
+                if (!packages[0].TryGetProperty("titles", out var titles) || titles.ValueKind != JsonValueKind.Array)
+                    return null;
+
+                string? enUs = null, fallback = null, first = null;
+                foreach (var t in titles.EnumerateArray())
+                {
+                    var locale = t.TryGetProperty("locale", out var l) ? l.GetString() : null;
+                    var title = t.TryGetProperty("title", out var v) ? v.GetString()?.Trim() : null;
+                    if (string.IsNullOrWhiteSpace(title)) continue;
+
+                    first ??= title;
+                    if (string.Equals(locale, "en-US", StringComparison.OrdinalIgnoreCase)) enUs = title;
+                    else if (string.Equals(locale, "default", StringComparison.OrdinalIgnoreCase)) fallback = title;
+                }
+
+                var name = enUs ?? fallback ?? first;
+                if (name is null) return null;
+
+                if (root.TryGetProperty("discCount", out var countEl) && countEl.TryGetInt32(out var count) && count > 1
+                    && root.TryGetProperty("discNumber", out var numEl) && numEl.TryGetInt32(out var number))
+                    name = $"{name} (Disc {number})";
+
+                return name;
+            }
+            catch
+            {
+                // Unreadable or unexpected JSON -- caller keeps the volume label.
+                return null;
+            }
+        }
+
+        // catalog.js on Xbox One discs is stored as UTF-16 (two bytes
+        // per character), sometimes without the marker bytes that let
+        // File.ReadAllText notice. Reads it as UTF-16 when it has that
+        // marker or looks like it (every other byte zero), else as
+        // UTF-8.
+        private static string ReadTextAnyEncoding(string path)
+        {
+            var bytes = File.ReadAllBytes(path);
+            if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+                return System.Text.Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+                return System.Text.Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+                return System.Text.Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+            if (bytes.Length >= 4 && bytes[1] == 0 && bytes[3] == 0 && bytes[0] != 0)
+                return System.Text.Encoding.Unicode.GetString(bytes);
+            if (bytes.Length >= 4 && bytes[0] == 0 && bytes[2] == 0 && bytes[1] != 0)
+                return System.Text.Encoding.BigEndianUnicode.GetString(bytes);
+            return System.Text.Encoding.UTF8.GetString(bytes).TrimEnd('\0');
+        }
+
         public class RealTitleResult
         {
             public string? Title;
@@ -188,12 +275,16 @@ namespace ArchivSector_OD
             {
                 result.GameSystem = DiscDetectionService.DetectGameSystem(discRoot);
 
+                // PS3 keeps PARAM.SFO in PS3_GAME; PS4 discs keep one in
+                // "bd" (same file format, also with TITLE and TITLE_ID).
                 var sfoPath = Path.Combine(discRoot, "PS3_GAME", "PARAM.SFO");
+                if (!File.Exists(sfoPath))
+                    sfoPath = Path.Combine(discRoot, "bd", "param.sfo");
                 if (File.Exists(sfoPath))
                 {
                     try
                     {
-                        var blob = File.ReadAllBytes(sfoPath);
+                        var blob = SkipToPsfHeader(File.ReadAllBytes(sfoPath));
                         var sfo = ParseSfo(blob);
                         if (sfo.TryGetValue("TITLE", out var titleVal) && !string.IsNullOrWhiteSpace(titleVal.Text))
                             result.Title = titleVal.Text;
@@ -207,6 +298,30 @@ namespace ArchivSector_OD
                     catch
                     {
                         // Best-effort -- leave Title null, caller keeps the volume label.
+                    }
+                }
+
+                if (result.GameSystem == "Xbox One")
+                    result.Title = ExtractXboxOneTitle(discRoot);
+
+                // PS4 fallback: the game sits in app\<serial>, e.g.
+                // app\CUSA36842 -> "CUSA-36842".
+                var appDir = Path.Combine(discRoot, "app");
+                if (result.Serial is null && result.GameSystem == "PlayStation 4" && Directory.Exists(appDir))
+                {
+                    try
+                    {
+                        foreach (var dir in Directory.GetDirectories(appDir))
+                        {
+                            var m = Regex.Match(Path.GetFileName(dir), @"^([A-Z]{4})(\d{5})$", RegexOptions.IgnoreCase);
+                            if (!m.Success) continue;
+                            result.Serial = $"{m.Groups[1].Value.ToUpperInvariant()}-{m.Groups[2].Value}";
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        // Best-effort -- leave Serial null.
                     }
                 }
 

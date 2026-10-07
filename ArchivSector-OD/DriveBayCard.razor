@@ -491,7 +491,14 @@
     private string? selectedMode = null;
     private bool previousMediaPresent = false;
     private bool isResolving = false;
-    private bool isRunning = false;
+    // isRunning / isVerifying also tell RipActivity, so an update never
+    // closes the app in the middle of a rip or checksum.
+    private bool _isRunning = false;
+    private bool isRunning
+    {
+        get => _isRunning;
+        set { _isRunning = value; RipActivity.Set(DriveLetter, "rip", value); }
+    }
     private string runningLabel = "";
     private string runningKind = "makemkv";
     private bool showModeDialog = false;
@@ -508,7 +515,12 @@
     private string? lastOutputFolder = null;
     private string? trimMessage = null;
 
-    private bool isVerifying = false;
+    private bool _isVerifying = false;
+    private bool isVerifying
+    {
+        get => _isVerifying;
+        set { _isVerifying = value; RipActivity.Set(DriveLetter, "verify", value); }
+    }
     private string? verificationMessage = null;
     private string verificationColor = "var(--text-muted)";
     private string lastSha1 = "";
@@ -545,6 +557,31 @@
     // Windows can't identify beforehand). GameSystem from the disc's
     // own files wins when there is one.
     private string? logGameSystem = null;
+
+    // Disc labels that many different discs share. Saved artwork isn't
+    // looked up by these, or the last game saved under "DVD_ROM" would
+    // show for every disc with that label.
+    private static readonly HashSet<string> GenericLabels = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "DVD_ROM", "DVDROM", "DVD-ROM", "DVD_VIDEO", "DVDVIDEO", "DVDVOLUME", "DVD",
+        "BD_ROM", "BDROM", "BD-ROM", "BDVIDEO", "BD_VIDEO", "BLURAY", "BLU-RAY",
+        "CD_ROM", "CDROM", "CD-ROM", "VIDEO_TS", "PS4VOLUME", "PS5VOLUME",
+        "XBOX360", "XBOX 360", "XBOX", "XBOXONE", "NO NAME", "NONAME", "UNTITLED", "UNKNOWN",
+    };
+
+    private static bool IsGenericLabel(string? label) =>
+        string.IsNullOrWhiteSpace(label) || GenericLabels.Contains(label.Trim());
+
+    // Key for looking saved art up: the disc's name, or its serial when
+    // the name is generic, or nothing (no lookup) when neither is usable.
+    private string? ArtCacheKey =>
+        !IsGenericLabel(VolumeTitle) ? VolumeTitle
+        : !string.IsNullOrWhiteSpace(Serial) ? Serial
+        : null;
+
+    // Where to save art: the lookup key, or the label as a last resort
+    // (saved, but never auto-loaded for another disc).
+    private string ArtCacheName => ArtCacheKey ?? VolumeTitle;
     private string EffectiveGameSystem =>
         !string.IsNullOrWhiteSpace(GameSystem) ? GameSystem : logGameSystem ?? "";
 
@@ -680,7 +717,7 @@
             }
 
             var top = results[0];
-            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(VolumeTitle, top);
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(ArtCacheName, top);
             LoadCoverDataUri();
             AddLog(hasCachedCover
                 ? $"Auto-fetch: saved \"{top.Title}\" ({top.Source})"
@@ -715,9 +752,9 @@
         }
 
         AddLog($"Metadata search: saving \"{chosen.Title}\" ({chosen.Source}) to art cache");
-        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(VolumeTitle, chosen);
+        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(ArtCacheName, chosen);
         LoadCoverDataUri();
-        AddLog($"Metadata saved: {MetadataFetchService.GetArtCacheDir(VolumeTitle)}");
+        AddLog($"Metadata saved: {MetadataFetchService.GetArtCacheDir(ArtCacheName)}");
         StateHasChanged();
     }
 
@@ -726,7 +763,7 @@
         if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
         try
         {
-            var dir = MetadataFetchService.GetArtCacheDir(VolumeTitle);
+            var dir = MetadataFetchService.GetArtCacheDir(ArtCacheName);
             if (Directory.Exists(dir))
                 Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
         }
@@ -757,7 +794,7 @@
             // Game dumps record the detected console (e.g. "PlayStation 2")
             // as their System, like the Python app did, so History's
             // per-system stats count PS1/PS2/PS3 separately.
-            System = Category == DiscCategory.Game && !string.IsNullOrWhiteSpace(EffectiveGameSystem) ? EffectiveGameSystem : operation,
+            System = !string.IsNullOrWhiteSpace(EffectiveGameSystem) ? EffectiveGameSystem : operation,
             Serial = Serial,
             AacsVersion = AacsVersion,
             OutputPath = outputPath,
@@ -908,6 +945,62 @@
         }
         catch { /* not important */ }
 
+        AddLog($"Moved to {target}");
+    }
+
+    // Backup for an Xbox disc dumped through the DVD menu's Raw Sector
+    // ISO option: if Redumper's log has an "XGD detected" line, record
+    // the console and (with Auto-categorize on) move the dump from
+    // DVD_Movies into Games\<console> -- or the bay label's folder.
+    private void MoveXboxDumpOutOfDvd(AppConfig config, string outputBase, string outputFolder, string isoName, string operationLabel)
+    {
+        string logText;
+        try
+        {
+            var logPath = Path.Combine(outputFolder, $"{isoName}.log");
+            if (!File.Exists(logPath)) return;
+            logText = File.ReadAllText(logPath);
+        }
+        catch { return; }
+
+        var matches = XgdRegex.Matches(logText);
+        if (matches.Count == 0) return;
+        var m = matches[matches.Count - 1];
+
+        var system = m.Groups[1].Value == "1" ? "Original Xbox" : "Xbox 360";
+        logGameSystem = system;
+        AddLog($"{operationLabel}: Redumper identified this as an {system} disc (XGD{m.Groups[1].Value}), not a DVD movie.");
+        if (m.Groups[2].Success && !m.Groups[2].Value.Equals("complete", StringComparison.OrdinalIgnoreCase))
+            AddLog($"[NOTE] Redumper reports the Xbox security sector as \"{m.Groups[2].Value}\" -- the game data is dumped, but this dump may not match Redump's database.");
+
+        if (!config.AutoCategorize) return;
+
+        var sysFolder = !string.IsNullOrWhiteSpace(customLabel)
+            ? FileNamingService.SanitizeFilename(customLabel)
+            : FileNamingService.SanitizeFilename(system);
+        var consoleDir = Path.Combine(outputBase, CategoryFolder(config, "Games"), sysFolder);
+        var folderName = Path.GetFileName(outputFolder);
+        var target = Path.Combine(consoleDir, folderName);
+        int n = 2;
+        while (Directory.Exists(target) || File.Exists(target))
+        {
+            target = Path.Combine(consoleDir, $"{folderName} ({n})");
+            n++;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(consoleDir);
+            Directory.Move(outputFolder, target);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Couldn't move the dump into {consoleDir}: {ex.Message} -- it stays where it is.");
+            return;
+        }
+
+        if (redumperResult is not null && redumperResult.IsoPath is not null)
+            redumperResult.IsoPath = Path.Combine(target, Path.GetFileName(redumperResult.IsoPath));
         AddLog($"Moved to {target}");
     }
 
@@ -1517,6 +1610,13 @@
                         gameNameDraft = isoName;
                     }
                 }
+                else if (folderPrefix == "DVD_RawISO")
+                {
+                    // An Xbox disc picked as a "DVD" (its video partition
+                    // looks like one) -- if Redumper's log says XGD, file
+                    // it with the games instead of the movies.
+                    MoveXboxDumpOutOfDvd(config, outputBase, outputFolder, isoName, operationLabel);
+                }
 
                 lastOutputFolder = redumperResult.IsoPath;
                 await VerifyOutput(redumperResult.IsoPath);
@@ -1956,7 +2056,10 @@
 
             if (!string.IsNullOrWhiteSpace(VolumeTitle))
             {
-                cachedArt = MetadataFetchService.GetCachedArt(VolumeTitle);
+                // Generic labels (DVD_ROM, PS4VOLUME...) are shared by many
+                // discs, so saved art is only loaded under a real name or
+                // a serial -- otherwise one game's cover showed for all.
+                cachedArt = ArtCacheKey is null ? null : MetadataFetchService.GetCachedArt(ArtCacheKey);
                 LoadCoverDataUri();
 
                 if (!hasCachedCover && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd))
@@ -1974,5 +2077,6 @@
     {
         StopProgressTimer();
         BatchSyncService.StateChanged -= OnBatchSyncStateChanged;
+        RipActivity.ClearDrive(DriveLetter);
     }
 }

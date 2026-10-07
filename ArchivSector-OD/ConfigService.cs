@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Text.Json;
 
 namespace ArchivSector_OD
@@ -24,6 +24,11 @@ namespace ArchivSector_OD
         // Ported from the Python app's "sound_alerts" (on by default):
         // a system beep when a rip completes successfully.
         public bool SoundAlerts { get; set; } = true;
+
+        // Ask GitHub for a newer release each time the app starts, and
+        // offer to install it (Settings -> "Check for updates when the
+        // app starts").
+        public bool CheckForUpdatesOnStartup { get; set; } = true;
 
         public bool AutoFetchMetadataArt { get; set; } = true;
         public bool BatchQueueMode { get; set; } = false;

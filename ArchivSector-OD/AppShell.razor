@@ -156,6 +156,26 @@
 
     private void OnBatchSyncStateChanged() => InvokeAsync(StateHasChanged);
 
+    // Startup update check: a few seconds after the window appears, ask
+    // GitHub for a newer release and offer to install it. Silent when
+    // up to date or offline. Turned off in Settings with "Check for
+    // updates when the app starts".
+    private bool startupUpdateCheckDone = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || startupUpdateCheckDone) return;
+        startupUpdateCheckDone = true;
+
+        if (!ConfigService.Load().CheckForUpdatesOnStartup) return;
+
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        var result = await UpdateCheckService.CheckAsync();
+        if (result.Status != UpdateCheckService.UpdateStatus.UpdateAvailable) return;
+
+        await InvokeAsync(() => UpdateInstallService.OfferAndRunAsync(result, System.Windows.Application.Current.MainWindow));
+    }
+
     private void ToggleUnattendedMode()
     {
         config.UnattendedAutoStart = !config.UnattendedAutoStart;
