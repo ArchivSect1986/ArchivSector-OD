@@ -1,8 +1,8 @@
-🌟 [RELEASE] ArchivSector-OD v2.4 | Optical Disc Ripping & Archival Control Center 🌟
+🌟 [RELEASE] ArchivSector-OD v2.4.1 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v2.4**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v2.4.1**! Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -21,10 +21,22 @@ handful of improvements on top.
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
 
-Already on v2.3? The app offers v2.4 by itself when it starts -- just
+Already on v2.3 or later? The app offers v2.4.1 by itself when it starts -- just
 click Yes. Updating from an older v2 version? Just replace your old folder with this one. Your
 settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
+
+========================================================================
+🧹 NEW IN V2.4.1 (since v2.4)
+========================================================================
+
+• After a CD dump, the big raw files (.scram and .state, together about
+  the size of the disc) are deleted automatically once the .bin/.cue
+  are made. The small log files are kept.
+• A CD with damaged spots no longer just fails: the app re-reads the
+  damaged sectors (Redumper's refine step) and tries again. If it still
+  can't be read, it tells you and suggests cleaning the disc.
+• CD dump errors now show Redumper's actual error message.
 
 ========================================================================
 💿 NEW IN V2.4 (since v2.3)
