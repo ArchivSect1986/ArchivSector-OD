@@ -169,7 +169,7 @@
         }
     }
 
-    @if ((MediaPresent && Category == DiscCategory.Game) || lastGameFolder is not null)
+    @if (CanRawDump || lastGameFolder is not null)
     {
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
             <span class="bay-meta" style="margin: 0;">💾 File name:</span>
@@ -253,8 +253,8 @@
             📀 DVD Movie Disc (ISO Dump / Movie-Only MKV)
         </button>
         <button class="bay-btn game @(selectedMode == "Game Disc" ? "selected" : "")"
-                disabled="@(Category != DiscCategory.Game)"
-                title="@(Category != DiscCategory.Game ? "Insert a game disc to enable this" : "")"
+                disabled="@(!CanRawDump)"
+                title="@(!CanRawDump ? "Insert a game or data disc to enable this" : Category == DiscCategory.Unknown ? "Unrecognized disc (e.g. a PC game) -- dumps a raw image with Redumper" : "")"
                 @onclick='() => StartGated(() => RunRedumperDump("Game", "Game Disc", "Games"))'>
             🎮 Game Disc / Raw ISO (Redumper)
         </button>
@@ -477,6 +477,21 @@
     [Parameter]
     public string Serial { get; set; } = "";
 
+    // The 🎮 Game Disc / Raw ISO button (and its File name box) work for
+    // recognized game discs, music CDs, and any disc the app couldn't
+    // classify, such as PC game CDs/DVDs -- it's a plain Redumper dump.
+    // Unrecognized discs are never auto-started, only dumped on a click.
+    private bool CanRawDump =>
+        MediaPresent && (Category == DiscCategory.Game || Category == DiscCategory.Unknown || Category == DiscCategory.Audio);
+
+    // Music CDs go through the same Redumper dump (.bin/.cue per track),
+    // but into their own top-level Music_CDs folder, not Games.
+    private bool IsAudioDump => Category == DiscCategory.Audio || logAudioCd;
+
+    // Set when Redumper's log shows a disc that wasn't recognized beforehand
+    // is all audio tracks (a music CD) -- see MoveMusicCdFromLog.
+    private bool logAudioCd = false;
+
     private bool? OmnidriveCompatible => DriveHardwareService.CheckOmniDriveCompatibility(DriveModel);
     private bool omnidriveConfirmed = false;
     private bool libreDriveSeen = false;
@@ -566,7 +581,7 @@
         "DVD_ROM", "DVDROM", "DVD-ROM", "DVD_VIDEO", "DVDVIDEO", "DVDVOLUME", "DVD",
         "BD_ROM", "BDROM", "BD-ROM", "BDVIDEO", "BD_VIDEO", "BLURAY", "BLU-RAY",
         "CD_ROM", "CDROM", "CD-ROM", "VIDEO_TS", "PS4VOLUME", "PS5VOLUME",
-        "XBOX360", "XBOX 360", "XBOX", "XBOXONE", "NO NAME", "NONAME", "UNTITLED", "UNKNOWN",
+        "XBOX360", "XBOX 360", "XBOX", "XBOXONE", "AUDIO CD", "AUDIO_CD", "NO NAME", "NONAME", "UNTITLED", "UNKNOWN",
     };
 
     private static bool IsGenericLabel(string? label) =>
@@ -788,13 +803,16 @@
             DriveModel = DriveModel,
             // A game dump records the file name it was saved under, so a
             // name typed in the bay's name box shows up in History.
-            Title = Category == DiscCategory.Game && !string.IsNullOrEmpty(lastGameName)
+            Title = !string.IsNullOrEmpty(lastGameName)
                 ? lastGameName
                 : string.IsNullOrEmpty(VolumeTitle) ? "UNKNOWN" : VolumeTitle,
             // Game dumps record the detected console (e.g. "PlayStation 2")
             // as their System, like the Python app did, so History's
             // per-system stats count PS1/PS2/PS3 separately.
-            System = !string.IsNullOrWhiteSpace(EffectiveGameSystem) ? EffectiveGameSystem : operation,
+            System = !string.IsNullOrWhiteSpace(EffectiveGameSystem) ? EffectiveGameSystem
+                : IsAudioDump
+                    ? (DiscDetectionService.IsMusicFileDisc(DriveLetter.TrimEnd(':', '\\') + ":\\") ? "Music CD (files)" : "Audio CD")
+                : operation,
             Serial = Serial,
             AacsVersion = AacsVersion,
             OutputPath = outputPath,
@@ -906,7 +924,10 @@
         if (!config.AutoCategorize || !string.IsNullOrWhiteSpace(customLabel)) return;
 
         var generalDir = Path.GetDirectoryName(lastGameFolder);
-        if (generalDir is null || !Path.GetFileName(generalDir).Equals("General_Games", StringComparison.OrdinalIgnoreCase)) return;
+        var fallbackName = generalDir is null ? "" : Path.GetFileName(generalDir);
+        if (generalDir is null
+            || !(fallbackName.Equals("General_Games", StringComparison.OrdinalIgnoreCase)
+                 || fallbackName.Equals("PC_and_Other", StringComparison.OrdinalIgnoreCase))) return;
         var gamesDir = Path.GetDirectoryName(generalDir);
         if (gamesDir is null) return;
 
@@ -927,7 +948,7 @@
         }
         catch (Exception ex)
         {
-            AddLog($"Couldn't move the dump into {consoleDir}: {ex.Message} -- it stays in General_Games.");
+            AddLog($"Couldn't move the dump into {consoleDir}: {ex.Message} -- it stays where it is.");
             return;
         }
 
@@ -937,7 +958,7 @@
         if (redumperResult is not null && redumperResult.Success)
             redumperResult.IsoPath = lastGameIso;
 
-        // Leave General_Games behind only if it's now empty.
+        // Leave the General_Games / PC_and_Other folder behind only if it's now empty.
         try
         {
             if (!Directory.EnumerateFileSystemEntries(generalDir).Any())
@@ -1001,6 +1022,77 @@
 
         if (redumperResult is not null && redumperResult.IsoPath is not null)
             redumperResult.IsoPath = Path.Combine(target, Path.GetFileName(redumperResult.IsoPath));
+        AddLog($"Moved to {target}");
+    }
+
+    // Backup for music CDs the app didn't recognize before the dump (they
+    // were dumped as unrecognized data discs into Games\PC_and_Other).
+    // Redumper's log lists the disc's tracks as "track 1 {  audio }" or
+    // "track 1 {  data }"; when every track is audio, it's a music CD, so
+    // the dump moves to Music_CDs and History records "Audio CD". Mixed
+    // discs (e.g. PS1 games with CD-audio tracks) aren't touched.
+    private static readonly System.Text.RegularExpressions.Regex TocTrackRegex =
+        new(@"^\s*track\s+\d+\s*\{\s*(audio|data)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+    private void MoveMusicCdFromLog(AppConfig config, string outputBase, string operationLabel)
+    {
+        if (Category != DiscCategory.Unknown || lastGameFolder is null || lastGameName is null) return;
+
+        string logText;
+        try
+        {
+            var logPath = Path.Combine(lastGameFolder, $"{lastGameName}.log");
+            if (!File.Exists(logPath)) return;
+            logText = File.ReadAllText(logPath);
+        }
+        catch { return; }
+
+        var tracks = TocTrackRegex.Matches(logText);
+        if (tracks.Count == 0) return;
+        foreach (System.Text.RegularExpressions.Match t in tracks)
+            if (!t.Groups[1].Value.Equals("audio", StringComparison.OrdinalIgnoreCase)) return;
+
+        logAudioCd = true;
+        AddLog($"{operationLabel}: Redumper shows only audio tracks -- this is a music CD.");
+
+        if (!config.AutoCategorize || !string.IsNullOrWhiteSpace(customLabel)) return;
+
+        var musicDir = Path.Combine(outputBase, CategoryFolder(config, "Music_CDs"));
+        var folderName = Path.GetFileName(lastGameFolder);
+        var target = Path.Combine(musicDir, folderName);
+        int n = 2;
+        while (Directory.Exists(target) || File.Exists(target))
+        {
+            target = Path.Combine(musicDir, $"{folderName} ({n})");
+            n++;
+        }
+
+        var oldParent = Path.GetDirectoryName(lastGameFolder);
+        try
+        {
+            Directory.CreateDirectory(musicDir);
+            Directory.Move(lastGameFolder, target);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Couldn't move the dump into {musicDir}: {ex.Message} -- it stays where it is.");
+            return;
+        }
+
+        if (lastGameIso is not null)
+            lastGameIso = Path.Combine(target, Path.GetFileName(lastGameIso));
+        lastGameFolder = target;
+        if (redumperResult is not null && redumperResult.Success)
+            redumperResult.IsoPath = lastGameIso;
+
+        try
+        {
+            if (oldParent is not null && !Directory.EnumerateFileSystemEntries(oldParent).Any())
+                Directory.Delete(oldParent);
+        }
+        catch { /* not important */ }
+
         AddLog($"Moved to {target}");
     }
 
@@ -1453,7 +1545,10 @@
     {
         showModeDialog = false;
         ResetResultState();
-        selectedMode = folderPrefix == "Game" ? "Game Disc" : "DVD Movie Disc (Raw Sector ISO)";
+        selectedMode = folderPrefix != "Game" ? "DVD Movie Disc (Raw Sector ISO)"
+            : IsAudioDump ? "Music CD (Raw Dump)"
+            : "Game Disc";
+        if (folderPrefix == "Game" && IsAudioDump) operationLabel = "Music CD";
         AddLog($"{operationLabel}: locating redumper.exe");
         StateHasChanged();
 
@@ -1489,6 +1584,7 @@
             return;
         }
 
+        if (folderPrefix == "Game" && IsAudioDump) category = "Music_CDs";
         var categoryDir = Path.Combine(outputBase, CategoryFolder(config, category));
 
         // Ported from the Python app's _start_game_pipeline(): game
@@ -1496,13 +1592,15 @@
         // as Python -- the bay's custom label when one is set (e.g.
         // "PS3"), else the console detected from the disc (e.g.
         // "PlayStation 2"), else General_Games.
-        if (config.AutoCategorize && folderPrefix == "Game")
+        if (config.AutoCategorize && folderPrefix == "Game" && !IsAudioDump)
         {
+            // Unrecognized data discs (PC games and the like) get their
+            // own PC_and_Other folder instead of General_Games.
             var sysFolder = !string.IsNullOrWhiteSpace(customLabel)
                 ? FileNamingService.SanitizeFilename(customLabel)
                 : !string.IsNullOrWhiteSpace(GameSystem)
                     ? FileNamingService.SanitizeFilename(GameSystem)
-                    : "General_Games";
+                    : Category == DiscCategory.Unknown ? "PC_and_Other" : "General_Games";
             categoryDir = Path.Combine(categoryDir, sysFolder);
         }
 
@@ -1559,6 +1657,26 @@
                 exe, DriveLetter, outputFolder, isoName,
                 onProgress: pct => InvokeAsync(() => { progressPercent = pct; StateHasChanged(); }),
                 onProcessStarted: p => currentProcess = p));
+
+            // CDs: "dump" leaves a raw .scram and no .iso, so RunDump calls
+            // it a failure. Run Redumper's "split" step to make the
+            // .bin/.cue and use that instead (null = not a CD dump).
+            if (!redumperResult.Success && !wasCancelled)
+            {
+                var scramPath = Path.Combine(outputFolder, $"{isoName}.scram");
+                if (File.Exists(scramPath))
+                {
+                    AddLog($"{operationLabel}: CD read complete -- building .bin/.cue (Redumper split)");
+                    runningLabel = "Building .bin/.cue from the CD dump…";
+                    progressPercent = null;
+                    StateHasChanged();
+
+                    var cdResult = await Task.Run(() => RedumperCdService.FinishCdDump(
+                        exe, outputFolder, isoName, p => currentProcess = p));
+                    if (cdResult is not null)
+                        redumperResult = cdResult;
+                }
+            }
         }
         else
         {
@@ -1597,6 +1715,7 @@
                     lastGameIso = redumperResult.IsoPath;
 
                     ApplyRedumperLogDetection(config, operationLabel);
+                    MoveMusicCdFromLog(config, outputBase, operationLabel);
 
                     var wanted = CleanGameName(gameNameDraft);
                     if (wanted is not null && wanted != isoName)
@@ -2048,6 +2167,7 @@
             // A new disc starts with a blank name box and no console
             // carried over from the last disc's Redumper log.
             logGameSystem = null;
+            logAudioCd = false;
             gameNameDraft = "";
             gameNameNote = null;
             lastGameFolder = null;

@@ -4,6 +4,18 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v2.4 - 2026-10-07
+
+### ✨ Added
+* PC game discs and other data discs the app doesn't recognize can now be dumped: the 🎮 Game Disc / Raw ISO button is no longer disabled for them, and so is the File name box. Dumps go into `Games\PC_and_Other\` (or the bay label's folder). Unrecognized discs are never auto-started, only dumped on a click.
+* Music CDs can be dumped as an exact copy (`.bin` per track plus a `.cue`) into their own top-level `Music_CDs\` folder, recorded in History as "Audio CD". This isn't a music rip -- for playable FLAC/MP3 files, use a dedicated ripper. Music CDs are recognized by any `.cda` track file or the "Audio CD" label, with a backup check of Redumper's track list after the dump (all audio tracks = music CD).
+* Data discs that hold music files (e.g. a burned CD of MP3s) also go into `Music_CDs\`, recorded as "Music CD (files)". A disc counts when at least 80% of its files are audio files (cover art, playlists and the like are ignored).
+
+### 🐛 Fixed
+* CD dumps were always reported as failed. For CDs, Redumper's `dump` step only writes the raw read (`.scram` and friends) and no image, while the app looked for an `.iso`. When a dump leaves a `.scram`, the app now runs Redumper's `split` step and uses the resulting `.bin`/`.cue` (the largest `.bin` is hashed and checked against Redump). This affected PS1 games and every other CD. The `.scram` is kept, as Redumper does.
+
+---
+
 ## v2.3 - 2026-10-05
 
 ### ✨ Added

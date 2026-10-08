@@ -29,7 +29,8 @@ namespace ArchivSector_OD
         public static DiscCategory DetectDiscCategory(string driveLetter)
         {
             var root = $"{driveLetter.TrimEnd(':', '\\')}:\\";
-            if (!Directory.Exists(root)) return DiscCategory.Unknown;
+            if (!Directory.Exists(root))
+                return LooksLikeAudioCd(root) ? DiscCategory.Audio : DiscCategory.Unknown;
 
             try
             {
@@ -44,7 +45,8 @@ namespace ArchivSector_OD
                 if (Directory.Exists(Path.Combine(root, "BDMV"))) return DiscCategory.BluRay;
                 if (IsOriginalXboxVideoPartition(root)) return DiscCategory.Game;
                 if (Directory.Exists(Path.Combine(root, "VIDEO_TS"))) return DiscCategory.Dvd;
-                if (File.Exists(Path.Combine(root, "Track01.cda"))) return DiscCategory.Audio;
+                if (LooksLikeAudioCd(root)) return DiscCategory.Audio;
+                if (IsMusicFileDisc(root)) return DiscCategory.Audio;
             }
             catch
             {
@@ -171,6 +173,76 @@ namespace ArchivSector_OD
                     if (total > XboxVideoPartitionMaxBytes) return false;
                 }
                 return total > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Music CDs: Windows shows each track as a small "TrackNN.cda"
+        // file and labels the disc "Audio CD". Checks for any .cda file
+        // (not just Track01.cda) or that label, since the old single-file
+        // check missed some music CDs and they were dumped as
+        // unrecognized data discs.
+        public static bool LooksLikeAudioCd(string root)
+        {
+            try
+            {
+                if (Directory.Exists(root) && Directory.EnumerateFiles(root, "*.cda").Any()) return true;
+            }
+            catch { /* fall through to the label check */ }
+            try
+            {
+                var label = new DriveInfo(root).VolumeLabel?.Trim() ?? "";
+                return label.Equals("Audio CD", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // A data disc holding music files (e.g. a burned CD of MP3s) --
+        // to the drive it's an ordinary data CD, so it was dumped into
+        // Games\PC_and_Other. It counts as a music disc when it has at
+        // least 3 audio files and they make up at least 80% of the files
+        // that matter (cover art, playlists, desktop.ini and so on are
+        // ignored). A PC game with a soundtrack folder has far too many
+        // other files to pass. Stops after 3000 files to stay quick.
+        private static readonly HashSet<string> AudioExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".mp3", ".flac", ".wav", ".wma", ".m4a", ".aac", ".ogg", ".oga", ".opus",
+            ".ape", ".wv", ".aif", ".aiff", ".alac", ".mpc", ".mp2", ".ac3", ".dts",
+        };
+
+        private static readonly HashSet<string> IgnoredExtensions = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".m3u", ".m3u8", ".pls", ".wpl",
+            ".txt", ".nfo", ".sfv", ".md5", ".cue", ".log", ".ini", ".db", ".inf", ".ico", ".pdf", ".url",
+        };
+
+        public static bool IsMusicFileDisc(string root)
+        {
+            try
+            {
+                if (!Directory.Exists(root)) return false;
+                var options = new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    IgnoreInaccessible = true,
+                    AttributesToSkip = FileAttributes.System,
+                };
+
+                int audio = 0, other = 0, seen = 0;
+                foreach (var file in Directory.EnumerateFiles(root, "*", options))
+                {
+                    if (++seen > 3000) break;
+                    var ext = Path.GetExtension(file);
+                    if (AudioExtensions.Contains(ext)) audio++;
+                    else if (!IgnoredExtensions.Contains(ext)) other++;
+                }
+                return audio >= 3 && audio >= (audio + other) * 0.8;
             }
             catch
             {

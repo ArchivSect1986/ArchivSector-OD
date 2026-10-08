@@ -1,8 +1,8 @@
-🌟 [RELEASE] ArchivSector-OD v2.3 | Optical Disc Ripping & Archival Control Center 🌟
+🌟 [RELEASE] ArchivSector-OD v2.4 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v2.3**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v2.4**! Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -21,9 +21,25 @@ handful of improvements on top.
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
 
-Updating from an older v2 version? Just replace your old folder with this one. Your
+Already on v2.3? The app offers v2.4 by itself when it starts -- just
+click Yes. Updating from an older v2 version? Just replace your old folder with this one. Your
 settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
+
+========================================================================
+💿 NEW IN V2.4 (since v2.3)
+========================================================================
+
+• CD dumps work. For CDs, Redumper's dump step only saves the raw read,
+  so every CD dump (PS1 games, PC CDs) was reported as failed. The app
+  now runs Redumper's second step itself and you get a .bin + .cue.
+• PC game discs and other unrecognized data discs can be dumped: the
+  🎮 Game Disc / Raw ISO button is no longer greyed out for them. They
+  go into \Games\PC_and_Other and never start by themselves.
+• Music CDs can be dumped too (an exact .bin/.cue copy, one .bin per
+  track), into their own \Music_CDs folder. Type the album name in the
+  File name box first -- every music CD is just called "Audio CD".
+  Burned CDs full of MP3s (or other music files) go into \Music_CDs too.
 
 ========================================================================
 🕹️ NEW IN V2.3 (since v2.2)
@@ -306,8 +322,11 @@ APIs (tray eject, registry, system sounds), so it only runs on Windows.
 • Blu-ray (BD-25 / BD-50) ------------------ (1:1 Decrypt or Movie-Only MKV)
 • 4K UHD Blu-ray (LibreDrive-detected) ----- (1:1 Decrypt or Movie-Only MKV)
 • Game Discs (PC / console, via Redumper) — (1:1 archival dump)
-  Recognized: PS1, PS2, PS3, PS4, Xbox One; Original Xbox and Xbox 360
-  after the dump (drive must be able to read them, e.g. OmniDrive)
+  Recognized: PS1, PS2, PS3, PS4, Original Xbox, Xbox One; Xbox 360
+  after the dump (drive must be able to read them, e.g. OmniDrive).
+  CDs come out as .bin + .cue, DVDs/Blu-rays as .iso.
+• Other data discs (PC software etc.) ---- (1:1 archival dump)
+• Music CDs ------------------------------ (1:1 .bin/.cue copy)
 
 ========================================================================
 🔮 PLANNED — NOT YET BUILT
