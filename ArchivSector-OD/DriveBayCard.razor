@@ -1672,7 +1672,9 @@
                     StateHasChanged();
 
                     var cdResult = await Task.Run(() => RedumperCdService.FinishCdDump(
-                        exe, outputFolder, isoName, p => currentProcess = p));
+                        exe, DriveLetter, outputFolder, isoName,
+                        onStatus: msg => InvokeAsync(() => { AddLog($"{operationLabel}: {msg}"); runningLabel = msg; StateHasChanged(); }),
+                        onProcessStarted: p => currentProcess = p));
                     if (cdResult is not null)
                         redumperResult = cdResult;
                 }

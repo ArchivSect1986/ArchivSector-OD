@@ -4,6 +4,17 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v2.4.1 - 2026-10-07
+
+### ⚙️ Changed
+* After a successful CD dump, the raw `.scram` and `.state` files are deleted automatically. Together they're about the size of the whole disc and are only needed to rebuild the image, which is already done (`.bin` + `.cue`). The small files (`.log`, `.toc`, `.fulltoc`, `.subcode`) are kept for verification and Redump submissions.
+
+### 🐛 Fixed
+* A CD read with damaged sectors made Redumper's `split` step stop with "data errors detected", and the dump failed. The app now runs Redumper's `refine` step, which re-reads only the damaged sectors, and then tries `split` again (the same dump → refine → split order Redumper's own full mode uses). If the disc still can't be read, it says so and suggests cleaning the disc; the `.scram` is kept so nothing is lost.
+* CD dump error messages showed the start of Redumper's output and cut off the actual reason. They now show Redumper's last `error:` line.
+
+---
+
 ## v2.4 - 2026-10-07
 
 ### ✨ Added
@@ -12,7 +23,7 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 * Data discs that hold music files (e.g. a burned CD of MP3s) also go into `Music_CDs\`, recorded as "Music CD (files)". A disc counts when at least 80% of its files are audio files (cover art, playlists and the like are ignored).
 
 ### 🐛 Fixed
-* CD dumps were always reported as failed. For CDs, Redumper's `dump` step only writes the raw read (`.scram` and friends) and no image, while the app looked for an `.iso`. When a dump leaves a `.scram`, the app now runs Redumper's `split` step and uses the resulting `.bin`/`.cue` (the largest `.bin` is hashed and checked against Redump). This affected PS1 games and every other CD. The `.scram` is kept, as Redumper does.
+* CD dumps were always reported as failed. For CDs, Redumper's `dump` step only writes the raw read (`.scram` and friends) and no image, while the app looked for an `.iso`. When a dump leaves a `.scram`, the app now runs Redumper's `split` step and uses the resulting `.bin`/`.cue` (the largest `.bin` is hashed and checked against Redump). This affected PS1 games and every other CD.
 
 ---
 
