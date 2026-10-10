@@ -395,6 +395,14 @@
         <button class="bay-btn retry-btn" @onclick="RetryLast">🔁 Retry Last Rip</button>
     }
 
+    @if (!isRunning && !isVerifying && BackupSourceFolder is not null)
+    {
+        <button class="bay-btn tray-btn" style="margin-top: 6px;" @onclick="MakeBackupDisc"
+                title="Opens TargetFill with this rip's folder, to burn a padded, self-verifying backup copy">
+            💿 Make archival backup disc
+        </button>
+    }
+
     <button class="log-toggle-btn" @onclick="() => showLog = !showLog">
         @(showLog ? "▾" : "▸") Process Telemetry [@logLines.Count]
     </button>
@@ -1094,6 +1102,32 @@
         catch { /* not important */ }
 
         AddLog($"Moved to {target}");
+    }
+
+    // ---- TargetFill handoff (v3.0) ----
+
+    // The folder of the last successful rip on this bay, if it still exists.
+    private string? BackupSourceFolder
+    {
+        get
+        {
+            if (lastOutputFolder is null) return null;
+            try
+            {
+                var dir = File.Exists(lastOutputFolder) ? Path.GetDirectoryName(lastOutputFolder) : lastOutputFolder;
+                return dir is not null && Directory.Exists(dir) ? dir : null;
+            }
+            catch { return null; }
+        }
+    }
+
+    private void MakeBackupDisc()
+    {
+        if (BackupSourceFolder is string dir)
+        {
+            AddLog($"Sent to TargetFill: {dir}");
+            TargetFillHandoff.Request(dir);
+        }
     }
 
     // ---- Game disc naming ----

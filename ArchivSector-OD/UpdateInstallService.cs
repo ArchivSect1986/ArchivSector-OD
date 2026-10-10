@@ -85,8 +85,19 @@ namespace ArchivSector_OD
             if (RipActivity.AnyBusy)
             {
                 Ask(owner,
-                    "A rip (or its checksum) is still running. Update once it's finished -- " +
+                    "A rip, checksum or TargetFill job is still running. Update once it's finished -- " +
                     "use Check for Updates in Settings.",
+                    "Update Later", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // A second copy of the app (such as a TargetFill window opened
+            // from the right-click menu) would keep the app's files locked.
+            if (OtherCopiesRunning())
+            {
+                Ask(owner,
+                    "Another ArchivSector-OD window is open (for example a TargetFill window opened from the " +
+                    "right-click menu). Close it, then use Check for Updates in Settings.",
                     "Update Later", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -156,6 +167,30 @@ namespace ArchivSector_OD
                 try { if (Directory.Exists(workDir)) Directory.Delete(workDir, recursive: true); } catch { }
                 OfferDownloadPage(owner, result, $"The update didn't finish: {ex.Message}");
             }
+        }
+
+        private static bool OtherCopiesRunning()
+        {
+            try
+            {
+                using var me = Process.GetCurrentProcess();
+                var mine = Environment.ProcessPath;
+                foreach (var p in Process.GetProcessesByName(me.ProcessName))
+                {
+                    using (p)
+                    {
+                        if (p.Id == me.Id) continue;
+                        try
+                        {
+                            var path = p.MainModule?.FileName;
+                            if (path is null || mine is null || path.Equals(mine, StringComparison.OrdinalIgnoreCase)) return true;
+                        }
+                        catch { return true; } // can't inspect it -- assume it's ours
+                    }
+                }
+            }
+            catch { /* can't list processes -- let the update try */ }
+            return false;
         }
 
         // Can the running app replace its own files?

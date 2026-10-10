@@ -1,0 +1,855 @@
+@* TargetFill, built into ArchivSector-OD (v3.0), with every feature of
+   TargetFill Pro v3.0.4. Pick a folder (or send one from a drive bay with
+   "Make archival backup disc", or right-click a folder in Explorer), a
+   disc size and a placement mode, and TargetFill pads it so the disc is
+   filled to exactly 100% with the real data in the middle tracks. All the
+   work is done by TargetFillService; this is the screen, and it asks the
+   same questions TargetFill Pro asks (multi-disc builds, Disc_NN folders).
+
+   Every choice is remembered between runs (TargetFillSettings, saved to
+   its own targetfill.json).
+
+   AppShell keeps this panel mounted while the Drive Bays tab is showing
+   (it's only hidden), so a running job survives tab switches. A request
+   from a bay or the right-click menu arrives as SourceRequest plus a new
+   RequestId. *@
+
+@using System.IO
+@using System.Windows
+@implements IDisposable
+
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; padding: 20px;">
+
+    <section class="bay-card" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px;">
+            <h2 style="margin: 0;">🎯 TargetFill</h2>
+            <span class="bay-subtitle" style="flex: 1 1 260px;">Fill a disc to exactly 100%, with your data in the safe middle tracks</span>
+            <button class="shortcut-btn" @onclick="() => showGuide = true">❔ Instructions</button>
+        </div>
+
+        @* Source folder *@
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span class="bay-meta" style="margin: 0;">SOURCE FOLDER</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                <input class="label-input" style="flex: 1 1 320px; min-width: 200px; font-size: 13px;"
+                       value="@folder" placeholder="Choose a folder, or paste its path"
+                       @onchange="OnFolderTyped" disabled="@busy" />
+                <button class="bay-btn tray-btn" style="width: auto;" @onclick="BrowseFolder" disabled="@busy">📁 Browse…</button>
+                <button class="bay-btn tray-btn" style="width: auto;" @onclick="OpenFolder" disabled="@(!HasFolder)">📂 Open</button>
+            </div>
+            @if (scanning)
+            {
+                <span class="bay-subtitle">Scanning folder…</span>
+            }
+            else if (HasFolder && stats is not null)
+            {
+                <span class="bay-subtitle">@stats.Count file(s), @TargetFillService.FormatBytes(stats.Bytes) of your data (TargetFill's own files aren't counted)</span>
+            }
+        </div>
+
+        @* Media *@
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span class="bay-meta" style="margin: 0;">TARGET STORAGE MEDIUM</span>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                @foreach (var p in TargetFillService.OpticalPresets)
+                {
+                    var label = p.Label;
+                    <button class="shortcut-btn @(mediaKey == label ? "active-toggle" : "")" @onclick="() => SelectMedia(label)" disabled="@busy">@label</button>
+                }
+                <button class="shortcut-btn @(mediaKey == CustomKey ? "active-toggle" : "")" @onclick="() => SelectMedia(CustomKey)" disabled="@busy">Custom Size (@F(customOpticalGb) GB)</button>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                @foreach (var p in TargetFillService.UsbPresets)
+                {
+                    var label = p.Label;
+                    <button class="shortcut-btn @(mediaKey == label ? "active-toggle" : "")" style="font-size: 12px;" @onclick="() => SelectMedia(label)" disabled="@busy">@label</button>
+                }
+                <button class="shortcut-btn @(mediaKey == CustomUsbKey ? "active-toggle" : "")" style="font-size: 12px;" @onclick="() => SelectMedia(CustomUsbKey)" disabled="@busy">Custom USB (@F(customUsbGb) GB)</button>
+            </div>
+            @if (mediaKey == CustomKey || mediaKey == CustomUsbKey)
+            {
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                    <label for="tf-custom" class="bay-subtitle" style="margin: 0;">Custom capacity in GB (1 GB = 1,000,000,000 bytes):</label>
+                    <input id="tf-custom" type="number" min="0.01" step="0.01" class="label-input" style="width: 120px; font-size: 13px;"
+                           value="@F(mediaKey == CustomKey ? customOpticalGb : customUsbGb)" @onchange="OnCustomSize" disabled="@busy" />
+                </div>
+            }
+        </div>
+
+        @* Placement *@
+        @if (!Medium.IsUsb)
+        {
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span class="bay-meta" style="margin: 0;">PLACEMENT MODE</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <button class="shortcut-btn @(placement == TargetFillService.Placement.DualSplit ? "active-toggle" : "")" @onclick="() => SetPlacement(TargetFillService.Placement.DualSplit)" disabled="@busy">Dual-Part Split</button>
+                    <button class="shortcut-btn @(placement == TargetFillService.Placement.EndOnly ? "active-toggle" : "")" @onclick="() => SetPlacement(TargetFillService.Placement.EndOnly)" disabled="@busy">Single: End</button>
+                    <button class="shortcut-btn @(placement == TargetFillService.Placement.StartOnly ? "active-toggle" : "")" @onclick="() => SetPlacement(TargetFillService.Placement.StartOnly)" disabled="@busy">Single: Start</button>
+                </div>
+            </div>
+            @if (placement == TargetFillService.Placement.DualSplit)
+            {
+                @* Same control as TargetFill Pro: five presets, a 1-99 slider,
+                   and the Beginning / End readouts under it. *@
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label for="tf-split" class="bay-meta" style="margin: 0;">SPLIT BALANCE (BEGINNING VS END)</label>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        @foreach (var preset in SplitPresets)
+                        {
+                            var v = preset.Value;
+                            <button class="shortcut-btn @(splitPercent == v ? "active-toggle" : "")"
+                                    style="display: flex; flex-direction: column; align-items: center; line-height: 1.2; padding: 4px 10px;"
+                                    @onclick="() => SetSplit(v)" disabled="@busy">
+                                <strong>@preset.Ratio</strong>
+                                <span style="font-size: 11px;">@preset.Name</span>
+                            </button>
+                        }
+                    </div>
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 13px;">
+                        <span style="color: @HeadHex;">Beginning: @TargetFillService.FormatBytes(Split.Head) (@splitPercent%)</span>
+                        <span style="color: #c084fc;">End: @TargetFillService.FormatBytes(Split.Tail) (@(100 - splitPercent)%)</span>
+                    </div>
+                    <input id="tf-split" type="range" min="1" max="99" step="1" value="@splitPercent" @oninput="OnSplitSlider" @onchange="_ => Persist()" disabled="@busy" style="width: 100%;" />
+                </div>
+            }
+        }
+
+        @* Volume label + write method *@
+        <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
+            <div style="display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px;">
+                <label for="tf-vol" class="bay-meta" style="margin: 0;">DISC VOLUME LABEL (NAME)</label>
+                <input id="tf-vol" class="label-input" style="font-size: 13px;" value="@volumeLabel"
+                       placeholder="@(HasFolder ? new DirectoryInfo(folder).Name : "Folder name")"
+                       @oninput="e => volumeLabel = e.Value?.ToString() ?? string.Empty" @onchange="_ => Persist()" disabled="@busy" />
+            </div>
+            @if (Medium.IsUsb)
+            {
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <span class="bay-meta" style="margin: 0;">ALLOCATION WRITE METHOD</span>
+                    <div style="display: flex; gap: 6px;">
+                        <button class="shortcut-btn @(!physical ? "active-toggle" : "")" @onclick="() => SetPhysical(false)" disabled="@busy" title="Sparse files: instant, no disk space or SSD wear">Virtual (Sparse / Instant)</button>
+                        <button class="shortcut-btn @(physical ? "active-toggle" : "")" @onclick="() => SetPhysical(true)" disabled="@busy" title="Writes real zero blocks: slower, really fills the drive">Physical (Blocks / Slow)</button>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* Numbers *@
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px;">
+            <div class="bay-status" style="flex-direction: column; align-items: flex-start; gap: 2px;">
+                <span class="bay-subtitle" style="margin: 0;">Current user data</span>
+                <strong style="color: @DataHex;">@(TargetFillService.FormatBytes(PerDiscPayload) + (Discs > 1 ? " / disc" : ""))</strong>
+            </div>
+            <div class="bay-status" style="flex-direction: column; align-items: flex-start; gap: 2px;">
+                <span class="bay-subtitle" style="margin: 0;">@(Medium.IsUsb ? "Filler" : "Part 1 lead-in")</span>
+                <strong style="color: @HeadHex;">@TargetFillService.FormatBytes(Split.Head)</strong>
+            </div>
+            @if (!Medium.IsUsb)
+            {
+                <div class="bay-status" style="flex-direction: column; align-items: flex-start; gap: 2px;">
+                    <span class="bay-subtitle" style="margin: 0;">Part 2 lead-out</span>
+                    <strong style="color: #c084fc;">@TargetFillService.FormatBytes(Split.Tail)</strong>
+                </div>
+            }
+            <div class="bay-status" style="flex-direction: column; align-items: flex-start; gap: 2px;">
+                <span class="bay-subtitle" style="margin: 0;">Disc fill</span>
+                <strong>@(HasFolder ? "100%" + (placement == TargetFillService.Placement.DualSplit && splitPercent == 50 && !Medium.IsUsb ? " (Balanced)" : "") : "—")</strong>
+            </div>
+        </div>
+
+        @if (HasFolder && Discs > 1)
+        {
+            <p class="bay-meta" style="margin: 0; color: var(--amber);">
+                ⚠ Too big for one @Medium.Label (@TargetFillService.FormatBytes(stats!.Bytes)) — this needs @Discs discs.
+                Generate .ISO Image builds all @Discs ISOs, each filled to 100%.
+                @(autoSpan ? "Generate Split Filler will offer ISOs or Disc_01… folders." : "To use Generate Split Filler, turn on Auto-Span in Expert Mode.")
+            </p>
+        }
+
+        @* Main options (as on TargetFill Pro's main window) *@
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" checked="@manifest" @onchange="e => SetBool(ref manifest, e)" disabled="@busy" />
+                <span><strong>Generate SHA-256 Archival Manifest</strong><br /><span class="bay-subtitle">A checksum of every file, saved on the disc.</span></span>
+            </label>
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" checked="@expertMode" @onchange="e => SetBool(ref expertMode, e)" />
+                <span><strong>Enable Advanced Archival Options (Expert Mode)</strong></span>
+            </label>
+        </div>
+
+        @if (expertMode)
+        {
+            <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 10px;">
+                <span class="bay-meta" style="margin: 0;">EXPERT ARCHIVAL &amp; RECOVERY FEATURES</span>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 16px;">
+                    @(Option("Pre-Flight Archival Scanner", "Stops first if a path is 250+ characters (may fail on a disc).", preflight, v => preflight = v))
+                    @(Option("Detailed LBA Sector Map & Report", "Adds the physical mm radial ranges to the manifest.", lbaReport, v => lbaReport = v))
+                    @(Option("Audio Feedback Cues", "Plays a chime when a job finishes.", sound, v => sound = v))
+                    @(Option("Auto-Span Multi-Disc Volumes", "When the folder is too big for one disc, Generate Split Filler offers ISOs or Disc_01… folders.", autoSpan, v => autoSpan = v))
+                    @(Option("PAR2 Recovery Files (needs par2.exe)", par2Found ? "Adds real 10% PAR2 recovery data so damaged files can be repaired." : "par2.exe not found — put it next to ArchivSector-OD.exe (from github.com/Parchive/par2cmdline).", parity, v => parity = v))
+                    @(Option("Stealth Decoy File Generator", "Names the filler files like cache files instead of pad_start / pad_end.", stealth, v => stealth = v))
+                    @(Option("Random-Data Filler (instead of zeros)", "Pads with random bytes. Slower and uses real disk space.", noise, v => noise = v))
+                    @(Option("Searchable Disc Library Indexer", "Logs each disc in History and the disc catalog (_DiscCatalog.json / .csv).", catalog, v => catalog = v))
+                    @(Option("Standalone On-Disc Verifier (Verify_Disc.bat)", "Re-checks the whole disc years from now. Nothing to install.", verifier, v => verifier = v))
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <button class="bay-btn tray-btn" style="width: auto;" @onclick="() => RunArt(false)" disabled="@(busy || !HasFolder)">🖼 Export Disc Label (.png)</button>
+                    <button class="bay-btn tray-btn" style="width: auto;" @onclick="() => RunArt(true)" disabled="@(busy || !HasFolder)">📇 Export Jewel Case / Inlay (.png)</button>
+                    <button class="bay-btn tray-btn" style="width: auto;" @onclick="ViewCatalog">📚 View Disc Library Catalog</button>
+                    <button class="bay-btn tray-btn" style="width: auto;" @onclick="ToggleRightClick" disabled="@busy"
+                            title="Adds 'TargetFill (ArchivSector-OD)' when you right-click a folder in File Explorer">
+                        @(rightClickInstalled ? "🖱 Remove from right-click menu" : "🖱 Add to right-click menu")
+                    </button>
+                </div>
+            </div>
+        }
+
+        @* Actions *@
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <button class="bay-btn game" style="width: auto; padding: 0 18px;" @onclick="RunIso" disabled="@(busy || !HasFolder || Medium.IsUsb)"
+                    title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds ready-to-burn .iso images; your files aren't changed")">
+                💿 Generate .ISO Image
+            </button>
+            <button class="bay-btn bd" style="width: auto; padding: 0 18px;" @onclick="RunFiller" disabled="@(busy || !HasFolder)"
+                    title="Adds filler files to this folder so it burns to exactly 100%">
+                🧩 Generate Split Filler
+            </button>
+            <button class="bay-btn tray-btn" style="width: auto;" @onclick="RunClean" disabled="@(busy || !HasFolder)">🧹 Clean Fillers</button>
+            <button class="bay-btn tray-btn" style="width: auto;" @onclick="RunImgBurn" disabled="@(busy || !HasFolder || Medium.IsUsb)"
+                    title="Opens ImgBurn in Build mode with this folder, UDF 2.60 and the volume label">🔥 ImgBurn</button>
+        </div>
+
+        @if (busy)
+        {
+            <div class="progress-bar"><div class="progress-fill" style="width: 100%; opacity: 0.6;"></div></div>
+            <span class="bay-subtitle">@(progressText ?? "Working…")</span>
+        }
+        else if (resultMessage is not null)
+        {
+            <div class="bay-status" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+                <span style="color: @(resultOk ? "var(--success)" : "var(--danger)"); white-space: pre-line;">@((resultOk ? "✓ " : "⚠ ") + resultMessage)</span>
+                @foreach (var o in resultOutputs)
+                {
+                    <span class="bay-subtitle" style="margin: 0;">• @o</span>
+                }
+                @foreach (var n in resultNotes)
+                {
+                    <span class="bay-subtitle" style="margin: 0; color: var(--amber);">ℹ @n</span>
+                }
+            </div>
+        }
+    </section>
+
+    @* Radial preview *@
+    <aside class="bay-card" style="flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+        <span class="bay-meta" style="margin: 0;">RADIAL TRACK PREVIEW — @Medium.Label</span>
+        <div style="display: flex; justify-content: center;">
+            @if (Medium.IsUsb)
+            {
+                <svg width="300" height="160" viewBox="0 0 320 160" role="img" aria-label="Drive layout: your data, then filler">
+                    <rect x="8" y="58" width="26" height="44" rx="4" fill="#94a3b8" />
+                    <rect x="34" y="40" width="270" height="80" rx="8" fill="#0d1526" stroke="#334155" stroke-width="2" />
+                    <rect x="38" y="44" width="@F(UsbBar.Data)" height="72" rx="5" fill="@DataHex" />
+                    <rect x="@F(38 + UsbBar.Data)" y="44" width="@F(UsbBar.Fill)" height="72" rx="5" fill="@HeadHex" />
+                </svg>
+            }
+            else
+            {
+                <svg width="300" height="300" viewBox="0 0 320 320" role="img" aria-label="Disc layout: filler at the inner and outer edges, your data in the middle tracks">
+                    <circle cx="160" cy="160" r="152" fill="#0d1526" stroke="#334155" stroke-width="2" />
+                    <circle cx="160" cy="160" r="@F(Rings.HeadMid)" fill="none" stroke="@HeadHex" stroke-width="@F(Rings.HeadW)" />
+                    <circle cx="160" cy="160" r="@F(Rings.DataMid)" fill="none" stroke="@DataHex" stroke-width="@F(Rings.DataW)" />
+                    <circle cx="160" cy="160" r="@F(Rings.TailMid)" fill="none" stroke="@TailHex" stroke-width="@F(Rings.TailW)" />
+                    <circle cx="160" cy="160" r="62" fill="#1e293b" stroke="#334155" stroke-width="2" />
+                    <circle cx="160" cy="160" r="20" fill="#0b0f19" />
+                    <text x="160" y="164" text-anchor="middle" font-size="10" font-weight="700" fill="#94a3b8" font-family="Segoe UI, sans-serif">HUB</text>
+                </svg>
+            }
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+            @if (Medium.IsUsb)
+            {
+                <span>@Swatch(DataHex)User data — @TargetFillService.FormatBytes(PerDiscPayload)</span>
+                <span>@Swatch(HeadHex)Filler — @TargetFillService.FormatBytes(Split.Head)</span>
+            }
+            else
+            {
+                <span>@Swatch(HeadHex)Head (lead-in start) — @TargetFillService.FormatBytes(Split.Head)</span>
+                <span>@Swatch(DataHex)User data (middle) — @TargetFillService.FormatBytes(PerDiscPayload)</span>
+                <span>@Swatch(TailHex)Tail (lead-out end) — @TargetFillService.FormatBytes(Split.Tail)</span>
+                <span>@Swatch("#1e293b")Center hub hole</span>
+            }
+        </div>
+        @if (!Medium.IsUsb && HasFolder)
+        {
+            <span style="color: @DataHex; font-weight: 600; font-size: 13px;">🛡 Data Centering Shield Active</span>
+        }
+        <p class="bay-subtitle" style="margin: 0; line-height: 1.5;">
+            Filler files are sparse: gigabytes appear instantly and use no real disk space or SSD wear.
+            The outer edge of a disc is usually the first part to degrade, so keeping it filled with padding protects your real data.
+            Folders prepared here also work with the standalone TargetFill Pro, and the other way round.
+        </p>
+    </aside>
+</div>
+
+@if (showGuide)
+{
+    <div class="modal-backdrop" @onclick="() => showGuide = false">
+        <div class="modal-box" style="width: min(760px, 92vw); max-height: 85vh; overflow-y: auto; text-align: left;" @onclick:stopPropagation="true">
+            @* Explicit sizes and colours: the modal sits outside .bay-card,
+               so the card's text classes don't apply in here. *@
+            <h3 style="margin: 0 0 4px;">Step-by-step instructions</h3>
+
+            <p style="margin: 18px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: #22d3ee;">WORKFLOW 1: DIRECT MULTI-ISO GENERATION (fastest, no extra disk space)</p>
+            <p style="margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: var(--text-secondary);">Use this when your data is bigger than one disc (for example 12 GB onto 4.7 GB DVD-5s, or 60 GB onto 25 GB BD-Rs) and you want ready-to-burn ISO images without copying your files.</p>
+            <ol style="margin: 0; padding-left: 22px; line-height: 1.6; font-size: 13px; color: var(--text-primary);">
+                <li>Choose the folder and your disc size (for example DVD-5 or BD-25).</li>
+                <li>TargetFill shows how many discs it needs.</li>
+                <li>Click <strong>Generate .ISO Image</strong> and answer <strong>Yes</strong> to build them all.</li>
+                <li>TargetFill builds YourFolder_DISC1.iso, YourFolder_DISC2.iso and so on. Each ISO gets lead-in and lead-out padding so every disc is 100% full, plus a printable label (_DiscLabel.png) with a "DISC 1 OF N" badge.</li>
+                <li>Burn each .iso with ImgBurn or Windows' own disc burner (right-click the .iso → Burn disc image).</li>
+            </ol>
+
+            <p style="margin: 20px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: #22d3ee;">WORKFLOW 2: DISC SUBFOLDERS (Disc_01, Disc_02… on your drive)</p>
+            <p style="margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: var(--text-secondary);">Use this if you want each disc as its own folder before burning.</p>
+            <ol style="margin: 0; padding-left: 22px; line-height: 1.6; font-size: 13px; color: var(--text-primary);">
+                <li>Turn on <strong>Expert Mode</strong> and tick <strong>Auto-Span Multi-Disc Volumes</strong>.</li>
+                <li>Choose your disc size and click <strong>Generate Split Filler</strong>.</li>
+                <li>When asked, choose <strong>No</strong> to copy your files into Disc_01, Disc_02… folders, each padded to full with its own manifest, verifier and label.</li>
+                <li>Click <strong>Generate .ISO Image</strong> and answer <strong>Yes</strong> to build one ISO from each Disc folder at once.</li>
+            </ol>
+
+            <p style="margin: 20px 0 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: #22d3ee;">SINGLE DISCS &amp; TIPS</p>
+            <ul style="margin: 0; padding-left: 22px; line-height: 1.6; font-size: 13px; color: var(--text-primary);">
+                <li>Filler files are named so they sort before and after your files. The exact physical position on the disc is decided by the burning software.</li>
+                <li><strong>Clean Fillers</strong> only removes files TargetFill created itself (it keeps a hidden list in the folder). Your files, ISOs and Disc folders are never touched.</li>
+                <li><strong>ImgBurn</strong> opens ImgBurn in Build mode with UDF 2.60 and your volume label already set.</li>
+                <li>In any drive bay, <strong>💿 Make archival backup disc</strong> sends a finished rip straight here.</li>
+                <li>Expert Mode can add TargetFill to the right-click menu of folders in File Explorer.</li>
+            </ul>
+
+            <div class="modal-actions" style="margin-top: 18px;">
+                <button class="modal-btn" @onclick="() => showGuide = false">Close Instructions</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? SourceRequest { get; set; }
+    [Parameter] public int RequestId { get; set; }
+
+    private const string HeadHex = "#06b6d4";   // cyan: start filler
+    private const string DataHex = "#22c55e";   // green: your data
+    private const string TailHex = "#9333ea";   // purple: end filler
+    private const string CustomKey = "Custom";
+    private const string CustomUsbKey = "Custom USB";
+    private const string DefaultMedia = "Blu-ray BD-25";
+
+    private int lastRequestId = -1;
+    private string folder = "";
+    private TargetFillService.PayloadStats? stats;
+    private bool scanning;
+
+    // Remembered settings (TargetFillSettings)
+    private string mediaKey = DefaultMedia;
+    private double customOpticalGb = 32, customUsbGb = 64;
+    private TargetFillService.Placement placement = TargetFillService.Placement.DualSplit;
+    private int splitPercent = 50;
+    private bool physical = false;
+    private string volumeLabel = "";
+    private bool expertMode, manifest = true, verifier = true, catalog = true, preflight = true,
+                 lbaReport = true, autoSpan, parity, noise, stealth, sound = true;
+
+    // TargetFill Pro's split presets (share of filler at the beginning).
+    private static readonly (int Value, string Ratio, string Name)[] SplitPresets =
+    {
+        (50, "50/50", "Balanced"),
+        (25, "25/75", "Outer Rim"),
+        (33, "33/67", "Golden Sec"),
+        (75, "75/25", "Inner Hub"),
+        (10, "10/90", "Lead-In"),
+    };
+
+    private bool busy;
+    private string? progressText;
+    private string? resultMessage;
+    private bool resultOk;
+    private List<string> resultOutputs = new();
+    private List<string> resultNotes = new();
+    private bool showGuide;
+    private bool rightClickInstalled;
+    private bool par2Found;
+
+    private bool HasFolder => !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder);
+
+    private TargetFillService.MediaPreset Medium =>
+        mediaKey == CustomKey ? TargetFillService.CustomOptical(customOpticalGb)
+        : mediaKey == CustomUsbKey ? TargetFillService.CustomUsb(customUsbGb)
+        : TargetFillService.OpticalPresets.Concat(TargetFillService.UsbPresets).FirstOrDefault(p => p.Label == mediaKey)
+          ?? TargetFillService.OpticalPresets[3];
+
+    // The folder a job was started on: a new folder arriving from a drive
+    // bay mid-job waits (pendingRequest) instead of switching underneath it.
+    private string? pendingRequest;
+
+    protected override void OnInitialized()
+    {
+        var s = TargetFillSettings.Load();
+        mediaKey = s.Media;
+        if (mediaKey != CustomKey && mediaKey != CustomUsbKey
+            && !TargetFillService.OpticalPresets.Concat(TargetFillService.UsbPresets).Any(p => p.Label == mediaKey))
+            mediaKey = DefaultMedia;
+        customOpticalGb = s.CustomOpticalGb > 0 ? s.CustomOpticalGb : 32;
+        customUsbGb = s.CustomUsbGb > 0 ? s.CustomUsbGb : 64;
+        placement = Enum.IsDefined(typeof(TargetFillService.Placement), s.Placement) ? (TargetFillService.Placement)s.Placement : TargetFillService.Placement.DualSplit;
+        splitPercent = Math.Clamp(s.SplitPercent, 1, 99);
+        physical = s.Physical;
+        volumeLabel = s.VolumeLabel ?? "";
+        expertMode = s.ExpertMode;
+        manifest = s.Manifest;
+        verifier = s.Verifier;
+        catalog = s.Catalog;
+        preflight = s.Preflight;
+        lbaReport = s.LbaReport;
+        autoSpan = s.AutoSpan;
+        parity = s.Parity;
+        noise = s.Noise;
+        stealth = s.Stealth;
+        sound = s.Sound;
+
+        rightClickInstalled = TargetFillService.IsRightClickInstalled();
+        par2Found = TargetFillService.FindPar2() is not null;
+    }
+
+    private void Persist()
+    {
+        new TargetFillSettings
+        {
+            Media = mediaKey,
+            CustomOpticalGb = customOpticalGb,
+            CustomUsbGb = customUsbGb,
+            Placement = (int)placement,
+            SplitPercent = splitPercent,
+            Physical = physical,
+            VolumeLabel = volumeLabel,
+            ExpertMode = expertMode,
+            Manifest = manifest,
+            Verifier = verifier,
+            Catalog = catalog,
+            Preflight = preflight,
+            LbaReport = lbaReport,
+            AutoSpan = autoSpan,
+            Parity = parity,
+            Noise = noise,
+            Stealth = stealth,
+            Sound = sound,
+        }.Save();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (RequestId != lastRequestId)
+        {
+            lastRequestId = RequestId;
+            if (!string.IsNullOrWhiteSpace(SourceRequest))
+            {
+                if (busy) { pendingRequest = SourceRequest; return; }
+                // A new folder from a bay or the right-click menu gets its
+                // own name as the volume label.
+                volumeLabel = "";
+                Persist();
+                await SetFolder(SourceRequest);
+            }
+        }
+    }
+
+    // ---- small UI helpers ----
+
+    private RenderFragment Option(string title, string hint, bool value, Action<bool> set) => __builder =>
+    {
+        <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+            <input type="checkbox" checked="@value" disabled="@busy"
+                   @onchange="e => { set((bool)(e.Value ?? false)); Persist(); }" />
+            <span><strong>@title</strong><br /><span class="bay-subtitle">@hint</span></span>
+        </label>
+    };
+
+    private RenderFragment Swatch(string color) => __builder =>
+    {
+        <span style="display: inline-block; width: 12px; height: 12px; border-radius: 3px; background: @color; margin-right: 8px; vertical-align: -1px;"></span>
+    };
+
+    private void SetBool(ref bool field, ChangeEventArgs e)
+    {
+        field = (bool)(e.Value ?? false);
+        Persist();
+    }
+
+    private void SetPlacement(TargetFillService.Placement p) { placement = p; Persist(); }
+    private void SetSplit(int v) { splitPercent = v; Persist(); }
+    private void SetPhysical(bool v) { physical = v; Persist(); }
+
+    private void OnSplitSlider(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var v)) splitPercent = Math.Clamp(v, 1, 99);
+    }
+
+    private void SelectMedia(string key)
+    {
+        mediaKey = key;
+        resultMessage = null;
+        Persist();
+    }
+
+    private void OnCustomSize(ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var gb)
+            && !double.TryParse(e.Value?.ToString(), out gb)) return;
+        if (gb <= 0) return;
+        if (mediaKey == CustomKey) customOpticalGb = gb; else customUsbGb = gb;
+        Persist();
+    }
+
+    private static MessageBoxResult Ask(string text, string title, MessageBoxButton buttons, MessageBoxImage icon)
+    {
+        var owner = System.Windows.Application.Current?.MainWindow;
+        return owner is null ? MessageBox.Show(text, title, buttons, icon) : MessageBox.Show(owner, text, title, buttons, icon);
+    }
+
+    // ---- numbers for the screen ----
+
+    private long Usable => Medium.IsUsb ? Medium.Bytes : Math.Max(1, Medium.Bytes - TargetFillService.IsoMargin(Medium));
+
+    // Same whole-file packing the ISO build uses, cached per folder scan
+    // and disc size so dragging the slider doesn't re-sort the folder.
+    private TargetFillService.PayloadStats? discsFor;
+    private long discsUsable = -1;
+    private List<(List<FileInfo> Files, long Size)>? discBins;
+    private List<(List<FileInfo> Files, long Size)> Bins
+    {
+        get
+        {
+            if (stats is null) return new();
+            if (!ReferenceEquals(discsFor, stats) || discsUsable != Usable || discBins is null)
+            {
+                discBins = TargetFillService.PackDiscs(stats, Usable);
+                discsFor = stats;
+                discsUsable = Usable;
+            }
+            return discBins;
+        }
+    }
+
+    private int Discs => stats is null || Medium.IsUsb ? 1 : Bins.Count;
+
+    private long PerDiscPayload => stats is null ? 0 : Discs > 1 ? stats.Bytes / Discs : stats.Bytes;
+
+    // Same disc-space math as the service (per disc for a multi-disc set).
+    private long Needed => stats is null ? 0
+        : Medium.IsUsb ? Math.Max(0, Medium.Bytes - stats.Bytes - TargetFillService.SafetyMargin(stats.Count))
+        : Math.Max(0, Medium.Bytes - PerDiscPayload - TargetFillService.Overhead(stats, Medium) / Math.Max(1, Discs));
+
+    private (long Head, long Tail) Split => Medium.IsUsb ? (Needed, 0) : TargetFillService.SplitBytes(Needed, placement, splitPercent);
+
+    private (double HeadMid, double HeadW, double DataMid, double DataW, double TailMid, double TailW) Rings
+    {
+        get
+        {
+            // Area-proportional rings between the hub (r=62) and the rim (r=150).
+            const double r0 = 62, rMax = 150;
+            double area = rMax * rMax - r0 * r0;
+            double cap = Math.Max(1, Medium.Bytes);
+            double fh = Split.Head / cap, fd = Math.Min(1, PerDiscPayload / cap);
+            if (stats is null) { fh = 0.25; fd = 0.5; }
+            double r1 = Math.Sqrt(r0 * r0 + area * fh);
+            double r2 = Math.Min(rMax, Math.Sqrt(r1 * r1 + area * fd));
+            return ((r0 + r1) / 2, r1 - r0, (r1 + r2) / 2, r2 - r1, (r2 + rMax) / 2, rMax - r2);
+        }
+    }
+
+    private (double Data, double Fill) UsbBar
+    {
+        get
+        {
+            const double w = 262;
+            double cap = Math.Max(1, Medium.Bytes);
+            double fd = stats is null ? 0.4 : Math.Min(1, PerDiscPayload / cap);
+            double ff = stats is null ? 0.6 : Math.Min(1 - fd, Split.Head / cap);
+            return (w * fd, w * ff);
+        }
+    }
+
+    private static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    // ---- folder ----
+
+    private async Task SetFolder(string path)
+    {
+        var p = path.Trim().Trim('"');
+        if (p.Length > 0)
+        {
+            try { p = TargetFillService.NormalizePath(p); }
+            catch { /* not a valid path -- HasFolder will be false */ }
+        }
+        folder = p;
+        resultMessage = null;
+        await Rescan();
+    }
+
+    private async Task Rescan()
+    {
+        stats = null;
+        if (!HasFolder) { StateHasChanged(); return; }
+        scanning = true;
+        StateHasChanged();
+        var f = folder;
+        try
+        {
+            var s = await Task.Run(() => TargetFillService.ScanPayload(f));
+            if (f == folder) stats = s;
+        }
+        catch (Exception ex)
+        {
+            ShowResult(false, $"Couldn't read that folder: {ex.Message}");
+        }
+        finally
+        {
+            scanning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnFolderTyped(ChangeEventArgs e) => await SetFolder(e.Value?.ToString() ?? "");
+
+    private async Task BrowseFolder()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Choose the folder to fill" };
+        if (HasFolder) dlg.InitialDirectory = folder;
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) == true)
+            await SetFolder(dlg.FolderName);
+    }
+
+    private void OpenFolder()
+    {
+        if (!HasFolder) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = folder, UseShellExecute = true }); }
+        catch { /* no file manager -- nothing useful to report */ }
+    }
+
+    // ---- actions ----
+
+    private TargetFillService.Options CurrentOptions() => new()
+    {
+        Media = Medium,
+        Placement = placement,
+        SplitPercent = splitPercent,
+        Physical = physical,
+        Manifest = manifest,
+        Verifier = verifier,
+        Catalog = catalog,
+        Preflight = preflight,
+        LbaReport = lbaReport,
+        Parity = parity,
+        Noise = noise,
+        Stealth = stealth,
+        Sound = sound,
+        VolumeLabel = volumeLabel,
+    };
+
+    private void ShowResult(bool ok, string message, List<string>? outputs = null, List<string>? notes = null)
+    {
+        resultOk = ok;
+        resultMessage = message;
+        resultOutputs = outputs ?? new();
+        resultNotes = notes ?? new();
+    }
+
+    // Generate Split Filler. When the folder is too big and Auto-Span is
+    // on, asks like TargetFill Pro: Yes = ISOs, No = Disc_NN folders.
+    private async Task RunFiller()
+    {
+        var o = CurrentOptions();
+        var f = folder;
+        var r = await RunJob(() => TargetFillService.GenerateFiller(f, o, Progress));
+        if (r is null) return;
+        if (!(r.TooBig && autoSpan && !o.Media.IsUsb)) { await Finish(r, o, f); return; }
+
+        var ans = Ask($"Your payload ({TargetFillService.FormatBytes(stats?.Bytes ?? 0)}) is larger than one {o.Media.Label}.\n\n" +
+                      "[Yes]  Build ready-to-burn .ISO images directly (your files are not moved).\n" +
+                      "[No]   Copy the files into Disc_01, Disc_02… folders, each padded to full.\n" +
+                      "[Cancel]  Do nothing.",
+                      "Auto-Span Multi-Disc", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (ans == MessageBoxResult.Yes) { await RunIsoCore(skipFolderPrompt: true, f); return; }
+        if (ans != MessageBoxResult.No) { ShowResult(false, "Cancelled."); await ApplyPendingRequest(); return; }
+
+        var old = TargetFillService.PreviousDiscFolders(f);
+        if (old.Count > 0)
+        {
+            var ok = Ask($"Disc folders from a previous run exist ({string.Join(", ", old)}). They hold copies TargetFill made and will be replaced.\n\nContinue?",
+                         "Replace Disc Folders", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (ok != MessageBoxResult.Yes) { ShowResult(false, "Cancelled."); await ApplyPendingRequest(); return; }
+        }
+        var span = await RunJob(() => TargetFillService.AutoSpanFolders(f, o, Progress));
+        if (span is not null) await Finish(span, o, f);
+    }
+
+    private Task RunIso() => RunIsoCore(skipFolderPrompt: false, folder);
+
+    // Generate .ISO Image, with TargetFill Pro's two questions: build one
+    // ISO per existing Disc_NN folder? and, for a multi-disc set, the
+    // per-disc summary before building.
+    private async Task RunIsoCore(bool skipFolderPrompt, string f)
+    {
+        var o = CurrentOptions();
+        if (!skipFolderPrompt)
+        {
+            var discDirs = TargetFillService.DiscFolders(f);
+            if (discDirs.Count >= 2)
+            {
+                var names = string.Join(", ", discDirs.Take(5).Select(Path.GetFileName));
+                var ans = Ask($"Found {discDirs.Count} disc folders here ({names}).\n\nBuild one .ISO image from each folder?",
+                              "Disc Folders Found", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (ans == MessageBoxResult.Yes)
+                {
+                    var rf = await RunJob(() => TargetFillService.BuildIsoFromDiscFolders(f, o, Progress));
+                    if (rf is not null) await Finish(rf, o, f);
+                    return;
+                }
+            }
+        }
+
+        if (stats is not null && f == folder && Discs > 1)
+        {
+            var bins = Bins;
+            var sb = new System.Text.StringBuilder($"Your payload ({TargetFillService.FormatBytes(stats.Bytes)}) needs {bins.Count} × {o.Media.Label} ({TargetFillService.FormatBytes(Usable)} usable each):\n");
+            for (int k = 0; k < bins.Count; k++)
+                sb.Append($"  - Disc {k + 1}: {bins[k].Files.Count} files, {TargetFillService.FormatBytes(bins[k].Size)}\n");
+            sb.Append($"\nBuild all {bins.Count} ISO images now?");
+            if (Ask(sb.ToString(), "Multi-Disc ISO Build", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                ShowResult(false, "Cancelled.");
+                await ApplyPendingRequest();
+                return;
+            }
+        }
+
+        var r = await RunJob(() => TargetFillService.BuildIso(f, o, Progress));
+        if (r is not null) await Finish(r, o, f);
+    }
+
+    private async Task RunClean()
+    {
+        var f = folder;
+        int n = -1;
+        string? error = null;
+        await RunJob(() =>
+        {
+            try { n = TargetFillService.CleanFillers(f); }
+            catch (Exception ex) { error = ex.Message; }
+            return new TargetFillService.Result { Ok = error is null };
+        }, "Removing TargetFill's files…");
+        if (error is not null) ShowResult(false, $"Error cleaning filler files: {error}");
+        else if (n == 0) ShowResult(true, "Nothing to clean — no TargetFill files here.");
+        else ShowResult(true, $"Removed {n} file(s) that TargetFill generated (filler, manifest, verifier, labels, recovery data). Your own files, ISO images and Disc_NN folders weren't touched.");
+        await Rescan();
+        await ApplyPendingRequest();
+    }
+
+    private async Task RunArt(bool caseInlay)
+    {
+        var o = CurrentOptions();
+        var f = folder;
+        var r = await RunJob(() => TargetFillService.ExportArt(f, o, caseInlay), caseInlay ? "Drawing the jewel case / inlay card…" : "Drawing the disc label…");
+        if (r is not null) { ShowResult(r.Ok, r.Message, r.Outputs); await Rescan(); }
+        await ApplyPendingRequest();
+    }
+
+    private async Task RunImgBurn()
+    {
+        var o = CurrentOptions();
+        var f = folder;
+        var r = await RunJob(() => TargetFillService.LaunchImgBurn(f, o), "Opening ImgBurn…");
+        if (r is not null) ShowResult(r.Ok, r.Message);
+        await ApplyPendingRequest();
+    }
+
+    private void ViewCatalog()
+    {
+        var path = TargetFillService.CatalogToOpen(HasFolder ? folder : null);
+        if (path is null)
+        {
+            Ask("No disc catalog yet.\n\nWith 'Searchable Disc Library Indexer' turned on, every disc you master is added to:\n" + TargetFillService.MasterCatalogPath,
+                "Disc Catalog", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = path, UseShellExecute = true }); }
+        catch (Exception ex) { ShowResult(false, $"Couldn't open the catalog: {ex.Message}"); }
+    }
+
+    private void ToggleRightClick()
+    {
+        var msg = TargetFillService.SetRightClick(!rightClickInstalled);
+        rightClickInstalled = TargetFillService.IsRightClickInstalled();
+        ShowResult(!msg.StartsWith("Couldn't"), msg);
+    }
+
+    // Runs a service call off the UI thread with the busy bar showing.
+    // While it runs, the updater won't start (RipActivity).
+    private async Task<TargetFillService.Result?> RunJob(Func<TargetFillService.Result> job, string? startText = null)
+    {
+        busy = true;
+        progressText = startText ?? "Starting…";
+        resultMessage = null;
+        RipActivity.Set("TargetFill", "job", true);
+        StateHasChanged();
+        try
+        {
+            return await Task.Run(job);
+        }
+        catch (Exception ex)
+        {
+            return new TargetFillService.Result { Message = $"Something went wrong: {ex.Message}" };
+        }
+        finally
+        {
+            RipActivity.Set("TargetFill", "job", false);
+            busy = false;
+            StateHasChanged();
+        }
+    }
+
+    // A folder sent from a drive bay while a job was running.
+    private async Task ApplyPendingRequest()
+    {
+        if (busy || pendingRequest is null) return;
+        var p = pendingRequest;
+        pendingRequest = null;
+        volumeLabel = "";
+        Persist();
+        await SetFolder(p);
+    }
+
+    private async Task Finish(TargetFillService.Result r, TargetFillService.Options o, string f)
+    {
+        ShowResult(r.Ok, r.Message, r.Outputs, r.Notes);
+        if (r.Ok && o.Catalog)
+        {
+            var title = string.IsNullOrWhiteSpace(o.VolumeLabel) ? new DirectoryInfo(f).Name : o.VolumeLabel.Trim();
+            try { TargetFillService.RecordHistory(title, o.Media.Label, f); } catch { /* history is best-effort */ }
+        }
+        await Rescan();
+        await ApplyPendingRequest();
+    }
+
+    private void Progress(string text)
+    {
+        InvokeAsync(() => { progressText = text; StateHasChanged(); });
+    }
+
+    public void Dispose()
+    {
+        if (busy) RipActivity.Set("TargetFill", "job", false);
+    }
+}

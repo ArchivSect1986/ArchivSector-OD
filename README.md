@@ -17,6 +17,7 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 * 🎮 **Game Disc Archival:** Dedicated Redumper-driven pipeline for game discs. PlayStation 1/2/3/4 and Xbox One discs are recognized automatically and sorted into a folder per console, with PlayStation serial numbers recorded and the real game name read from PS3, PS4 and Xbox One discs. PS4 and Xbox One dumps are encrypted exact copies for preservation and Redump verification; they can't be played or installed directly. Original Xbox discs are recognized as soon as they're inserted. Xbox 360 discs (and any Original Xbox disc the app can't tell beforehand) are identified from Redumper's log once the dump finishes, on a drive that can read them such as one with OmniDrive firmware, and moved into their own console folder. PC game discs and other unrecognized data discs can be dumped too, CDs come out as `.bin` + `.cue`, and music CDs (including burned CDs of MP3s) can be copied exactly into their own folder. Each dump can be named before, during, or after it rips.
 * 🖼️ **Metadata & Artwork:** Automatic lookup of movie titles/artwork on disc insertion via TMDB, plus manual search for movies (TMDB) and games (RAWG). Both use free API keys.
 * 💡 **LibreDrive Detection:** Drive bays show OmniDrive-compatible drive models, and automatically confirm LibreDrive mode when MakeMKV reports it during a rip.
+* 🎯 **TargetFill Built In:** Everything from TargetFill Pro, in its own tab. Fill a CD, DVD, Blu-ray or USB drive to exactly 100% with your data protected in the middle tracks. Build ready-to-burn ISOs (split across several discs when needed) with a SHA-256 manifest, an on-disc verifier, optional PAR2 recovery files and printable disc labels, or send any finished rip straight to TargetFill to burn an archival backup copy. Also available from the right-click menu of any folder.
 * ⚡ **Smart Workflow Automation:** Duplicate-output warnings, a completion sound and Windows notification, and physical optical tray auto-ejection upon completion.
 * 🔄 **One-Click Updates:** Checks GitHub for a new version at startup (can be turned off in Settings). With one click it downloads the update, verifies it, installs it and restarts, keeping your settings and history. It never updates in the middle of a rip.
 
@@ -51,10 +52,14 @@ To use **ArchivSector-OD**, you must independently download the following third-
 * **Source:** Download from official community preservation channels.
 
 ### 4. ImgBurn *(Optional)*
-* **Purpose:** Used as a fallback for DVD raw ISO dumps when Redumper isn't set up, and as an optional stage 2 that turns a decrypted Blu-ray/UHD backup into a single-file ISO.
+* **Purpose:** Used as a fallback for DVD raw ISO dumps when Redumper isn't set up, as an optional stage 2 that turns a decrypted Blu-ray/UHD backup into a single-file ISO, and by TargetFill's ImgBurn button.
 * **Source:** Download from the official ImgBurn repository.
 
-### 5. API Keys *(Optional, free)*
+### 5. par2cmdline *(Optional)*
+* **Purpose:** Only for TargetFill's PAR2 recovery files option. Put `par2.exe` next to `ArchivSector-OD.exe`.
+* **Source:** [par2cmdline releases on GitHub](https://github.com/Parchive/par2cmdline/releases).
+
+### 6. API Keys *(Optional, free)*
 * **TMDB** ([themoviedb.org](https://www.themoviedb.org)) for movie titles and artwork.
 * **RAWG** ([rawg.io/apidocs](https://rawg.io/apidocs)) for game titles and artwork.
 

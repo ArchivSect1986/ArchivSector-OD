@@ -1,8 +1,8 @@
-🌟 [RELEASE] ArchivSector-OD v2.4.1 | Optical Disc Ripping & Archival Control Center 🌟
+🌟 [RELEASE] ArchivSector-OD v3.0 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v2.4.1**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v3.0**! Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -21,10 +21,43 @@ handful of improvements on top.
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
 
-Already on v2.3 or later? The app offers v2.4.1 by itself when it starts -- just
+Already on v2.3 or later? The app offers v3.0 by itself when it starts -- just
 click Yes. Updating from an older v2 version? Just replace your old folder with this one. Your
 settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
+
+========================================================================
+🎯 NEW IN V3.0 — TARGETFILL BUILT IN
+========================================================================
+
+• A new 🎯 TargetFill tab (next to 💿 Drive Bays at the top) brings
+  all of TargetFill Pro into the app. Pick a folder and a disc size and
+  it pads the folder so the disc is filled to exactly 100%, with your
+  data in the safe middle tracks and filler at the inner and outer edges.
+• Presets from CD-R to BD-128, USB/drive sizes, and Custom Size.
+  Dual-Part Split with TargetFill Pro's split balance presets (or any
+  value on the slider), Single: End / Single: Start, and a live radial
+  preview of the disc.
+• Generate .ISO Image builds a ready-to-burn image filled to 100%, plus
+  a printable disc label. Too big for one disc? It's split into several
+  ISOs, each filled to 100% and labelled "DISC 1 OF N". Your own files
+  are never changed.
+• Generate Split Filler pads the folder itself (instant sparse files),
+  Clean Fillers removes everything TargetFill added, and the ImgBurn
+  button opens ImgBurn with everything already set up.
+• Expert Mode has everything else from TargetFill Pro: Auto-Span into
+  Disc_01, Disc_02… folders, PAR2 recovery files (needs par2.exe),
+  random-data and stealth filler, an LBA zone report, disc label and
+  jewel case images, the disc library catalog, the on-disc
+  Verify_Disc.bat verifier and a pre-flight path check.
+• Right-click any folder in File Explorer and pick "TargetFill
+  (ArchivSector-OD)" (turn it on in Expert Mode; on Windows 11 it's
+  under "Show more options"). It opens a TargetFill-only window.
+• ❔ Instructions explains the multi-disc workflows step by step.
+• "💿 Make archival backup disc" on every drive bay after a rip sends
+  that rip straight to TargetFill. Backups show up in History.
+• Works with the standalone TargetFill Pro: folders prepared by either
+  one can be cleaned or rebuilt by the other.
 
 ========================================================================
 🧹 NEW IN V2.4.1 (since v2.4)

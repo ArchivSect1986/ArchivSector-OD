@@ -16,7 +16,16 @@
    config.json like everything else, but lives here in the header,
    matching where the Python app puts its own equivalent. Each
    DriveBayCard reads this fresh on every disc insert to decide
-   whether to auto-start a rip. *@
+   whether to auto-start a rip.
+
+   v3.0: two tabs in the header, 💿 Drive Bays and 🎯 TargetFill
+   (TargetFillPanel). Both stay mounted so neither loses its work when
+   the other is showing.
+
+   Started with --targetfill "<folder>" (the "TargetFill (ArchivSector-OD)"
+   right-click menu on folders), the window is TargetFill-only: no drive
+   bays, no drive watching and no startup update check, so it can't rip
+   or update alongside a main window that's already open. *@
 
 @implements IDisposable
 @using System.IO
@@ -26,13 +35,22 @@
     <header class="app-header">
         <div class="app-brand">
             <h1>ARCHIVSECTOR-OD</h1>
-            <p>Optical Disc Ripping Control Center</p>
+            <p>@(fillOnly ? "TargetFill — Disc Fill & Burn Prep" : "Optical Disc Ripping, Archival & Burn Prep")</p>
         </div>
-        <div style="display: flex; align-items: center;">
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px 0;">
+            @if (!fillOnly)
+            {
+            <button class="shortcut-btn @(activeTab == "bays" ? "active-toggle" : "")" @onclick='() => activeTab = "bays"'>
+                💿 Drive Bays
+            </button>
+            <button class="shortcut-btn @(activeTab == "fill" ? "active-toggle" : "")" style="margin-left: 8px; margin-right: 16px;" @onclick='() => activeTab = "fill"'>
+                🎯 TargetFill
+            </button>
             <button class="shortcut-btn @(config.UnattendedAutoStart ? "active-toggle" : "")" @onclick="ToggleUnattendedMode"
                     title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
                 🤖 Unattended Mode @(config.UnattendedAutoStart ? "ON" : "OFF")
             </button>
+            }
             <button class="shortcut-btn" style="margin-left: 8px;" @onclick="OpenSettings">
                 ⚙️ Settings
             </button>
@@ -42,9 +60,12 @@
             <button class="shortcut-btn" style="margin-left: 8px;" @onclick="OpenIsoVerifier">
                 🔍 ISO Verifier
             </button>
-            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="CreateShortcut" disabled="@isCreatingShortcut">
-                @(isCreatingShortcut ? "Creating…" : "📌 Create Desktop Shortcut")
-            </button>
+            @if (!fillOnly)
+            {
+                <button class="shortcut-btn" style="margin-left: 8px;" @onclick="CreateShortcut" disabled="@isCreatingShortcut">
+                    @(isCreatingShortcut ? "Creating…" : "📌 Create Desktop Shortcut")
+                </button>
+            }
             @if (shortcutMessage is not null)
             {
                 <span class="shortcut-message">@shortcutMessage</span>
@@ -61,6 +82,15 @@
         </div>
     </header>
 
+    @* Both tabs stay mounted; the hidden one is only hidden, so running
+       rips and a running TargetFill job keep going across tab switches. *@
+    <div style="display: @(activeTab == "fill" ? "block" : "none");">
+        <TargetFillPanel SourceRequest="@targetFillSource" RequestId="@targetFillRequestId" />
+    </div>
+
+    @if (!fillOnly)
+    {
+    <div style="display: @(activeTab == "bays" ? "block" : "none");">
     @if (driveStates.Count == 0)
     {
         <div class="bays-grid">
@@ -92,9 +122,18 @@
             }
         </div>
     }
+    </div>
+    }
 
     <footer class="app-footer">
-        <span>Active Bays: @driveStates.Count &nbsp;•&nbsp; Discs Loaded: @LoadedCount/@driveStates.Count &nbsp;•&nbsp; Active Jobs: @BatchSyncService.ActiveCount @(BatchSyncService.QueuedCount > 0 ? $"(+{BatchSyncService.QueuedCount} queued)" : "")</span>
+        @if (fillOnly)
+        {
+            <span>TargetFill window (opened from the right-click menu) — drive bays are in the main ArchivSector-OD window</span>
+        }
+        else
+        {
+            <span>Active Bays: @driveStates.Count &nbsp;•&nbsp; Discs Loaded: @LoadedCount/@driveStates.Count &nbsp;•&nbsp; Active Jobs: @BatchSyncService.ActiveCount @(BatchSyncService.QueuedCount > 0 ? $"(+{BatchSyncService.QueuedCount} queued)" : "")</span>
+        }
         <span>ENGINE BUS: READY</span>
     </footer>
 
@@ -106,6 +145,23 @@
     private readonly string[] Themes = { "midnight", "nova", "daylight" };
 
     private bool isCreatingShortcut = false;
+
+    // "bays" or "fill" (TargetFill). A drive bay's "Make archival backup
+    // disc" button switches to TargetFill with that rip's folder.
+    private string activeTab = "bays";
+    private string? targetFillSource = null;
+    private int targetFillRequestId = 0;
+
+    // Opened from the right-click menu (--targetfill "<folder>").
+    private bool fillOnly = false;
+
+    private void OnTargetFillRequested(string folder) => InvokeAsync(() =>
+    {
+        targetFillSource = folder;
+        targetFillRequestId++;
+        activeTab = "fill";
+        StateHasChanged();
+    });
     private string? shortcutMessage = null;
 
     private readonly Dictionary<string, DriveHardwareInfo> driveHardware = new();
@@ -133,7 +189,24 @@
         config = ConfigService.Load();
         currentTheme = config.Theme;
 
+        var startFolder = TargetFillService.StartupFolder();
+        if (startFolder is not null)
+        {
+            fillOnly = true;
+            activeTab = "fill";
+            targetFillSource = startFolder;
+            targetFillRequestId = 1;
+            try
+            {
+                var win = System.Windows.Application.Current?.MainWindow;
+                if (win is not null) win.Title = $"ArchivSector-OD — TargetFill — {Path.GetFileName(startFolder.TrimEnd('\\', '/'))}";
+            }
+            catch { /* title is cosmetic */ }
+            return;
+        }
+
         BatchSyncService.StateChanged += OnBatchSyncStateChanged;
+        TargetFillHandoff.Requested += OnTargetFillRequested;
 
         RefreshDriveList();
 
@@ -166,6 +239,7 @@
     {
         if (!firstRender || startupUpdateCheckDone) return;
         startupUpdateCheckDone = true;
+        if (fillOnly) return;
 
         if (!ConfigService.Load().CheckForUpdatesOnStartup) return;
 
@@ -176,14 +250,19 @@
         await InvokeAsync(() => UpdateInstallService.OfferAndRunAsync(result, System.Windows.Application.Current.MainWindow));
     }
 
+    // Reload before saving, so changes the drive bays saved in the
+    // meantime (bay labels, OmniDrive confirmations) aren't overwritten.
     private void ToggleUnattendedMode()
     {
-        config.UnattendedAutoStart = !config.UnattendedAutoStart;
-        ConfigService.Save(config);
+        var fresh = ConfigService.Load();
+        fresh.UnattendedAutoStart = !config.UnattendedAutoStart;
+        ConfigService.Save(fresh);
+        config = fresh;
     }
 
     private void OpenSettings()
     {
+        config = ConfigService.Load();
         var window = new SettingsWindow(config)
         {
             Owner = System.Windows.Application.Current.MainWindow
@@ -318,8 +397,10 @@
     private void SetTheme(string theme)
     {
         currentTheme = theme;
-        config.Theme = theme;
-        ConfigService.Save(config);
+        var fresh = ConfigService.Load();
+        fresh.Theme = theme;
+        ConfigService.Save(fresh);
+        config = fresh;
     }
 
     private static string Capitalize(string s) =>
@@ -329,5 +410,6 @@
     {
         driveWatchTimer?.Dispose();
         BatchSyncService.StateChanged -= OnBatchSyncStateChanged;
+        TargetFillHandoff.Requested -= OnTargetFillRequested;
     }
 }

@@ -47,6 +47,60 @@ namespace ArchivSector_OD
         public HashSet<string> ConfirmedOmniDriveLetters { get; set; } = new();
     }
 
+    // The TargetFill tab's choices, remembered between runs like
+    // TargetFill Pro's own config.json. Kept in their own file
+    // (%AppData%\ArchivSector-OD\targetfill.json) so saving them never
+    // races with Settings or the drive bays saving config.json.
+    public class TargetFillSettings
+    {
+        public string Media { get; set; } = "Blu-ray BD-25";   // preset label, or "Custom"/"Custom USB"
+        public double CustomOpticalGb { get; set; } = 32;
+        public double CustomUsbGb { get; set; } = 64;
+        public int Placement { get; set; } = 0;        // 0 Dual-Part Split, 1 Single: End, 2 Single: Start
+        public int SplitPercent { get; set; } = 50;
+        public bool Physical { get; set; } = false;
+        public string VolumeLabel { get; set; } = "";
+        public bool ExpertMode { get; set; } = false;
+        public bool Manifest { get; set; } = true;
+        public bool Verifier { get; set; } = true;
+        public bool Catalog { get; set; } = true;
+        public bool Preflight { get; set; } = true;
+        public bool LbaReport { get; set; } = true;
+        public bool AutoSpan { get; set; } = false;
+        public bool Parity { get; set; } = false;
+        public bool Noise { get; set; } = false;
+        public bool Stealth { get; set; } = false;
+        public bool Sound { get; set; } = true;        // "Audio Feedback Cues"
+
+        private static string FilePath => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "ArchivSector-OD", "targetfill.json");
+
+        public static TargetFillSettings Load()
+        {
+            try
+            {
+                if (File.Exists(FilePath))
+                {
+                    var s = JsonSerializer.Deserialize<TargetFillSettings>(File.ReadAllText(FilePath));
+                    if (s is not null) return s;
+                }
+            }
+            catch { /* corrupt -- use defaults */ }
+            return new TargetFillSettings();
+        }
+
+        public void Save()
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+                File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch { /* best-effort */ }
+        }
+    }
+
     public static class ConfigService
     {
         private static string ConfigPath => Path.Combine(

@@ -4,6 +4,35 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v3.0 - 2026-10-09
+
+### ✨ Added
+* **TargetFill is now built into ArchivSector-OD, with every feature of TargetFill Pro v3.0.4.** A new **🎯 TargetFill** tab (next to **💿 Drive Bays** in the header): pick a folder and a disc size, and it pads the folder so the disc is filled to exactly 100%, with filler at the start (lead-in) and/or end (lead-out) and your data in the middle tracks.
+  * Presets for CD-R 700 MB, DVD-5, DVD-9, BD-25, BD-50, BD-100 and BD-128, USB/drive sizes from 16 GB to 2 TB, and a **Custom Size** for each.
+  * Placement modes: **Dual-Part Split** with TargetFill Pro's split balance (Balanced 50/50, Outer Rim 25/75, Golden Sec 33/67, Inner Hub 75/25, Lead-In 10/90, or any value on the slider, with live Beginning/End sizes), **Single: End** and **Single: Start**, plus a live **radial track preview** (a drive bar for USB).
+  * **Generate .ISO Image** builds a ready-to-burn image with Windows' built-in IMAPI2, padded to the exact disc size, plus a printable **disc label**. A folder too big for one disc is split into several ISOs (after showing what goes on each disc), each filled to 100% with a "DISC 1 OF N" label. If the folder has `Disc_01`, `Disc_02`… folders, it offers to build one ISO from each. Your files are hard-linked into a temporary staging folder (instant, no extra space) or copied when that isn't possible, and are never changed.
+  * **Generate Split Filler** pads the folder itself, ready to burn with any software. For USB sticks and drives it fills up to the size you picked (or the free space), in files under 4 GB, with **Virtual (Sparse)** or **Physical (Blocks)** writing. **Clean Fillers** removes everything TargetFill added.
+  * **🔥 ImgBurn** opens ImgBurn in Build mode with the folder's contents, UDF 2.60 and your volume label already set.
+  * **Expert Mode** with all of TargetFill Pro's advanced options: pre-flight path scanner, LBA zone report in the manifest, audio cues, **Auto-Span** (copy an oversized folder into padded `Disc_01`, `Disc_02`… folders, or build the ISOs directly), real **PAR2 recovery files** (needs `par2.exe`), stealth filler names, random-data filler, the searchable disc library catalog and the on-disc `Verify_Disc.bat` verifier. Also **Export Disc Label** and **Export Jewel Case / Inlay** images, **View Disc Library Catalog**, and the right-click menu switch.
+  * **Right-click menu:** "TargetFill (ArchivSector-OD)" on folders in File Explorer (turned on from Expert Mode; on Windows 11 it's under Show more options). It opens a TargetFill-only window with that folder, with no drive bays, so it never rips or updates alongside the main window.
+  * A **❔ Instructions** page with TargetFill Pro's step-by-step multi-disc workflows.
+  * All TargetFill choices are remembered between runs.
+* **"💿 Make archival backup disc"** on every drive bay after a successful rip: opens TargetFill with that rip's folder, ready to burn a padded, self-verifying backup copy.
+* TargetFill backups are recorded in **History** next to the rips, as "TargetFill backup (BD-25)" and so on.
+
+### ⚙️ Changed
+* Folders are fully compatible with the standalone TargetFill Pro: the same filler file names, hidden `.targetfill_generated` tracking file, manifest format, `Verify_Disc` scripts, PAR2 file names, label images and `TargetFill_DiscCatalog.csv` (including the shared master catalog in `%LOCALAPPDATA%\TargetFillPro`). A folder prepared by either one can be cleaned or rebuilt by the other.
+* Discs are filled closer to 100% than TargetFill Pro managed. ISO images are measured as they're built and the filler is trimmed to the exact sector, so they come out 100% full. Padded folders now keep only the space the file system really needs, which works out to about 99.7% full on a CD and 99.9% on DVD and Blu-ray. The DVD-5 and DVD-9 presets now use the real recordable sizes (the smaller of the + and − formats, so an image fits both).
+* The updater waits while a TargetFill job is running, and asks you to close any other ArchivSector-OD window first.
+
+### 🐛 Fixed
+* Turning Unattended Mode on or off, changing the theme, or saving Settings no longer overwrites drive bay names and OmniDrive confirmations saved since the app started.
+
+### 🔜 Coming in v3.1
+* Burning straight to a drive with ImgBurn, and blank-disc detection in the drive bays.
+
+---
+
 ## v2.4.1 - 2026-10-07
 
 ### ⚙️ Changed
