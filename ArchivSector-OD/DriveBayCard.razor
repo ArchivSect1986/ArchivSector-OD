@@ -241,19 +241,19 @@
 
     <div class="bay-actions">
         <button class="bay-btn bd @(selectedMode == "Blu-ray / 4K UHD" ? "selected" : "")"
-                disabled="@(Category != DiscCategory.BluRay)"
+                disabled="@(Category != DiscCategory.BluRay || healthRunning)"
                 title="@(Category != DiscCategory.BluRay ? "Insert a Blu-ray/4K disc to enable this" : "")"
                 @onclick='() => OpenModeDialog("bd")'>
             🎬 Blu-ray / 4K UHD (MakeMKV Backup Decrypt)
         </button>
         <button class="bay-btn dvd @(selectedMode == "DVD Movie Disc" ? "selected" : "")"
-                disabled="@(Category != DiscCategory.Dvd)"
+                disabled="@(Category != DiscCategory.Dvd || healthRunning)"
                 title="@(Category != DiscCategory.Dvd ? "Insert a DVD to enable this" : "")"
                 @onclick='() => OpenModeDialog("dvd")'>
             📀 DVD Movie Disc (ISO Dump / Movie-Only MKV)
         </button>
         <button class="bay-btn game @(selectedMode == "Game Disc" ? "selected" : "")"
-                disabled="@(!CanRawDump)"
+                disabled="@(!CanRawDump || healthRunning)"
                 title="@(!CanRawDump ? "Insert a game or data disc to enable this" : Category == DiscCategory.Unknown ? "Unrecognized disc (e.g. a PC game) -- dumps a raw image with Redumper" : "")"
                 @onclick='() => StartGated(() => RunRedumperDump("Game", "Game Disc", "Games"))'>
             🎮 Game Disc / Raw ISO (Redumper)
@@ -390,7 +390,7 @@
         </p>
         <button class="bay-btn cancel-btn" @onclick="CancelRun">✖ Cancel</button>
     }
-    else if (lastAction is not null && !showModeDialog)
+    else if (lastAction is not null && !showModeDialog && !healthRunning)
     {
         <button class="bay-btn retry-btn" @onclick="RetryLast">🔁 Retry Last Rip</button>
     }
@@ -401,6 +401,15 @@
                 title="Opens TargetFill with this rip's folder, to burn a padded, self-verifying backup copy">
             💿 Make archival backup disc
         </button>
+    }
+
+    @* v3.2: reads every sector and reports slow or unreadable areas. *@
+    @if (!isRunning)
+    {
+        <DiscHealthPanel DriveLetter="@DriveLetter" MediaPresent="@MediaPresent" Category="@Category"
+                         DiscTitle="@VolumeTitle" DriveModel="@DriveModel"
+                         Disabled="@(isRunning || isVerifying || isQueuedForBatch || showModeDialog)"
+                         BusyChanged="OnHealthBusyChanged" />
     }
 
     <button class="log-toggle-btn" @onclick="() => showLog = !showLog">
@@ -623,9 +632,20 @@
 
     private void OnBatchSyncStateChanged() => InvokeAsync(StateHasChanged);
 
+    // True while a disc health check is reading this drive (DiscHealthPanel).
+    // A rip waiting in the batch queue for this drive is dropped when a check
+    // starts, so the two never read the disc at the same time.
+    private bool healthRunning = false;
+
+    private void OnHealthBusyChanged(bool busy)
+    {
+        healthRunning = busy;
+        if (busy) BatchSyncService.RemoveQueued(DriveLetter);
+    }
+
     private async Task TryAutoStart()
     {
-        if (isRunning || showModeDialog) return;
+        if (isRunning || showModeDialog || healthRunning) return;
         if (Category != DiscCategory.BluRay && Category != DiscCategory.Dvd && Category != DiscCategory.Game) return;
 
         var config = ConfigService.Load();

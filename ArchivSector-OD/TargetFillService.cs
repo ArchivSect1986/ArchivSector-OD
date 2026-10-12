@@ -1353,7 +1353,8 @@ namespace ArchivSector_OD
                         Release(resultObj);
                         Release(fsi);
                         resultObj = null; fsi = null;
-                        if (fit(delta)) continue;
+                        LetGoOfFiles();
+                        if (TryFit(fit, delta)) continue;
                         (fsi, resultObj, totalBlocks) = CreateImage(sourceDir, media, volume, hasLargeFile);
                     }
                     if (totalBlocks > maxBlocks)
@@ -1366,6 +1367,7 @@ namespace ArchivSector_OD
                 {
                     Release(resultObj);
                     Release(fsi);
+                    LetGoOfFiles();
                 }
             }
         }
@@ -1395,7 +1397,11 @@ namespace ArchivSector_OD
                 var clean = Regex.Replace(string.IsNullOrWhiteSpace(volume) ? "TARGETFILL" : volume, "[^a-zA-Z0-9_]", "_");
                 if (clean.Length > 32) clean = clean.Substring(0, 32);
                 fsi.VolumeName = clean;
-                fsi.Root.AddTree(sourceDir, false);
+                // Keep and release the Root object too: every COM object IMAPI2
+                // hands out holds the image (and its open files) alive.
+                object rootObj = fsi.Root;
+                try { ((dynamic)rootObj).AddTree(sourceDir, false); }
+                finally { Release(rootObj); }
                 dynamic result = fsi.CreateResultImage();
                 long total = Convert.ToInt64(result.TotalBlocks);
                 return ((object)fsi, (object)result, total);
@@ -1446,6 +1452,38 @@ namespace ArchivSector_OD
                 // Release IMAPI2's stream so it lets go of the staged files.
                 if (stream is not null) Release(stream);
             }
+        }
+
+        // IMAPI2 only closes the files it read once every COM wrapper for the
+        // image is gone, including temporary ones .NET made along the way.
+        private static void LetGoOfFiles()
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        // Resizes the filler, retrying for a few seconds if the file is still
+        // held (IMAPI2 letting go, or antivirus scanning the new file). If it
+        // still can't, returns false and the ISO is built at the measured
+        // size, padded to the disc size as before -- never a failed build.
+        private static bool TryFit(Func<long, bool> fit, long delta)
+        {
+            for (int attempt = 0; attempt < 20; attempt++)
+            {
+                try { return fit(delta); }
+                catch (IOException)
+                {
+                    Thread.Sleep(250);
+                    LetGoOfFiles();
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    Thread.Sleep(250);
+                    LetGoOfFiles();
+                }
+            }
+            return false;
         }
 
         private static void Release(object? com)

@@ -1,0 +1,220 @@
+@* Disc health check, shown inside each drive bay (v3.2). Reads every
+   sector of the disc in the drive and shows, live, how fast each part of
+   the disc reads, plus anything slow or unreadable. All the work is in
+   DiscHealthService; this is the screen. DriveBayCard passes in the disc
+   details and is told (BusyChanged) while a check runs, so it can keep its
+   rip buttons disabled. *@
+
+@implements IDisposable
+
+@if (!running && result is null)
+{
+    <button class="bay-btn tray-btn" style="margin-top: 6px;" @onclick="Start"
+            disabled="@(!CanStart)" title="@StartTitle">
+        🩺 Disc health check
+    </button>
+}
+else
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 6px;">
+        <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+            <strong>🩺 Disc health check</strong>
+            @if (running)
+            {
+                <span class="bay-subtitle" style="margin: 0;">@Percent% • ETA @Eta</span>
+            }
+            else if (result is not null)
+            {
+                <span style="color: @VerdictColor; font-weight: 700;">@result.VerdictTitle</span>
+            }
+        </div>
+
+        @* Read speed across the disc: one bar per 1% of the disc, from the
+           inner edge (left) to the outer edge (right). *@
+        <svg viewBox="0 0 300 64" preserveAspectRatio="none" style="width: 100%; height: 64px; background: rgba(0,0,0,0.25); border-radius: 4px;"
+             role="img" aria-label="Read speed across the disc, inner edge on the left">
+            @for (int i = 0; i < DiscHealthService.Segments; i++)
+            {
+                var (h, color) = Bar(i);
+                <rect x="@(i * 3)" y="@F(62 - h)" width="2.4" height="@F(h)" fill="@color" />
+            }
+        </svg>
+        <div style="display: flex; justify-content: space-between; font-size: 10px;" class="bay-subtitle">
+            <span>Inner edge</span>
+            <span>
+                <span style="color: #22c55e;">■</span> good
+                <span style="color: #f59e0b; margin-left: 6px;">■</span> slow
+                <span style="color: #ef4444; margin-left: 6px;">■</span> unreadable
+            </span>
+            <span>Outer edge</span>
+        </div>
+
+        @if (running && progress is not null)
+        {
+            <div class="progress-bar"><div class="progress-fill" style="width: @Percent%"></div></div>
+            <span class="bay-subtitle" style="margin: 0;">
+                @DiscHealthService.FormatBytes(progress.SectorsDone * DiscHealthService.SectorSize) of
+                @DiscHealthService.FormatBytes(progress.TotalSectors * DiscHealthService.SectorSize) •
+                @DiscHealthService.FormatSpeed(progress.CurrentBytesPerSec, progress.OneX) •
+                <span style="color: @(progress.BadSectors > 0 ? "var(--danger)" : "inherit");">@progress.BadSectors.ToString("N0") unreadable</span> •
+                @progress.SlowSectors.ToString("N0") slow
+            </span>
+            <button class="bay-btn cancel-btn" @onclick="Cancel">✖ Stop check</button>
+        }
+        else if (running)
+        {
+            <span class="bay-subtitle" style="margin: 0;">Starting… (the drive may need a moment to spin up)</span>
+            <button class="bay-btn cancel-btn" @onclick="Cancel">✖ Stop check</button>
+        }
+        else if (result is not null)
+        {
+            @if (result.Error is not null)
+            {
+                <span style="color: var(--danger); font-size: 12px;">⚠ @result.Error</span>
+            }
+            <span style="font-size: 12px;">@result.VerdictText</span>
+            <span class="bay-subtitle" style="margin: 0;">
+                Average @DiscHealthService.FormatSpeed(result.AverageBytesPerSec, result.Final.OneX) •
+                @result.BadSectors.ToString("N0") unreadable • @result.SlowSectors.ToString("N0") slow •
+                took @result.Elapsed.ToString(@"h\:mm\:ss")
+            </span>
+            @if (Category == DiscCategory.Audio)
+            {
+                <span class="bay-subtitle" style="margin: 0;">
+                    Music CDs: drives quietly correct small errors in music, so "unreadable" here means a spot the drive couldn't read at all.
+                    Slow areas are the best sign of scratches or wear on a music CD.
+                </span>
+            }
+            @if (result.BadSectors > 0 && Category == DiscCategory.Dvd)
+            {
+                <span class="bay-subtitle" style="margin: 0; color: var(--amber);">
+                    Note: on copy-protected DVD movies, some drives refuse to read protected sectors until a player unlocks the disc,
+                    which shows up here as unreadable. If the movie plays fine, that may be the cause.
+                </span>
+            }
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                @if (result.ReportPath is not null)
+                {
+                    <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="OpenReport">📄 Open report</button>
+                }
+                <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="Start" disabled="@(!CanStart)">🔁 Check again</button>
+                <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="() => result = null">Close</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string DriveLetter { get; set; } = "";
+    [Parameter] public bool MediaPresent { get; set; }
+    [Parameter] public DiscCategory Category { get; set; }
+    [Parameter] public string DiscTitle { get; set; } = "";
+    [Parameter] public string DriveModel { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }                 // the bay is ripping or checksumming
+    [Parameter] public EventCallback<bool> BusyChanged { get; set; }
+
+    private bool running;
+    private DiscHealthService.Progress? progress;
+    private DiscHealthService.Result? result;
+    private CancellationTokenSource? cts;
+    private bool lastMediaPresent;
+
+    private bool CanStart => MediaPresent && !Disabled && !running;
+
+    private string StartTitle =>
+        !MediaPresent ? "Insert a disc to check it"
+        : Disabled ? "Wait for the current rip to finish"
+        : "Reads every sector of the disc and shows anything slow or unreadable. Nothing is written to the disc.";
+
+    protected override void OnParametersSet()
+    {
+        // A different disc: forget the last result.
+        if (lastMediaPresent && !MediaPresent && !running) result = null;
+        lastMediaPresent = MediaPresent;
+    }
+
+    private int Percent => progress is null || progress.TotalSectors == 0 ? 0
+        : (int)Math.Min(100, progress.SectorsDone * 100 / progress.TotalSectors);
+
+    private string Eta
+    {
+        get
+        {
+            if (progress is null || progress.SectorsDone == 0) return "…";
+            double secs = progress.Elapsed.TotalSeconds * (progress.TotalSectors - progress.SectorsDone) / progress.SectorsDone;
+            var t = TimeSpan.FromSeconds(secs);
+            return t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min" : "under a minute";
+        }
+    }
+
+    private string VerdictColor => result?.Verdict switch
+    {
+        DiscHealthService.Level.Damaged => "var(--danger)",
+        DiscHealthService.Level.Slow => "var(--amber)",
+        _ => "var(--success)",
+    };
+
+    private (double Height, string Color) Bar(int i)
+    {
+        var p = result?.Final ?? progress;
+        if (p is null) return (2, "#334155");
+        if (p.SegmentBad[i] > 0) return (60, "#ef4444");
+        double speed = p.SegmentSpeed[i];
+        if (speed <= 0) return (2, "#334155");
+        double max = p.SegmentSpeed.Max();
+        double h = Math.Max(4, 58 * speed / Math.Max(1, max));
+        return (h, p.SegmentSlow[i] > 0 ? "#f59e0b" : "#22c55e");
+    }
+
+    private static string F(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    private async Task Start()
+    {
+        if (!CanStart) return;
+        running = true;
+        result = null;
+        progress = null;
+        cts = new CancellationTokenSource();
+        RipActivity.Set(DriveLetter, "health", true);
+        await BusyChanged.InvokeAsync(true);
+        StateHasChanged();
+
+        var reporter = new Progress<DiscHealthService.Progress>(p => InvokeAsync(() => { progress = p; StateHasChanged(); }));
+        DiscHealthService.Result r;
+        try
+        {
+            r = await DiscHealthService.RunAsync(DriveLetter, reporter, cts.Token);
+        }
+        catch (Exception ex)
+        {
+            r = new DiscHealthService.Result { Error = $"The check couldn't run: {ex.Message}", VerdictTitle = "Not checked" };
+        }
+
+        // Only a check that actually read something gets a report and a History entry.
+        if (r.Final.SectorsDone > 0)
+            await Task.Run(() => DiscHealthService.SaveReport(r, DriveLetter, DiscTitle, DriveModel));
+
+        result = r;
+        running = false;
+        cts.Dispose();
+        cts = null;
+        RipActivity.Set(DriveLetter, "health", false);
+        await BusyChanged.InvokeAsync(false);
+        StateHasChanged();
+    }
+
+    private void Cancel() => cts?.Cancel();
+
+    private void OpenReport()
+    {
+        if (result?.ReportPath is null) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = result.ReportPath, UseShellExecute = true }); }
+        catch { /* no text editor -- nothing useful to report */ }
+    }
+
+    public void Dispose()
+    {
+        cts?.Cancel();
+        if (running) RipActivity.Set(DriveLetter, "health", false);
+    }
+}

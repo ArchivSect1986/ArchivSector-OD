@@ -4,6 +4,24 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v3.1 - 2026-10-12
+
+### ✨ Added
+* **🩺 Disc health check** in every drive bay. It reads every sector of the disc and shows, live, how fast each part of the disc reads, from the inner edge to the outer edge: green for good, amber for slow, red for unreadable. Slow areas are often the first sign of wear, dirt or a disc starting to fail, long before files stop opening. When it finishes, you get a verdict: **Healthy**, **Readable, with slow areas** or **Damaged**.
+  * Works on Blu-ray, DVD and CD, including music CDs, and PS1 and other mixed CDs, which are read in raw mode like Redumper does.
+  * A report listing the exact damaged areas and the read speed across the disc is saved to `%AppData%\ArchivSector-OD\HealthReports`, and the check is recorded in History.
+  * Read-only: nothing is ever written to the disc. It can be stopped at any time, and the bay's rip buttons are locked while it runs.
+* **📚 Batch TargetFill:** queue several folders in the TargetFill tab and build all their ISOs (or pad them all) in one go, with each folder named after itself. A folder that fails is marked and the batch carries on with the next one.
+
+### 🐛 Fixed
+* **Generate .ISO Image could fail** with "The process cannot access the file … because it is being used by another process" (v3.0). Windows' disc image builder was still holding the filler file when TargetFill resized it to fill the disc to exactly 100%. ISOs now build reliably and still come out exactly the disc's size.
+* Temporary files from ISO builds are now cleaned up reliably.
+
+### 🔜 Coming next
+* Burning straight to a drive, blank-disc detection in the drive bays, and checking a disc right after it's burned.
+
+---
+
 ## v3.0 - 2026-10-09
 
 ### ✨ Added
@@ -27,9 +45,6 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ### 🐛 Fixed
 * Turning Unattended Mode on or off, changing the theme, or saving Settings no longer overwrites drive bay names and OmniDrive confirmations saved since the app started.
-
-### 🔜 Coming in v3.1
-* Burning straight to a drive with ImgBurn, and blank-disc detection in the drive bays.
 
 ---
 

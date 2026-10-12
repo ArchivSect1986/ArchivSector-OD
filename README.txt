@@ -27,6 +27,24 @@ settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
 
 ========================================================================
+🩺 NEW IN V3.1 — DISC HEALTH CHECK & BATCH TARGETFILL
+========================================================================
+
+• 🩺 Disc health check: a new button in every drive bay reads every
+  sector of the disc and shows a live chart of how fast each part reads,
+  from the inner edge to the outer edge (green = good, amber = slow,
+  red = unreadable). Slow areas are often the first sign of wear or a
+  disc starting to fail. You get a verdict (Healthy / Readable, with slow
+  areas / Damaged) and a saved report, and it shows up in History.
+  Works on Blu-ray, DVD and CD, including music CDs and PS1 games.
+  Nothing is ever written to the disc.
+• 📚 Batch TargetFill: in the TargetFill tab, add several folders and
+  build all their ISOs (or pad them all) in one go.
+• 🐛 Fixed: Generate .ISO Image could fail with "being used by another
+  process" in v3.0. ISOs now build reliably and still fill the disc to
+  exactly 100%.
+
+========================================================================
 🎯 NEW IN V3.0 — TARGETFILL BUILT IN
 ========================================================================
 

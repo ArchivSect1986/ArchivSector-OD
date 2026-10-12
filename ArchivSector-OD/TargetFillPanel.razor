@@ -239,6 +239,70 @@
                 }
             </div>
         }
+
+        @* Batch: several folders, one after another, with the settings above.
+           Each folder gets its own name as the volume label. *@
+        <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+                <span class="bay-meta" style="margin: 0;">📚 BATCH — SEVERAL FOLDERS</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <button class="shortcut-btn" @onclick="AddBatchFolders" disabled="@busy">➕ Add folders…</button>
+                    <button class="shortcut-btn" @onclick="AddCurrentToBatch" disabled="@(busy || !HasFolder)">➕ Add this folder</button>
+                    @if (batch.Count > 0)
+                    {
+                        <button class="shortcut-btn" @onclick="ClearBatch" disabled="@busy">Clear</button>
+                    }
+                </div>
+            </div>
+            @if (batch.Count == 0)
+            {
+                <span class="bay-subtitle" style="margin: 0;">
+                    Add several folders to build all their ISOs (or pad them all) in one go, using the disc size and options above.
+                    Each folder is named after itself.
+                </span>
+            }
+            else
+            {
+                @foreach (var item in batch)
+                {
+                    var it = item;
+                    <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 13px;">
+                        <span style="width: 18px; text-align: center;">@BatchIcon(it)</span>
+                        <span style="flex: 1; min-width: 0;">
+                            <strong>@Path.GetFileName(it.Folder.TrimEnd('\\', '/'))</strong>
+                            <span class="bay-subtitle" style="margin: 0; display: block; overflow-wrap: anywhere;">@(it.Detail ?? it.Folder)</span>
+                        </span>
+                        @if (!busy)
+                        {
+                            <button class="shortcut-btn" style="padding: 2px 8px;" title="Remove from the batch" @onclick="() => batch.Remove(it)">✖</button>
+                        }
+                    </div>
+                }
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    @if (batchRunning)
+                    {
+                        <button class="bay-btn cancel-btn" style="width: auto;" @onclick="() => batchStop = true" disabled="@batchStop">
+                            @(batchStop ? "Stopping after this folder…" : "✖ Stop after this folder")
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="bay-btn game" style="width: auto; padding: 0 18px;" @onclick="() => RunBatch(true)" disabled="@(busy || Medium.IsUsb || BatchTodo(true) == 0)"
+                                title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds the ISOs for every folder in the list that doesn't have them yet")">
+                            💿 Build all ISOs (@BatchTodo(true))
+                        </button>
+                        <button class="bay-btn bd" style="width: auto; padding: 0 18px;" @onclick="() => RunBatch(false)" disabled="@(busy || BatchTodo(false) == 0)"
+                                title="Adds filler to every folder in the list that isn't padded yet">
+                            🧩 Pad all folders (@BatchTodo(false))
+                        </button>
+                        @if (batch.Any(b => b.IsoDone || b.PadDone))
+                        {
+                            <button class="shortcut-btn" @onclick="ResetBatch" title="Lets every folder be built or padded again">↺ Reset list</button>
+                        }
+                    }
+                </div>
+            }
+        </div>
     </section>
 
     @* Radial preview *@
@@ -818,6 +882,148 @@
             busy = false;
             StateHasChanged();
         }
+    }
+
+    // ---- batch ----
+
+    private sealed class BatchItem
+    {
+        public string Folder = "";
+        public bool Working;
+        public bool? Ok;            // result of the last run: null = not run yet
+        public string? Detail;
+        public bool IsoDone;        // ISOs built (a later run of the same kind skips it)
+        public bool PadDone;        // filler added
+    }
+
+    private readonly List<BatchItem> batch = new();
+    private bool batchRunning;
+    private bool batchStop;
+
+    private static string BatchIcon(BatchItem b) => b.Working ? "⏳" : b.Ok == true ? "✅" : b.Ok == false ? "⚠️" : "•";
+
+    // Folders the next "Build all ISOs" / "Pad all folders" will do: every
+    // folder not already done with that same action.
+    private int BatchTodo(bool iso) => batch.Count(b => iso ? !b.IsoDone : !b.PadDone);
+
+    private void AddToBatch(string path)
+    {
+        string full;
+        try { full = TargetFillService.NormalizePath(path); } catch { return; }
+        if (!Directory.Exists(full)) return;
+        if (batch.Any(b => string.Equals(b.Folder, full, StringComparison.OrdinalIgnoreCase))) return;
+        batch.Add(new BatchItem { Folder = full });
+    }
+
+    private void AddBatchFolders()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Choose folders for the batch (hold Ctrl to pick several)", Multiselect = true };
+        if (HasFolder) dlg.InitialDirectory = Path.GetDirectoryName(folder) ?? folder;
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) == true)
+            foreach (var f in dlg.FolderNames) AddToBatch(f);
+    }
+
+    private void AddCurrentToBatch()
+    {
+        if (HasFolder) AddToBatch(folder);
+    }
+
+    private void ClearBatch() => batch.Clear();
+
+    private void ResetBatch()
+    {
+        foreach (var b in batch) { b.IsoDone = b.PadDone = false; b.Ok = null; b.Detail = null; }
+    }
+
+    // Runs every folder that isn't done yet, one at a time. A folder that
+    // fails is marked and the batch carries on with the next one.
+    private async Task RunBatch(bool iso)
+    {
+        var todo = batch.Where(b => iso ? !b.IsoDone : !b.PadDone).ToList();
+        if (todo.Count == 0) return;
+        if (iso && todo.Count > 1)
+        {
+            var multi = todo.Count;
+            if (Ask($"Build ISO images for {multi} folders with these settings ({Medium.Label})?\n\n" +
+                    "Each folder gets its own name as the volume label. A folder too big for one disc is split into several ISOs automatically.",
+                    "Batch ISO Build", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+        }
+
+        batchRunning = true;
+        batchStop = false;
+        busy = true;
+        resultMessage = null;
+        RipActivity.Set("TargetFill", "job", true);
+        int done = 0, failed = 0, processed = 0;
+        try
+        {
+            for (int i = 0; i < todo.Count; i++)
+            {
+                if (batchStop) break;
+                var item = todo[i];
+                var name = Path.GetFileName(item.Folder.TrimEnd('\\', '/'));
+                item.Working = true;
+                item.Ok = null;
+                item.Detail = iso ? "Building ISO…" : "Adding filler…";
+                var prefix = $"Folder {i + 1} of {todo.Count} ({name}): ";
+                progressText = prefix + "starting…";
+                StateHasChanged();
+
+                var o = CurrentOptions();
+                o.VolumeLabel = "";   // each folder is named after itself
+                var f = item.Folder;
+                void Log(string text) => InvokeAsync(() => { progressText = prefix + text; item.Detail = text; StateHasChanged(); });
+
+                TargetFillService.Result r;
+                try
+                {
+                    r = await Task.Run(() => iso ? TargetFillService.BuildIso(f, o, Log) : TargetFillService.GenerateFiller(f, o, Log));
+                }
+                catch (Exception ex)
+                {
+                    r = new TargetFillService.Result { Message = $"Something went wrong: {ex.Message}" };
+                }
+
+                item.Working = false;
+                item.Ok = r.Ok;
+                if (r.Ok)
+                {
+                    // Building an ISO first removes the folder's own filler (it
+                    // goes inside the ISO instead), so it's no longer padded.
+                    if (iso) { item.IsoDone = true; item.PadDone = false; }
+                    else item.PadDone = true;
+                }
+                item.Detail = r.Ok
+                    ? (r.Outputs.Count > 0 && iso ? string.Join(", ", r.Outputs) : r.Message)
+                    : r.Message + (r.TooBig ? " (Build all ISOs splits it across several discs.)" : "");
+                if (r.Ok)
+                {
+                    done++;
+                    if (o.Catalog)
+                    {
+                        try { TargetFillService.RecordHistory(name, o.Media.Label, f); } catch { /* history is best-effort */ }
+                    }
+                }
+                else failed++;
+                processed++;
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            RipActivity.Set("TargetFill", "job", false);
+            busy = false;
+            batchRunning = false;
+        }
+
+        int left = todo.Count - processed;
+        var msg = $"Batch finished: {done} folder(s) done" + (failed > 0 ? $", {failed} failed (see the list)" : "") +
+                  (batchStop && left > 0 ? $", {left} not started (stopped)" : "") + ".";
+        ShowResult(failed == 0, msg);
+        batchStop = false;
+        if (HasFolder) await Rescan();
+        await ApplyPendingRequest();
     }
 
     // A folder sent from a drive bay while a job was running.
