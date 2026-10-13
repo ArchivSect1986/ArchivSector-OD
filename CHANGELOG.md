@@ -4,6 +4,21 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v3.2 - 2026-10-13
+
+### ✨ Added
+* **Game dumps name themselves.** When a dump finishes and you haven't typed a name, it's renamed automatically (file and folder):
+  * **Any console:** if the dump matches an imported Redump DAT, it gets Redump's exact name, e.g. "NHL 13 (USA, Europe) (En,Fr,De,Sv,Fi,Ru,Cs)".
+  * **Original Xbox:** even without a Redump match, the real game name is read from inside the dump (e.g. "Madden NFL 2002").
+  * **Xbox 360:** the game's Title ID and disc number are shown in the log. Xbox 360 games store their name encrypted, so 360 names come from Redump's Xbox 360 DAT (free from redump.org, imported in Settings).
+* **Cover art for games:** once a game is named, its cover is fetched automatically from RAWG (needs a free RAWG key in Settings).
+* A name you type in the bay's name box before or during the dump always wins.
+
+### 🐛 Fixed
+* The Disc health check button showed an empty box instead of its icon on some versions of Windows.
+
+---
+
 ## v3.1 - 2026-10-12
 
 ### ✨ Added

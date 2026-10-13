@@ -27,7 +27,23 @@ settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
 
 ========================================================================
-🩺 NEW IN V3.1 — DISC HEALTH CHECK & BATCH TARGETFILL
+🏷️ NEW IN V3.2 — GAME DUMPS NAME THEMSELVES
+========================================================================
+
+• When a game dump finishes and you haven't typed a name, it's renamed
+  automatically:
+  - Any console: matched against your imported Redump DATs, it gets
+    Redump's exact name, e.g. "NHL 13 (USA, Europe) (En,Fr,...)".
+  - Original Xbox: the real game name is read from inside the dump,
+    even without a Redump match.
+  - Xbox 360: the name comes from Redump's Xbox 360 DAT (free from
+    redump.org - import it in Settings). The Title ID is shown in the
+    log either way.
+• The game's cover art is then fetched automatically from RAWG.
+• A name you type yourself always wins.
+
+========================================================================
+🔬 NEW IN V3.1 — DISC HEALTH CHECK & BATCH TARGETFILL
 ========================================================================
 
 • 🩺 Disc health check: a new button in every drive bay reads every

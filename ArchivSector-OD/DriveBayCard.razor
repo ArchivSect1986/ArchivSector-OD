@@ -558,6 +558,7 @@
     private string lastSha1 = "";
     private string lastMd5 = "";
     private string lastRedumpMatch = "";
+    private string? lastRedumpName = null;   // the matching Redump entry's name, for auto-naming
 
     private long targetBytes = 0;
     private long writtenBytes = 0;
@@ -997,6 +998,81 @@
         AddLog($"Moved to {target}");
     }
 
+    // Names a finished game dump automatically: Redump's exact name when the
+    // dump matches an imported Redump DAT (any console), otherwise the real
+    // name stored inside an Original Xbox game. Xbox 360 games keep their
+    // name only in encrypted data, so they're named through Redump. Then
+    // fetches cover art for that name from RAWG.
+    private async Task AutoNameGame(string operationLabel)
+    {
+        if (lastGameIso is null || lastGameFolder is null) return;
+        string? name = null, source = null;
+        if (!string.IsNullOrWhiteSpace(lastRedumpName)) { name = lastRedumpName; source = "Redump"; }
+
+        if (EffectiveGameSystem is "Original Xbox" or "Xbox 360")
+        {
+            var iso = lastGameIso;
+            var info = await Task.Run(() => XboxGameInfoService.ReadFromIso(iso));
+            if (info is not null)
+            {
+                var disc = info.DiscCount > 1 ? ", disc " + info.DiscNumber + " of " + info.DiscCount : "";
+                var titlePart = info.Title is null ? "" : " '" + info.Title + "'";
+                AddLog(operationLabel + ": " + info.System + " game" + titlePart + ", Title ID " + info.TitleId + disc);
+                if (name is null && info.Title is not null) { name = info.Title; source = "the disc"; }
+                if (name is null && info.System == "Xbox 360")
+                {
+                    AddLog("Xbox 360 games store their name encrypted. Import Redump's Xbox 360 DAT (Settings → Import DAT File) " +
+                           "and future 360 dumps are named automatically. You can type the name in the name box above.");
+                    gameNameNote = $"Title ID {info.TitleId} -- type the name above, or import the Redump Xbox 360 DAT for automatic names.";
+                }
+            }
+        }
+
+        if (name is null) return;
+        var clean = CleanGameName(name);
+        if (clean is null) return;
+        if (clean != lastGameName)
+        {
+            if (!RenameGameOutput(clean)) return;
+            gameNameNote = $"✓ Named '{clean}' from {source}";
+            AddLog($"{operationLabel}: named '{clean}' from {source}");
+        }
+        StateHasChanged();
+        await AutoFetchGameArt(clean);
+    }
+
+    // Matches "(USA)", "[!]" and similar tags at the end of a Redump name.
+    private const string BracketsPattern = "\\s*[\\(\\[][^\\)\\]]*[\\)\\]]";
+
+    // Cover art for a named game from RAWG (needs a free RAWG key in Settings).
+    private async Task AutoFetchGameArt(string name)
+    {
+        var config = ConfigService.Load();
+        if (!config.AutoFetchMetadataArt) return;
+        if (string.IsNullOrWhiteSpace(config.RawgApiKey))
+        {
+            AddLog("Cover art skipped: no RAWG API key set (add a free one in Settings).");
+            return;
+        }
+        // "Halo 3 (USA) (En,Fr,Es)" -> "Halo 3"
+        var query = System.Text.RegularExpressions.Regex.Replace(name, BracketsPattern, "").Trim();
+        if (query.Length == 0) query = name;
+        try
+        {
+            var results = await MetadataFetchService.SearchRawg(query, config.RawgApiKey);
+            if (results.Count == 0) { AddLog("Cover art: no RAWG results for '" + query + "'."); return; }
+            var top = results[0];
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(name, top);
+            LoadCoverDataUri();
+            AddLog(hasCachedCover ? "Cover art: saved '" + top.Title + "' (RAWG)" : "Cover art: '" + top.Title + "' has no cover image on RAWG.");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Cover art lookup failed: {ex.Message}");
+        }
+    }
+
     // Backup for an Xbox disc dumped through the DVD menu's Raw Sector
     // ISO option: if Redumper's log has an "XGD detected" line, record
     // the console and (with Auto-categorize on) move the dump from
@@ -1385,6 +1461,7 @@
         lastSha1 = "";
         lastMd5 = "";
         lastRedumpMatch = "";
+        lastRedumpName = null;
         StopProgressTimer();
         targetBytes = 0;
         writtenBytes = 0;
@@ -1534,6 +1611,7 @@
             if (match is not null)
             {
                 lastRedumpMatch = match.Name;
+                lastRedumpName = match.Name;
                 verificationMessage = $"✓ Redump match: {match.Name} (from {match.SourceDat})";
                 verificationColor = "var(--success)";
             }
@@ -1764,6 +1842,7 @@
 
             if (redumperResult.Success && redumperResult.IsoPath is not null)
             {
+                bool userNamed = false;
                 if (folderPrefix == "Game")
                 {
                     lastGameFolder = outputFolder;
@@ -1776,6 +1855,7 @@
                     var wanted = CleanGameName(gameNameDraft);
                     if (wanted is not null && wanted != isoName)
                     {
+                        userNamed = true;
                         AddLog($"{operationLabel}: applying the name '{wanted}' you typed during the dump");
                         if (RenameGameOutput(wanted))
                             gameNameNote = $"✓ Saved as '{wanted}'";
@@ -1795,6 +1875,11 @@
 
                 lastOutputFolder = redumperResult.IsoPath;
                 await VerifyOutput(redumperResult.IsoPath);
+
+                // v3.2: name the dump from Redump or from the disc itself,
+                // unless a name was typed during the dump.
+                if (folderPrefix == "Game" && !userNamed)
+                    await AutoNameGame(operationLabel);
             }
 
             NotifyIfEnabled(config, redumperResult.Success, operationLabel, redumperResult.Success ? redumperResult.IsoPath : redumperResult.ErrorMessage);

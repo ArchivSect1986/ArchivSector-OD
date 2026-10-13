@@ -11,14 +11,14 @@
 {
     <button class="bay-btn tray-btn" style="margin-top: 6px;" @onclick="Start"
             disabled="@(!CanStart)" title="@StartTitle">
-        🩺 Disc health check
+        🔬 Disc health check
     </button>
 }
 else
 {
     <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 6px;">
         <div style="display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
-            <strong>🩺 Disc health check</strong>
+            <strong>🔬 Disc health check</strong>
             @if (running)
             {
                 <span class="bay-subtitle" style="margin: 0;">@Percent% • ETA @Eta</span>
