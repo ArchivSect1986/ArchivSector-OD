@@ -1,6 +1,29 @@
-# 📋 Changelog
+﻿# 📋 Changelog
 
 All notable changes to **ArchivSector-OD** will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org).
+
+---
+
+## v3.3 - 2026-10-15
+
+### ✨ Added
+* **🔥 Burn ISOs to blank discs, right from the drive bay.** Put a blank CD-R, DVD±R or BD-R in a drive and its bay shows the disc type and free space, with a **Burn an ISO to this disc** button.
+  * **Choose how to burn:** **ImgBurn** (picked automatically when it's installed) or **Windows' built-in burning engine** (nothing to install, progress shown in the bay). Your choice is remembered.
+  * **Uses the whole disc with ImgBurn.** Windows keeps 768 MB of every BD-R spare for error handling, so a full BD-25 (25,025,314,816 bytes) can only be burned with ImgBurn. The bay shows both sizes, and an ISO that only fits with ImgBurn gets ImgBurn picked for it.
+  * **Verify after burning:** the disc is read back and compared with the ISO byte for byte (by the app with Windows, or by ImgBurn's own verify with ImgBurn), so you know it's perfect before it goes on the shelf.
+  * **Optional: move the ISO to the Recycle Bin** once the disc is burned and verified (only after every byte matched).
+  * The PC is kept awake while burning, the bay is locked during the burn, and every burn is recorded in History.
+* **📀 Pad existing ISOs** (TargetFill tab): add one or many ISOs and they're padded, one at a time with progress bars, to exactly 100% of the disc size you pick, by adding empty space at the end. Nothing inside an ISO moves, so movies and games still play. Make padded copies (recommended, originals untouched) or pad the originals instantly, and **↺ Remove padding** takes it back off.
+* **📄 Saved logs:** everything the drive bays, TargetFill and burning report is saved to `%AppData%\ArchivSector-OD\Logs` (one file per day, kept for 30 days), so you can look back after closing the app. Each bay has an **Open log** button.
+* **Better crash reports:** `%AppData%\ArchivSector-OD\crash.log` now also records errors inside the app's screens, the screen's browser view failing, and the app closing unexpectedly (with what Windows recorded about it).
+* **Smarter movie search (TMDB):**
+  * A year in brackets picks that year's film: "One Hundred and One Dalmatians (1961)" finds the 1961 film, not the 1996 remake.
+  * Titles with numbers are also searched with the number in words: "101 Dalmatians" finds both films, and "Ocean's 11" also finds "Ocean's Eleven" (1960).
+  * Up to 20 results instead of 10.
+
+### 🐛 Fixed
+* **The app froze for a few seconds when a disc was inserted or a tray was closed,** until the drive worked out what was in it. Drives are now checked in the background, so the window stays responsive.
+* **A blank disc couldn't be ejected** with the bay's Eject button (Windows' normal eject does nothing for a disc with no file system), and the button could get stuck saying "Close Tray".
 
 ---
 

@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using Microsoft.AspNetCore.Components.WebView.Wpf;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ArchivSector_OD
 {
@@ -37,6 +38,22 @@ namespace ArchivSector_OD
 
             var services = new ServiceCollection();
             services.AddWpfBlazorWebView();
+
+            // v3.3: errors inside a screen go to crash.log (CrashWatch.cs).
+            services.AddSingleton<ILoggerFactory>(new CrashLoggerFactory());
+            services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+
+            // v3.3: if the screen's browser view (WebView2) crashes or is
+            // killed, record why.
+            blazorWebView.BlazorWebViewInitialized += (_, e) =>
+            {
+                try
+                {
+                    e.WebView.CoreWebView2.ProcessFailed += (_, f) =>
+                        CrashWatch.ScreenProcessFailed(f.ProcessFailedKind.ToString(), f.Reason.ToString(), f.ExitCode, f.ProcessDescription);
+                }
+                catch { }
+            };
 #if DEBUG
             services.AddBlazorWebViewDeveloperTools();
 #endif

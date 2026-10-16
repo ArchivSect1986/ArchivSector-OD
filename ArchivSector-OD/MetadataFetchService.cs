@@ -24,6 +24,8 @@ namespace ArchivSector_OD
     // etc.), and TMDB searches that return nothing are retried with
     // progressively shorter queries (dropping trailing words), so
     // leftover junk at the end of a label doesn't sink the whole search.
+    // A year in brackets at the end of a search, "(1961)", picks that
+    // year's film (v3.3).
     public static class MetadataFetchService
     {
         private static readonly HttpClient Http = new HttpClient
@@ -144,10 +146,100 @@ namespace ArchivSector_OD
             return results;
         }
 
-        public static async Task<List<MetadataResult>> SearchTmdb(string query, string apiKey, int maxResults = 10)
+        // v3.3: a year in brackets at the end -- "One Hundred and One
+        // Dalmatians (1961)" or "Dune [1984]" -- is taken off the title and
+        // sent to TMDB as the release year, so the right version comes
+        // back instead of a remake. (Typed into the search, the "(1961)"
+        // was searched as part of the title, and TMDB matched the 1996
+        // remake.) Only bracketed years count, so a title that ends in a
+        // number, like "Blade Runner 2049", is left alone.
+        private const string YearPattern = @"^(?<title>.*?\S)\s*[\(\[]\s*(?<year>(?:18|19|20)\d{2})\s*[\)\]]\s*$";
+
+        public static (string Title, string? Year) SplitYear(string query)
+        {
+            var m = Regex.Match(query.Trim(), YearPattern);
+            return m.Success ? (m.Groups["title"].Value.Trim(), m.Groups["year"].Value) : (query.Trim(), null);
+        }
+
+        public static async Task<List<MetadataResult>> SearchTmdb(string query, string apiKey, int maxResults = 20)
+        {
+            if (string.IsNullOrWhiteSpace(apiKey)) return new List<MetadataResult>();
+            var (title, year) = SplitYear(query);
+
+            // v3.3: titles written with a number are also searched with the
+            // number in words, and the results added after the first ones --
+            // "101 Dalmatians" finds the 1961 film, whose title on TMDB is
+            // "One Hundred and One Dalmatians", as well as the 1996 one.
+            var spelled = SpellOutNumbers(title);
+            if (spelled is not null)
+            {
+                var first = await SearchTmdbByTitle(title, year, apiKey, maxResults);
+                var second = await SearchTmdbByTitle(spelled, year, apiKey, maxResults);
+                var merged = first.Concat(second.Where(r => !first.Any(f => f.Id == r.Id))).ToList();
+                // Exact title matches (either way of writing it) go to the top.
+                string a = Simplify(title), b = Simplify(spelled);
+                var ordered = merged.OrderBy(r => Simplify(r.Title) == a || Simplify(r.Title) == b ? 0 : 1);
+                if (year is not null && int.TryParse(year, out int want))
+                    ordered = ordered.ThenBy(r => int.TryParse(r.Year, out var y) ? Math.Abs(y - want) : 9999);
+                return ordered.ToList();
+            }
+            return await SearchTmdbByTitle(title, year, apiKey, maxResults);
+        }
+
+        // Whole numbers from 1 to 999 standing on their own in a title, in
+        // words ("101" -> "One Hundred and One"). Null when there are none.
+        // Bigger numbers are left alone (they're usually years, like "1917").
+        public static string? SpellOutNumbers(string title)
+        {
+            bool changed = false;
+            var result = Regex.Replace(title, @"(?<![\w.])\d{1,3}(?![\w.])", m =>
+            {
+                int n = int.Parse(m.Value);
+                if (n < 1) return m.Value;
+                changed = true;
+                return NumberWords(n);
+            });
+            return changed ? result : null;
+        }
+
+        private static string Simplify(string t) =>
+            Regex.Replace(t.ToLowerInvariant().Replace("-", " "), @"[^a-z0-9 ]", "").Replace(" ", "");
+
+        private static readonly string[] Ones =
+        {
+            "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+            "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen",
+        };
+        private static readonly string[] Tens = { "", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety" };
+
+        private static string NumberWords(int n)
+        {
+            string under100(int x) => x < 20 ? Ones[x] : Tens[x / 10] + (x % 10 > 0 ? "-" + Ones[x % 10] : "");
+            if (n < 100) return under100(n);
+            return Ones[n / 100] + " Hundred" + (n % 100 > 0 ? " and " + under100(n % 100) : "");
+        }
+
+        private static async Task<List<MetadataResult>> SearchTmdbByTitle(string title, string? year, string apiKey, int maxResults)
+        {
+            if (year is not null)
+            {
+                // That title released that year first...
+                var exact = await SearchTmdbOnce(title, apiKey, maxResults, year);
+                if (exact.Count > 0) return exact;
+                // ...then any year, with films from that year (or the
+                // closest year) at the top -- release dates differ between
+                // countries, so the year typed may be off by one.
+                var any = await SearchTmdbWithShorter(title, apiKey, maxResults);
+                int want = int.Parse(year);
+                return any.OrderBy(r => int.TryParse(r.Year, out var y) ? Math.Abs(y - want) : 9999).ToList();
+            }
+            return await SearchTmdbWithShorter(title, apiKey, maxResults);
+        }
+
+        private static async Task<List<MetadataResult>> SearchTmdbWithShorter(string query, string apiKey, int maxResults)
         {
             var results = await SearchTmdbOnce(query, apiKey, maxResults);
-            if (results.Count > 0 || string.IsNullOrWhiteSpace(apiKey)) return results;
+            if (results.Count > 0) return results;
 
             foreach (var shorter in ShorterQueries(query))
             {
@@ -157,12 +249,13 @@ namespace ArchivSector_OD
             return results;
         }
 
-        private static async Task<List<MetadataResult>> SearchTmdbOnce(string query, string apiKey, int maxResults)
+        private static async Task<List<MetadataResult>> SearchTmdbOnce(string query, string apiKey, int maxResults, string? year = null)
         {
             var results = new List<MetadataResult>();
             if (string.IsNullOrWhiteSpace(apiKey)) return results;
 
-            var url = $"https://api.themoviedb.org/3/search/movie?api_key={Uri.EscapeDataString(apiKey)}&query={Uri.EscapeDataString(query)}";
+            var url = $"https://api.themoviedb.org/3/search/movie?api_key={Uri.EscapeDataString(apiKey)}&query={Uri.EscapeDataString(query)}"
+                    + (year is null ? "" : $"&year={year}");
             using var resp = await Http.GetAsync(url);
             resp.EnsureSuccessStatusCode();
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());

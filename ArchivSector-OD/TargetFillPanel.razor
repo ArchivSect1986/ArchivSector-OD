@@ -1,4 +1,4 @@
-@* TargetFill, built into ArchivSector-OD (v3.0), with every feature of
+﻿@* TargetFill, built into ArchivSector-OD (v3.0), with every feature of
    TargetFill Pro v3.0.4. Pick a folder (or send one from a drive bay with
    "Make archival backup disc", or right-click a folder in Explorer), a
    disc size and a placement mode, and TargetFill pads it so the disc is
@@ -303,6 +303,94 @@
                 </div>
             }
         </div>
+
+        @* v3.3: pad ISOs that are already made, out to the size chosen above
+           (empty space added at the end; see IsoPadService). Add one or many;
+           they're done one at a time, with a progress bar. *@
+        <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+                <span class="bay-meta" style="margin: 0;">📀 PAD EXISTING ISOs</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <button class="shortcut-btn" @onclick="AddPadIsos" disabled="@(busy || padBusy)">➕ Add ISOs…</button>
+                    @if (padList.Count > 0)
+                    {
+                        <button class="shortcut-btn" @onclick="ClearPadList" disabled="@padBusy">Clear</button>
+                    }
+                </div>
+            </div>
+            @if (Medium.IsUsb)
+            {
+                <span class="bay-subtitle" style="margin: 0;">Choose a disc size above (CD, DVD or Blu-ray) to pad ISOs to it.</span>
+            }
+            else if (padList.Count == 0)
+            {
+                <span class="bay-subtitle" style="margin: 0;">
+                    Fills ISOs you already have out to exactly 100% of a @Medium.Label, by adding empty space at the end.
+                    Nothing inside an ISO changes or moves, so movies and games still play. Add one or several; they're padded one at a time.
+                </span>
+            }
+            else
+            {
+                @foreach (var it in padList)
+                {
+                    <div style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+                        <span style="width: 18px; text-align: center;">@PadIcon(it)</span>
+                        <span style="flex: 1; min-width: 0; overflow-wrap: anywhere;" title="@it.Path">
+                            <strong>@System.IO.Path.GetFileName(it.Path)</strong>
+                            <span class="bay-subtitle" style="margin: 0; display: block;">@PadLine(it)</span>
+                        </span>
+                        @if (!padBusy && it.Recorded > 0 && it.Recorded < it.Bytes)
+                        {
+                            <button class="shortcut-btn" @onclick="() => RunRemovePadding(it)" disabled="@busy" title="Takes the empty padding back off the end of this ISO">↺ Remove padding</button>
+                        }
+                        @if (!padBusy)
+                        {
+                            <button class="shortcut-btn" @onclick="() => { padList.Remove(it); }" title="Take it off the list (the file isn't touched)">✖</button>
+                        }
+                    </div>
+                }
+
+                @if (!padBusy && PadTodo > 0)
+                {
+                    <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;">
+                        <input type="radio" name="padmode" checked="@padCopy" @onchange="() => SetPadCopy(true)" />
+                        Make padded copies (recommended — the originals are kept as they are; each copy is "&lt;name&gt;_padded.iso")
+                    </label>
+                    <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;">
+                        <input type="radio" name="padmode" checked="@(!padCopy)" @onchange="() => SetPadCopy(false)" />
+                        Pad the original files (instant; can be undone with "Remove padding")
+                    </label>
+                }
+
+                @if (padBusy)
+                {
+                    <span style="font-size: 13px;"><strong>ISO @padIndex of @padTotal</strong> — @padCurrentName</span>
+                    <div class="progress-bar"><div class="progress-fill" style="width: @F(PadOverallPercent)%;"></div></div>
+                    <span class="bay-subtitle" style="margin: 0;">
+                        This ISO: @(padProgress?.Phase ?? "Working")… @(padProgress is not null && padProgress.Percent >= 0 ? padProgress.Percent.ToString("0") + "%" : "")
+                    </span>
+                    <div class="progress-bar" style="height: 6px;">
+                        <div class="progress-fill" style="width: @(padProgress is null || padProgress.Percent < 0 ? "100" : F(padProgress.Percent))%; @(padProgress is null || padProgress.Percent < 0 ? "opacity: 0.5;" : "")"></div>
+                    </div>
+                    <button class="bay-btn cancel-btn" @onclick="StopPad" disabled="@padStopping">@(padStopping ? "Stopping…" : "✖ Stop")</button>
+                }
+                else
+                {
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        <button class="bay-btn bd" style="width: auto; padding: 0 18px;" @onclick="RunPadAll" disabled="@(busy || PadTodo == 0)">
+                            🧩 Pad @(PadTodo == 1 ? "1 ISO" : PadTodo + " ISOs") to @Medium.Label
+                        </button>
+                    </div>
+                }
+                @if (padMessage is not null)
+                {
+                    <span style="font-size: 12px; color: @(padOk ? "var(--success)" : "var(--amber)");">@(padOk ? "✅" : "⚠") @padMessage</span>
+                }
+                <span class="bay-subtitle" style="margin: 0;">
+                    Tip: game dumps padded this way no longer match their Redump checksums, so keep the originals (use "Make padded copies").
+                </span>
+            }
+        </div>
     </section>
 
     @* Radial preview *@
@@ -446,6 +534,190 @@
     private bool rightClickInstalled;
     private bool par2Found;
 
+    // Pad existing ISOs (v3.3): a list, padded one at a time.
+    private sealed class PadItem
+    {
+        public string Path = "";
+        public long Bytes;
+        public long Recorded = -1;     // size before padding, if known
+        public bool Working;
+        public bool? Ok;               // null = not done yet
+        public string? Detail;
+    }
+    private readonly List<PadItem> padList = new();
+    private bool padCopy = true;
+    private bool padBusy, padStopping;
+    private int padIndex, padTotal;
+    private string padCurrentName = "";
+    private IsoPadService.Progress? padProgress;
+    private CancellationTokenSource? padCts;
+    private string? padMessage;
+    private bool padOk;
+
+    private long PadTarget => Medium.Bytes / 2048 * 2048;
+    private bool NeedsPad(PadItem it) => it.Ok != true && it.Bytes > 0 && it.Bytes < PadTarget;
+    private int PadTodo => padList.Count(NeedsPad);
+
+    private double PadOverallPercent
+    {
+        get
+        {
+            if (padTotal == 0) return 0;
+            double current = padProgress is null || padProgress.Percent < 0 ? 0 : padProgress.Percent / 100.0;
+            return Math.Clamp(100.0 * (padIndex - 1 + current) / padTotal, 0, 100);
+        }
+    }
+
+    private static string PadIcon(PadItem it) => it.Working ? "⏳" : it.Ok == true ? "✅" : it.Ok == false ? "⚠️" : "•";
+
+    private string PadLine(PadItem it)
+    {
+        if (it.Detail is not null) return it.Detail;
+        long target = PadTarget;
+        string now = $"{TargetFillService.FormatBytes(it.Bytes)} ({it.Bytes:N0} bytes)";
+        if (it.Bytes > target) return $"{now} — too big for a {Medium.Label}.";
+        if (it.Bytes == target)
+            return $"{now} — already 100% of a {Medium.Label}." +
+                   (it.Recorded > 0 && it.Recorded < it.Bytes ? $" It was {TargetFillService.FormatBytes(it.Recorded)} before padding." : "");
+        double pct = target > 0 ? 100.0 * it.Bytes / target : 0;
+        return $"{now} — {pct:0.0}%. Padding adds {TargetFillService.FormatBytes(target - it.Bytes)}.";
+    }
+
+    private void AddPadIsos()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose the ISOs to pad",
+            Filter = "Disc images (*.iso)|*.iso|All files (*.*)|*.*",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        foreach (var f in dlg.FileNames)
+        {
+            var full = System.IO.Path.GetFullPath(f);
+            if (padList.Any(p => string.Equals(p.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
+            var it = new PadItem { Path = full };
+            RefreshPadItem(it);
+            padList.Add(it);
+        }
+        padMessage = null;
+    }
+
+    private static void RefreshPadItem(PadItem it)
+    {
+        try { it.Bytes = new FileInfo(it.Path).Length; } catch { it.Bytes = 0; }
+        it.Recorded = IsoPadService.RecordedSize(it.Path);
+    }
+
+    private void ClearPadList()
+    {
+        padList.Clear();
+        padMessage = null;
+    }
+
+    private void SetPadCopy(bool copy)
+    {
+        padCopy = copy;
+        Persist();
+    }
+
+    private async Task RunPadAll()
+    {
+        var media = Medium;
+        var todo = padList.Where(NeedsPad).ToList();
+        if (todo.Count == 0) return;
+
+        padBusy = true;
+        padStopping = false;
+        padMessage = null;
+        padTotal = todo.Count;
+        padCts = new CancellationTokenSource();
+        int done = 0, failed = 0;
+        bool copy = padCopy;
+        LogService.Write("TargetFill", $"Pad ISOs: {todo.Count} to {media.Label} ({(copy ? "padded copies" : "in place")})");
+
+        for (int i = 0; i < todo.Count; i++)
+        {
+            if (padCts.IsCancellationRequested) break;
+            var it = todo[i];
+            padIndex = i + 1;
+            padCurrentName = System.IO.Path.GetFileName(it.Path);
+            padProgress = null;
+            it.Working = true;
+            it.Detail = null;
+            StateHasChanged();
+
+            var reporter = new Progress<IsoPadService.Progress>(p => InvokeAsync(() => { padProgress = p; StateHasChanged(); }));
+            var r = await IsoPadService.PadAsync(it.Path, media, copy, reporter, padCts.Token);
+
+            it.Working = false;
+            bool stoppedHere = !r.Ok && padCts.IsCancellationRequested;
+            it.Ok = stoppedHere ? null : r.Ok;      // stopped part-way: still to do
+            it.Detail = r.Message;
+            if (r.Ok) done++; else if (!stoppedHere) failed++;
+            LogService.Write("TargetFill", "Pad ISO [" + it.Path + "]: " + r.Message);
+
+            // In place: the item is now the padded file. A copy goes on the
+            // list as its own (finished) entry.
+            if (r.Ok && r.OutputPath is not null)
+            {
+                if (string.Equals(r.OutputPath, it.Path, StringComparison.OrdinalIgnoreCase)) RefreshPadItem(it);
+                else
+                {
+                    var copyItem = new PadItem { Path = r.OutputPath, Ok = true, Detail = "Padded copy of " + System.IO.Path.GetFileName(it.Path) };
+                    RefreshPadItem(copyItem);
+                    padList.Insert(padList.IndexOf(it) + 1, copyItem);
+                }
+            }
+            padProgress = new IsoPadService.Progress { Phase = "Done", Percent = 100 };
+            StateHasChanged();
+        }
+
+        bool stopped = padCts.IsCancellationRequested;
+        padCts.Dispose();
+        padCts = null;
+        padBusy = false;
+        padStopping = false;
+        padOk = failed == 0 && !stopped;
+        padMessage = $"{done} of {todo.Count} ISO(s) padded to {media.Label}" +
+                     (failed > 0 ? $", {failed} with a problem (see the list)" : "") +
+                     (stopped ? ". Stopped before the rest." : ".");
+        if (sound) { try { System.Media.SystemSounds.Asterisk.Play(); } catch { } }
+        StateHasChanged();
+    }
+
+    private void StopPad()
+    {
+        padStopping = true;
+        padCts?.Cancel();
+    }
+
+    private async Task RunRemovePadding(PadItem it)
+    {
+        padBusy = true;
+        padStopping = false;
+        padMessage = null;
+        padIndex = 1;
+        padTotal = 1;
+        padCurrentName = System.IO.Path.GetFileName(it.Path) + " (removing padding)";
+        padProgress = null;
+        it.Working = true;
+        padCts = new CancellationTokenSource();
+        var reporter = new Progress<IsoPadService.Progress>(p => InvokeAsync(() => { padProgress = p; StateHasChanged(); }));
+        var r = await IsoPadService.RemovePaddingAsync(it.Path, reporter, padCts.Token);
+        padCts.Dispose();
+        padCts = null;
+        it.Working = false;
+        padBusy = false;
+        RefreshPadItem(it);
+        it.Ok = r.Ok ? null : false;
+        it.Detail = r.Ok ? null : r.Message;
+        padOk = r.Ok;
+        padMessage = r.Message;
+        LogService.Write("TargetFill", "Remove ISO padding [" + it.Path + "]: " + r.Message);
+        StateHasChanged();
+    }
+
     private bool HasFolder => !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder);
 
     private TargetFillService.MediaPreset Medium =>
@@ -480,6 +752,7 @@
         autoSpan = s.AutoSpan;
         parity = s.Parity;
         noise = s.Noise;
+        padCopy = s.PadIsoCopy;
         stealth = s.Stealth;
         sound = s.Sound;
 
@@ -507,6 +780,7 @@
             AutoSpan = autoSpan,
             Parity = parity,
             Noise = noise,
+            PadIsoCopy = padCopy,
             Stealth = stealth,
             Sound = sound,
         }.Save();
@@ -728,6 +1002,12 @@
         resultMessage = message;
         resultOutputs = outputs ?? new();
         resultNotes = notes ?? new();
+
+        // Saved to the day's log file too.
+        var where = HasFolder ? " [" + folder + "]" : "";
+        LogService.Write("TargetFill", (ok ? "OK: " : "PROBLEM: ") + message.Replace("\n", " ") + where);
+        foreach (var o in resultOutputs) LogService.Write("TargetFill", "  output: " + o);
+        foreach (var n in resultNotes) LogService.Write("TargetFill", "  note: " + n);
     }
 
     // Generate Split Filler. When the folder is too big and Auto-Span is
@@ -997,6 +1277,7 @@
                 item.Detail = r.Ok
                     ? (r.Outputs.Count > 0 && iso ? string.Join(", ", r.Outputs) : r.Message)
                     : r.Message + (r.TooBig ? " (Build all ISOs splits it across several discs.)" : "");
+                LogService.Write("TargetFill", "Batch " + (iso ? "ISO" : "pad") + " [" + f + "]: " + (r.Ok ? "OK " : "PROBLEM ") + item.Detail);
                 if (r.Ok)
                 {
                     done++;

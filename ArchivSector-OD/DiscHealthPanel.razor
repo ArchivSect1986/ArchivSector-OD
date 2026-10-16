@@ -196,6 +196,8 @@ else
 
         result = r;
         running = false;
+        LogService.Write($"{DriveLetter}:", $"Disc health check: {r.VerdictTitle} -- {r.BadSectors:N0} unreadable, {r.SlowSectors:N0} slow sectors" +
+                         (r.Error is not null ? $" ({r.Error})" : "") + (r.ReportPath is not null ? $" -- report: {r.ReportPath}" : ""));
         cts.Dispose();
         cts = null;
         RipActivity.Set(DriveLetter, "health", false);

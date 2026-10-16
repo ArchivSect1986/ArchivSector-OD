@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
@@ -14,7 +14,9 @@ namespace ArchivSector_OD
     // full details needed to find and fix it. Errors on the main window's
     // thread are shown in a message and the app keeps running instead of
     // closing; errors on background threads can't be recovered from, so
-    // they're logged just before Windows closes the app.
+    // they're logged just before Windows closes the app. CrashWatch (v3.3)
+    // adds screen errors, the screen's browser view failing, and closes
+    // that happened with no warning at all.
     public partial class App : Application
     {
         public static string CrashLogPath => Path.Combine(
@@ -26,7 +28,14 @@ namespace ArchivSector_OD
             DispatcherUnhandledException += OnDispatcherUnhandledException;
             AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
             TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+            CrashWatch.Start();   // v3.3: notices if the last run closed unexpectedly
             base.OnStartup(e);
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            CrashWatch.Stop();    // a normal close
+            base.OnExit(e);
         }
 
         private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

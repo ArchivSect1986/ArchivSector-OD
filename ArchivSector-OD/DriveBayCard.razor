@@ -1,4 +1,4 @@
-@* One drive bay card. Blu-ray/4K and DVD Movie Disc both open a
+﻿@* One drive bay card. Blu-ray/4K and DVD Movie Disc both open a
    mode-choice popup; Movie-Only MKV is disc-agnostic; DVD's popup has
    three real options (MakeMKV backup, Redumper raw ISO, Movie-Only).
    Every mode button is gated by the real detected disc Category. A
@@ -214,7 +214,7 @@
     }
 
     <div class="tray-control">
-        <button class="bay-btn tray-btn" @onclick="ToggleTray" disabled="@isTrayBusy">
+        <button class="bay-btn tray-btn" @onclick="ToggleTray" disabled="@(isTrayBusy || burnRunning)">
             @if (isTrayBusy)
             {
                 <text>⏳ Working…</text>
@@ -390,7 +390,7 @@
         </p>
         <button class="bay-btn cancel-btn" @onclick="CancelRun">✖ Cancel</button>
     }
-    else if (lastAction is not null && !showModeDialog && !healthRunning)
+    else if (lastAction is not null && !showModeDialog && !healthRunning && !burnRunning)
     {
         <button class="bay-btn retry-btn" @onclick="RetryLast">🔁 Retry Last Rip</button>
     }
@@ -403,6 +403,13 @@
         </button>
     }
 
+    @* v3.3: burning an ISO to a blank disc. Always mounted so a running
+       burn keeps its screen; it shows nothing unless there's a blank disc
+       or a burn to show. *@
+    <BurnPanel DriveLetter="@DriveLetter" BlankMediaType="@BlankMediaType" BlankFreeBytes="@BlankFreeBytes" BlankTotalBytes="@BlankTotalBytes"
+               DriveModel="@DriveModel" Disabled="@(isRunning || isVerifying || healthRunning)"
+               BusyChanged="OnBurnBusyChanged" BurnFinished="OnBurnFinished" />
+
     @* v3.2: reads every sector and reports slow or unreadable areas. *@
     @if (!isRunning)
     {
@@ -412,9 +419,15 @@
                          BusyChanged="OnHealthBusyChanged" />
     }
 
-    <button class="log-toggle-btn" @onclick="() => showLog = !showLog">
-        @(showLog ? "▾" : "▸") Process Telemetry [@logLines.Count]
-    </button>
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+        <button class="log-toggle-btn" @onclick="() => showLog = !showLog">
+            @(showLog ? "▾" : "▸") Process Telemetry [@logLines.Count]
+        </button>
+        <button class="log-toggle-btn" @onclick="LogService.OpenToday"
+                title="Opens today's saved log (all drives and TargetFill). Logs are kept for 30 days in %AppData%\ArchivSector-OD\Logs.">
+            📄 Open log
+        </button>
+    </div>
     @if (showLog)
     {
         <div class="log-console">
@@ -633,6 +646,32 @@
 
     private void OnBatchSyncStateChanged() => InvokeAsync(StateHasChanged);
 
+    [Parameter] public string BlankMediaType { get; set; } = "";
+    [Parameter] public long BlankFreeBytes { get; set; }
+    [Parameter] public long BlankTotalBytes { get; set; }
+
+    // A disc this bay just burned shouldn't be auto-ripped by Unattended
+    // Mode when it appears; cleared when the disc is taken out.
+    private bool burnedDiscInDrive = false;
+    private bool burnRunning = false;
+
+    private void OnBurnBusyChanged(bool busy)
+    {
+        burnRunning = busy;
+        if (busy)
+        {
+            burnedDiscInDrive = true;
+            BatchSyncService.RemoveQueued(DriveLetter);
+        }
+    }
+
+    // A burn that didn't finish leaves an unreadable disc, which never
+    // "appears" -- so don't keep skipping auto-start for the next disc.
+    private void OnBurnFinished(bool burned)
+    {
+        if (!burned) burnedDiscInDrive = false;
+    }
+
     // True while a disc health check is reading this drive (DiscHealthPanel).
     // A rip waiting in the batch queue for this drive is dropped when a check
     // starts, so the two never read the disc at the same time.
@@ -646,7 +685,7 @@
 
     private async Task TryAutoStart()
     {
-        if (isRunning || showModeDialog || healthRunning) return;
+        if (isRunning || showModeDialog || healthRunning || burnRunning || burnedDiscInDrive) return;
         if (Category != DiscCategory.BluRay && Category != DiscCategory.Dvd && Category != DiscCategory.Game) return;
 
         var config = ConfigService.Load();
@@ -672,6 +711,7 @@
         {
             bool claimed = BatchSyncService.ClaimOrQueue(DriveLetter, config.MaxConcurrentRips, async () =>
             {
+                if (healthRunning || burnRunning) { BatchSyncService.ReleaseSlot(); return; }
                 await InvokeAsync(pipeline);
                 BatchSyncService.ReleaseSlot();
             });
@@ -821,6 +861,8 @@
     {
         logLines.Add($"[{DateTime.Now:HH:mm:ss}] {text}");
         if (logLines.Count > 200) logLines.RemoveAt(0);
+        // Also saved to the day's log file, so it can be read after the app closes.
+        LogService.Write($"{DriveLetter}:", text);
     }
 
     private void RecordHistory(string operation, string outputPath, string sha1 = "", string md5 = "", string redumpMatch = "")
@@ -1419,8 +1461,13 @@
 
         bool wasOpen = trayIsOpen;
         AddLog(wasOpen ? "Close tray requested" : "Eject requested");
+        // A blank disc (or one Windows can't read) has no file system, and
+        // Windows' normal Eject quietly does nothing for it -- so those go
+        // straight to the drive instead (v3.3).
+        bool noVolume = !MediaPresent;
         var result = await Task.Run(() => wasOpen
             ? TrayControlService.Close(DriveLetter)
+            : noVolume ? TrayControlService.EjectWithoutVolume(DriveLetter)
             : TrayControlService.Eject(DriveLetter));
 
         isTrayBusy = false;
@@ -1517,6 +1564,7 @@
 
         bool claimed = BatchSyncService.ClaimOrQueue(DriveLetter, config.MaxConcurrentRips, async () =>
         {
+            if (healthRunning || burnRunning) { BatchSyncService.ReleaseSlot(); return; }
             await InvokeAsync(action);
             BatchSyncService.ReleaseSlot();
         });
@@ -1568,6 +1616,7 @@
         {
             bool claimed = BatchSyncService.ClaimOrQueue(DriveLetter, config.MaxConcurrentRips, async () =>
             {
+                if (healthRunning || burnRunning) { BatchSyncService.ReleaseSlot(); return; }
                 await InvokeAsync(actionToRetry);
                 BatchSyncService.ReleaseSlot();
             });
@@ -2290,10 +2339,20 @@
 
     private static string FormatGb(long bytes) => $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
 
+    private bool previousBlank = false;
+
     protected override void OnParametersSet()
     {
+        // A blank disc showing up means the tray is closed (a blank disc
+        // never counts as "media present", so the check below misses it,
+        // and the button kept saying "Close Tray").
+        bool blank = !string.IsNullOrEmpty(BlankMediaType);
+        if (blank && !previousBlank) trayIsOpen = false;
+        previousBlank = blank;
+
         if (previousMediaPresent && !MediaPresent)
         {
+            burnedDiscInDrive = false;
             ResetResultState();
             lastAction = null;
             cachedArt = null;

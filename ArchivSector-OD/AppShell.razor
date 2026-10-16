@@ -1,4 +1,4 @@
-@* Root component for the visual shell draft. Bay cards are
+﻿@* Root component for the visual shell draft. Bay cards are
    generated dynamically from whatever optical drives actually exist,
    each keyed by drive letter. Each poll cycle computes real disc
    metadata for whatever's in the drive -- category, format/capacity,
@@ -117,6 +117,8 @@
                               AacsVersion="@st.AacsVersion"
                               GameSystem="@st.GameSystem"
                               Serial="@st.Serial"
+                              BlankMediaType="@st.BlankMediaType"
+                              BlankFreeBytes="@st.BlankFreeBytes" BlankTotalBytes="@st.BlankTotalBytes"
                               DriveModel="@(hw?.Caption ?? "")"
                               DriveFirmware="@(hw?.Firmware ?? "")" />
             }
@@ -177,6 +179,9 @@
         public string AacsVersion = "";
         public string GameSystem = "";
         public string Serial = "";
+        public string BlankMediaType = "";   // "BD-R" etc. when a blank, writable disc is in
+        public long BlankFreeBytes;
+        public long BlankTotalBytes;
     }
 
     private readonly Dictionary<string, DriveState> driveStates = new();
@@ -208,13 +213,10 @@
         BatchSyncService.StateChanged += OnBatchSyncStateChanged;
         TargetFillHandoff.Requested += OnTargetFillRequested;
 
-        RefreshDriveList();
-
-        driveWatchTimer = new Timer(_ => InvokeAsync(() =>
-        {
-            RefreshDriveList();
-            StateHasChanged();
-        }), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+        // Drives are checked on a background thread every 2 seconds. A drive
+        // spinning up after its tray closes can keep Windows busy for several
+        // seconds; on the window's own thread that froze the whole app.
+        driveWatchTimer = new Timer(_ => _ = PollDrivesAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
 
         _ = Task.Run(() =>
         {
@@ -301,27 +303,118 @@
         StateHasChanged();
     }
 
-    private void RefreshDriveList()
+    // ---- drive polling (background) ----
+
+    private int pollBusy = 0;
+
+    // What a disc looked like last time, so it's only examined again when
+    // something changes (a different disc, or the tray opened/closed).
+    private sealed class DiscKey
     {
-        var optical = DriveInfo.GetDrives()
-            .Where(d => d.DriveType == DriveType.CDRom)
-            .ToList();
+        public bool Ready;
+        public string Label = "";
+        public long Size;
+        public bool SameAs(DiscKey o) => Ready == o.Ready && Label == o.Label && Size == o.Size;
+    }
+    private readonly Dictionary<string, (DiscKey Key, DriveState State)> pollCache = new();
+    private readonly Dictionary<string, DateTime> lastBlankCheck = new();
 
-        var currentLetters = optical.Select(d => LetterOf(d)).ToHashSet();
+    private async Task PollDrivesAsync()
+    {
+        if (Interlocked.Exchange(ref pollBusy, 1) == 1) return;   // previous check still running
+        try
+        {
+            var fresh = await Task.Run(ReadDrives);
+            await InvokeAsync(() =>
+            {
+                foreach (var stale in driveStates.Keys.Except(fresh.Keys).ToList())
+                    driveStates.Remove(stale);
+                foreach (var (letter, st) in fresh)
+                    driveStates[letter] = st;
+                StateHasChanged();
+            });
+        }
+        catch { /* a failed check is simply retried in 2 seconds */ }
+        finally
+        {
+            Interlocked.Exchange(ref pollBusy, 0);
+        }
+    }
 
-        foreach (var stale in driveStates.Keys.Except(currentLetters).ToList())
-            driveStates.Remove(stale);
+    // Runs on a background thread. Returns a new DriveState per drive
+    // letter; a disc that hasn't changed reuses last time's details.
+    private Dictionary<string, DriveState> ReadDrives()
+    {
+        var result = new Dictionary<string, DriveState>();
+        var optical = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.CDRom).ToList();
 
         foreach (var di in optical)
         {
             var letter = LetterOf(di);
-            if (!driveStates.TryGetValue(letter, out var state))
+
+            // A drive that's burning isn't asked anything (even "is a disc
+            // ready?" can stall while it writes); its last state stays shown.
+            if (BurnService.IsBusy(letter) && pollCache.TryGetValue(letter, out var burning))
             {
-                state = new DriveState();
-                driveStates[letter] = state;
+                result[letter] = burning.State;
+                continue;
             }
+
+            var key = new DiscKey();
+            try
+            {
+                key.Ready = di.IsReady;   // this is the call that can take seconds
+                if (key.Ready)
+                {
+                    key.Label = SafeVolumeLabel(di);
+                    try { key.Size = di.TotalSize; } catch { }
+                }
+            }
+            catch { key.Ready = false; }
+
+            // No readable disc: is it a blank, writable one? (Asked every 4
+            // seconds at most, and never while the drive is busy -- a burn
+            // in progress also looks like "no readable disc".)
+            if (!key.Ready)
+            {
+                bool busy = BurnService.IsBusy(letter) || BurnService.IsPaused(letter) || RipActivity.IsDriveBusy(letter);
+                bool recent = lastBlankCheck.TryGetValue(letter, out var lastCheck) && DateTime.Now - lastCheck < TimeSpan.FromSeconds(4);
+                if (pollCache.TryGetValue(letter, out var prev) && prev.Key.SameAs(key) && (busy || recent))
+                {
+                    result[letter] = prev.State;
+                    continue;
+                }
+                lastBlankCheck[letter] = DateTime.Now;
+                var absent = new DriveState();
+                UpdateState(di, letter, absent);
+                var blank = busy ? null : BurnService.QueryBlank(letter);
+                if (blank is not null)
+                {
+                    absent.BlankMediaType = blank.MediaType;
+                    absent.BlankFreeBytes = blank.FreeBytes;
+                    absent.BlankTotalBytes = blank.TotalBytes;
+                    absent.StatusText = $"BLANK DISC — {blank.MediaType}, {DiscHealthService.FormatBytes(blank.FreeBytes)} free";
+                }
+                pollCache[letter] = (key, absent);
+                result[letter] = absent;
+                continue;
+            }
+
+            if (pollCache.TryGetValue(letter, out var cached) && cached.Key.SameAs(key))
+            {
+                result[letter] = cached.State;
+                continue;
+            }
+
+            var state = new DriveState();
             UpdateState(di, letter, state);
+            pollCache[letter] = (key, state);
+            result[letter] = state;
         }
+
+        foreach (var gone in pollCache.Keys.Except(result.Keys).ToList())
+            pollCache.Remove(gone);
+        return result;
     }
 
     private static string LetterOf(DriveInfo di) => di.Name.TrimEnd('\\', ':');

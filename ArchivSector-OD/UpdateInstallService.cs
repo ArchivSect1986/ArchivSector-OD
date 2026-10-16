@@ -32,6 +32,13 @@ namespace ArchivSector_OD
         }
 
         public static bool AnyBusy => !Busy.IsEmpty;
+
+        // Is anything (rip, checksum, health check, burn) using this drive?
+        public static bool IsDriveBusy(string driveLetter)
+        {
+            var prefix = driveLetter.TrimEnd(':', '\\') + ":";
+            return Busy.Keys.Any(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     // "Update Now": downloads the new release's .zip from GitHub, checks

@@ -31,6 +31,7 @@ namespace ArchivSector_OD
         private const uint OPEN_EXISTING = 3;
         private const uint IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808;
         private const uint IOCTL_STORAGE_LOAD_MEDIA = 0x2D480C;
+        private const uint IOCTL_STORAGE_MEDIA_REMOVAL = 0x2D4804;
         private const uint FSCTL_LOCK_VOLUME = 0x00090018;
         private const uint FSCTL_DISMOUNT_VOLUME = 0x00090020;
 
@@ -141,6 +142,63 @@ namespace ArchivSector_OD
                 return new TrayResult { Success = true, Detail = "via legacy MCI (commands sent, but this tier can't confirm the tray actually moved)" };
             }
             catch { /* all three tiers failed to even execute */ }
+
+            return new TrayResult { Success = false, Detail = "all three eject methods failed to execute" };
+        }
+
+        // v3.3: for a drive with no readable file system -- a blank disc,
+        // or a disc Windows can't read. Windows' usual "Eject" works on the
+        // disc's volume, and with no volume it quietly does nothing (and
+        // still reports success), so the tray never opened for a blank
+        // disc. This goes straight to the drive instead:
+        //   1. Windows' burning engine (IMAPI2) EjectMedia
+        //   2. allow removal + IOCTL_STORAGE_EJECT_MEDIA (no volume lock --
+        //      there's no volume to lock)
+        //   3. legacy MCI
+        // The bay's blank-disc polling is paused for a few seconds first so
+        // it can't send the drive a command at the same moment.
+        public static TrayResult EjectWithoutVolume(string driveLetter)
+        {
+            var letter = driveLetter.ToUpperInvariant().TrimEnd(':', '\\');
+            BurnService.PausePolling(letter, TimeSpan.FromSeconds(4));
+
+            if (BurnService.Eject(letter))
+                return new TrayResult { Success = true, Detail = "via Windows' burning engine" };
+
+            try
+            {
+                var handle = CreateFile($@"\\.\{letter}:",
+                    GENERIC_READ | GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+
+                if (handle != IntPtr.Zero && handle.ToInt64() != -1)
+                {
+                    // PREVENT_MEDIA_REMOVAL { BOOLEAN PreventMediaRemoval = FALSE }
+                    IntPtr allow = Marshal.AllocHGlobal(1);
+                    try
+                    {
+                        Marshal.WriteByte(allow, 0);
+                        DeviceIoControl(handle, IOCTL_STORAGE_MEDIA_REMOVAL, allow, 1, IntPtr.Zero, 0, out _, IntPtr.Zero);
+                    }
+                    finally { Marshal.FreeHGlobal(allow); }
+
+                    bool ejectOk = DeviceIoControl(handle, IOCTL_STORAGE_EJECT_MEDIA, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+                    CloseHandle(handle);
+                    if (ejectOk)
+                        return new TrayResult { Success = true, Detail = "via raw IOCTL" };
+                }
+            }
+            catch { /* fall through to MCI */ }
+
+            try
+            {
+                mciSendString($"open {letter}: type cdaudio alias dev_{letter}", null, 0, IntPtr.Zero);
+                mciSendString($"set dev_{letter} door open", null, 0, IntPtr.Zero);
+                mciSendString($"close dev_{letter}", null, 0, IntPtr.Zero);
+                return new TrayResult { Success = true, Detail = "via legacy MCI (commands sent, but this tier can't confirm the tray actually moved)" };
+            }
+            catch { }
 
             return new TrayResult { Success = false, Detail = "all three eject methods failed to execute" };
         }

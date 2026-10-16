@@ -68,7 +68,8 @@ namespace ArchivSector_OD
         // Custom sizes, in GB of 1,000,000,000 bytes like the PowerShell version.
         public static MediaPreset CustomOptical(double gb)
         {
-            long bytes = (long)(Math.Max(0.01, gb) * 1_000_000_000);
+            // Whole 2 KB sectors, so an ISO of this size can be burned.
+            long bytes = (long)(Math.Max(0.01, gb) * 1_000_000_000) / 2048 * 2048;
             int kind = bytes <= 900_000_000L ? 1 : bytes <= 4_700_000_000L ? 2 : bytes <= 8_600_000_000L ? 3 : 4;
             return new MediaPreset("Custom", bytes, false, kind);
         }

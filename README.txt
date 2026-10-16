@@ -1,8 +1,8 @@
-🌟 [RELEASE] ArchivSector-OD v3.0 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [RELEASE] ArchivSector-OD v3.3 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v3.0**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v3.3**! Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -21,10 +21,32 @@ handful of improvements on top.
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
 
-Already on v2.3 or later? The app offers v3.0 by itself when it starts -- just
+Already on v2.3 or later? The app offers v3.3 by itself when it starts -- just
 click Yes. Updating from an older v2 version? Just replace your old folder with this one. Your
 settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
+
+========================================================================
+🔥 NEW IN V3.3 — BURN DISCS & PAD EXISTING ISOs
+========================================================================
+
+• 🔥 Burn ISOs to blank discs from the drive bay: put a blank CD-R,
+  DVD±R or BD-R in and its bay offers "Burn an ISO to this disc".
+  - Burns with ImgBurn (picked automatically when installed) or with
+    Windows' built-in burning engine (nothing to install).
+  - ImgBurn uses the whole disc. Windows keeps 768 MB of a BD-R spare,
+    so a full BD-25 from TargetFill needs ImgBurn.
+  - Verify reads the disc back and compares every byte with the ISO.
+  - Optional: move the ISO to the Recycle Bin after a verified burn.
+• 📀 Pad existing ISOs (TargetFill tab): add one or many ISOs and pad
+  them, one at a time, to exactly 100% of a disc. Make padded copies
+  or pad the originals; "Remove padding" undoes it.
+• 📄 Logs are saved to %AppData%\ArchivSector-OD\Logs (30 days), with
+  an "Open log" button in each bay. Crash reports are more complete.
+• 🔎 Movie search: add the year in brackets, e.g. "One Hundred and One
+  Dalmatians (1961)", and "101 Dalmatians" now finds both films.
+• 🐛 Fixed: the window froze for a few seconds when a disc went in or a
+  tray closed, and a blank disc couldn't be ejected.
 
 ========================================================================
 🏷️ NEW IN V3.2 — GAME DUMPS NAME THEMSELVES

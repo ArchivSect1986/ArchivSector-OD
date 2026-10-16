@@ -1,0 +1,336 @@
+﻿@* Burning an ISO to a blank disc, shown inside a drive bay (v3.3), with
+   Windows' built-in burning engine or ImgBurn (the user picks). The bay
+   gets the blank disc's details from AppShell's drive polling
+   (BurnService.QueryBlank); all the work is in BurnService. BusyChanged
+   tells the bay while a burn runs. *@
+
+@using System.IO
+@using System.Windows
+@implements IDisposable
+
+@if (state == State.Idle && !string.IsNullOrEmpty(BlankMediaType))
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 6px;">
+        <span>💿 <strong>Blank @BlankMediaType</strong> in the drive — @DiscHealthService.FormatBytes(DiscBytes) (@DiscBytes.ToString("N0") bytes)</span>
+        @if (DiscBytes > BlankFreeBytes)
+        {
+            <span class="bay-subtitle" style="margin: 0;">Windows' burning engine keeps @(DiscHealthService.FormatBytes(DiscBytes - BlankFreeBytes)) of it spare and can write @DiscHealthService.FormatBytes(BlankFreeBytes); ImgBurn uses the whole disc.</span>
+        }
+        <button class="bay-btn game" @onclick="ChooseIso" disabled="@Disabled">🔥 Burn an ISO to this disc…</button>
+    </div>
+}
+else if (state == State.Confirm && isoPath is not null)
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px; margin-top: 6px;">
+        <strong>🔥 Burn to @BlankMediaType</strong>
+        <span style="overflow-wrap: anywhere;">@Path.GetFileName(isoPath)</span>
+        <span class="bay-subtitle" style="margin: 0;">
+            @DiscHealthService.FormatBytes(isoBytes) of @DiscHealthService.FormatBytes(Limit)
+            (@(Limit > 0 ? (100.0 * isoBytes / Limit).ToString("0.0") : "?")% of what @(useImgBurn ? "ImgBurn" : "Windows") can write)
+        </span>
+        @if (TooBigForWindows && !TooBigForDisc && imgBurnPath is not null)
+        {
+            <span style="color: var(--amber); font-size: 12px;">⚠ Windows' burning engine can only write @DiscHealthService.FormatBytes(BlankFreeBytes) to this disc. Choose ImgBurn below to burn this ISO.</span>
+        }
+        else if (TooBigForWindows && !TooBigForDisc)
+        {
+            <span style="color: var(--danger); font-size: 12px;">⚠ Windows' burning engine can only write @DiscHealthService.FormatBytes(BlankFreeBytes) to this disc. Install ImgBurn to use the whole disc, or pick a smaller ISO.</span>
+        }
+        else if (TooBigForDisc)
+        {
+            <span style="color: var(--danger); font-size: 12px;">⚠ This ISO is bigger than the disc. Pick a smaller ISO or a bigger disc.</span>
+        }
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
+            <span>Burn with:</span>
+            <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;">
+                <input type="radio" name="engine-@DriveLetter" checked="@(!useImgBurn)" @onchange="() => SetEngine(false)" />
+                Windows (built in, progress shown here)
+            </label>
+            <label style="display: flex; gap: 8px; align-items: center; cursor: @(imgBurnPath is null ? "default" : "pointer"); opacity: @(imgBurnPath is null ? "0.5" : "1");"
+                   title="@(imgBurnPath ?? "ImgBurn wasn't found. Install it, or set where it is in Settings.")">
+                <input type="radio" name="engine-@DriveLetter" checked="@useImgBurn" disabled="@(imgBurnPath is null)" @onchange="() => SetEngine(true)" />
+                ImgBurn @(imgBurnPath is null ? "(not installed)" : "(opens its own window with its progress)")
+            </label>
+        </div>
+        <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;">
+            <input type="checkbox" checked="@verify" @onchange="e => verify = (bool)(e.Value ?? false)" />
+            Verify after burning (reads the disc back and compares every byte, recommended)
+        </label>
+        <label style="display: flex; gap: 8px; align-items: center; cursor: @(verify ? "pointer" : "default"); font-size: 13px; opacity: @(verify ? "1" : "0.5");"
+               title="Only after the disc was verified and every byte matched. You can restore it from the Recycle Bin.">
+            <input type="checkbox" checked="@(deleteIso && verify)" disabled="@(!verify)" @onchange="e => SetDeleteIso((bool)(e.Value ?? false))" />
+            Move the ISO to the Recycle Bin once the disc is burned and verified
+        </label>
+        <span class="bay-subtitle" style="margin: 0; color: var(--amber);">
+            Burning can't be undone. Don't eject the disc or let the PC sleep while it burns.
+        </span>
+        <div style="display: flex; gap: 6px;">
+            <button class="bay-btn game" style="flex: 2;" @onclick="StartBurn" disabled="@(CantStart || Disabled)">🔥 Start burn</button>
+            <button class="bay-btn tray-btn" style="flex: 1;" @onclick="ChooseIso">Change ISO</button>
+            <button class="bay-btn tray-btn" style="flex: 1;" @onclick="Reset">Cancel</button>
+        </div>
+    </div>
+}
+else if (state == State.Running)
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 6px;">
+        <div style="display: flex; justify-content: space-between; gap: 8px;">
+            <strong>🔥 @(progress?.Phase ?? "Preparing")…</strong>
+            @if (progress is not null && progress.Percent >= 0)
+            {
+                <span>@progress.Percent.ToString("0")%</span>
+            }
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: @(progress is null || progress.Percent < 0 ? "100" : F(progress.Percent))%; @(progress is null || progress.Percent < 0 ? "opacity: 0.5;" : "")"></div>
+        </div>
+        <span class="bay-subtitle" style="margin: 0;">
+            @Path.GetFileName(isoPath)
+            @if (progress is not null && progress.BytesPerSec > 0)
+            {
+                <text> • @((progress.BytesPerSec / 1_000_000).ToString("0.0")) MB/s (@((progress.BytesPerSec / OneX).ToString("0.0"))x) • @Remaining left</text>
+            }
+            else if (progress?.Phase == "Finalizing")
+            {
+                <text> • closing the disc, this can take a minute or two</text>
+            }
+            else if (progress?.Phase == "Burning with ImgBurn")
+            {
+                <text> • @ImgBurnNote</text>
+            }
+        </span>
+        <button class="bay-btn cancel-btn" @onclick="Cancel" disabled="@cancelRequested">
+            @(cancelRequested ? "Stopping…" : progress?.Phase == "Verifying" ? "✖ Stop checking" : "✖ Cancel burn")
+        </button>
+    </div>
+}
+else if (state == State.Done && result is not null)
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 6px;">
+        <strong style="color: @ResultColor;">@ResultIcon @result.Message</strong>
+        <span class="bay-subtitle" style="margin: 0;">
+            @Path.GetFileName(isoPath)
+            @if (result.Burned)
+            {
+                <text> • burned in @Dur(result.BurnTime)</text>
+            }
+            @if (result.Verified is not null)
+            {
+                <text> • checked in @Dur(result.VerifyTime)</text>
+            }
+        </span>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            @if (result.Burned)
+            {
+                <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="Eject">⏏ Eject disc</button>
+            }
+            <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="OpenIsoFolder">📂 ISO folder</button>
+            <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="Reset">Close</button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string DriveLetter { get; set; } = "";
+    [Parameter] public string BlankMediaType { get; set; } = "";
+    [Parameter] public long BlankFreeBytes { get; set; }
+    [Parameter] public long BlankTotalBytes { get; set; }
+    [Parameter] public string DriveModel { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback<bool> BusyChanged { get; set; }
+    [Parameter] public EventCallback<bool> BurnFinished { get; set; }   // true = the disc was burned
+
+    private enum State { Idle, Confirm, Running, Done }
+    private State state = State.Idle;
+    private string? isoPath;
+    private long isoBytes;
+    private bool verify = true;
+    private BurnService.Progress? progress;
+    private BurnService.Result? result;
+    private CancellationTokenSource? cts;
+    private bool cancelRequested;
+    private bool useImgBurn;          // this burn's engine (Windows when false)
+    private string? imgBurnPath;      // null = ImgBurn not found
+    private bool engineLoaded;
+    private bool deleteIso;           // move the ISO to the Recycle Bin after a verified burn
+
+    // The last folder an ISO was picked from (this session).
+    private static string? lastIsoFolder;
+
+    private double OneX => BlankMediaType.StartsWith("BD") ? 4_500_000 : BlankMediaType.StartsWith("DVD") ? 1_385_000 : 153_600;
+    // The disc's full size, and how much the chosen program can write.
+    // On BD-R, Windows' burning engine can report less free space than the
+    // disc really has; ImgBurn writes the whole disc.
+    private long DiscBytes => FullDiscBytes(BlankMediaType, Math.Max(BlankTotalBytes, BlankFreeBytes));
+
+    // Windows formats a blank BD-R/BD-RE with spare areas for error handling
+    // (768 MB on a single-layer disc), and only reports what's left: a BD-25
+    // shows as 24,220,008,448 bytes instead of 25,025,314,816. ImgBurn burns
+    // without the spare areas, so the real disc size is worked out here from
+    // the standard Blu-ray sizes. (ImgBurn still checks the size itself.)
+    private const long Bd25 = 12_219_392L * 2048, Bd50 = 24_438_784L * 2048;
+    private static long FullDiscBytes(string mediaType, long reported)
+    {
+        if (!mediaType.StartsWith("BD")) return reported;
+        if (reported <= Bd25) return Bd25;
+        if (reported <= Bd50) return Bd50;
+        return reported;   // BD-XL: use what Windows says
+    }
+    private long Limit => useImgBurn ? DiscBytes : BlankFreeBytes;
+    private bool TooBigForWindows => isoBytes > BlankFreeBytes;
+    private bool TooBigForDisc => isoBytes > DiscBytes;
+    private bool CantStart => useImgBurn ? TooBigForDisc : TooBigForWindows;
+
+    private string ImgBurnNote => verify
+        ? "follow the progress in the ImgBurn window; ImgBurn verifies the disc after writing it"
+        : "follow the progress in the ImgBurn window";
+    private string Remaining => progress is null ? "" : Dur(progress.Remaining);
+    private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min" : $"{t.Seconds}s";
+    private static string F(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private string ResultColor => result?.Verified == true ? "var(--success)"
+        : result?.Verified == false || result?.Burned != true ? "var(--danger)" : "var(--amber)";
+    private string ResultIcon => result?.Verified == true ? "✅" : result?.Verified == false || result?.Burned != true ? "⚠" : "✓";
+
+    protected override void OnParametersSet()
+    {
+        // The blank disc was taken out before burning: go back to idle.
+        if (state == State.Confirm && string.IsNullOrEmpty(BlankMediaType)) Reset();
+    }
+
+    private void ChooseIso()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = $"Choose the ISO to burn to the {BlankMediaType}",
+            Filter = "Disc images (*.iso)|*.iso|All files (*.*)|*.*",
+        };
+        if (lastIsoFolder is not null && Directory.Exists(lastIsoFolder)) dlg.InitialDirectory = lastIsoFolder;
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        isoPath = dlg.FileName;
+        lastIsoFolder = Path.GetDirectoryName(isoPath);
+        try { isoBytes = new FileInfo(isoPath).Length; } catch { isoBytes = 0; }
+        if (!engineLoaded)
+        {
+            // The last engine used, if it's still available.
+            imgBurnPath = BurnService.ImgBurnPath();
+            var saved = ConfigService.Load();
+            // ImgBurn first when it's installed, unless Windows was chosen last time.
+            useImgBurn = imgBurnPath is not null &&
+                         !string.Equals(saved.BurnEngine, "Windows", StringComparison.OrdinalIgnoreCase);
+            deleteIso = saved.DeleteIsoAfterBurn;
+            engineLoaded = true;
+        }
+        // An ISO that only fits with ImgBurn (Windows keeps part of a BD-R
+        // spare) gets ImgBurn picked for it. Not saved as a preference.
+        if (!useImgBurn && imgBurnPath is not null && TooBigForWindows && !TooBigForDisc) useImgBurn = true;
+        state = State.Confirm;
+        LogService.Write($"{DriveLetter}:", $"Burn: chose {isoPath} ({isoBytes:N0} bytes). Blank {BlankMediaType}: disc {DiscBytes:N0} bytes, Windows engine free {BlankFreeBytes:N0} bytes");
+    }
+
+    private void SetEngine(bool imgBurn)
+    {
+        useImgBurn = imgBurn && imgBurnPath is not null;
+        try
+        {
+            var config = ConfigService.Load();
+            config.BurnEngine = useImgBurn ? "ImgBurn" : "Windows";
+            ConfigService.Save(config);
+        }
+        catch { }
+    }
+
+    private void SetDeleteIso(bool on)
+    {
+        deleteIso = on;
+        try
+        {
+            var config = ConfigService.Load();
+            config.DeleteIsoAfterBurn = on;
+            ConfigService.Save(config);
+        }
+        catch { }
+    }
+
+    private async Task StartBurn()
+    {
+        if (isoPath is null) return;
+        state = State.Running;
+        progress = null;
+        result = null;
+        cancelRequested = false;
+        cts = new CancellationTokenSource();
+        await BusyChanged.InvokeAsync(true);
+        StateHasChanged();
+
+        var path = isoPath;
+        var title = Path.GetFileNameWithoutExtension(path);
+        bool imgBurn = useImgBurn;
+        bool delete = deleteIso && verify;
+        LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {(imgBurn ? "ImgBurn" : "Windows")} (verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");
+        var reporter = new Progress<BurnService.Progress>(p => InvokeAsync(() => { progress = p; StateHasChanged(); }));
+        BurnService.Result r;
+        try
+        {
+            r = await BurnService.BurnAsync(DriveLetter, path, verify, title, DriveModel, reporter, cts.Token, imgBurn, delete);
+        }
+        catch (Exception ex)
+        {
+            r = new BurnService.Result { Message = $"The burn failed: {ex.Message}" };
+        }
+        LogService.Write($"{DriveLetter}:", "Burn finished: " + r.Message);
+
+        result = r;
+        state = State.Done;
+        cts.Dispose();
+        cts = null;
+        await BusyChanged.InvokeAsync(false);
+        await BurnFinished.InvokeAsync(r.Burned);
+        try { if (ConfigService.Load().SoundAlerts) System.Media.SystemSounds.Exclamation.Play(); } catch { }
+        StateHasChanged();
+    }
+
+    private void Cancel()
+    {
+        if (cts is null) return;
+        if (progress?.Phase != "Verifying")
+        {
+            var owner = System.Windows.Application.Current?.MainWindow;
+            var msg = progress?.Phase == "Burning with ImgBurn"
+                ? "Stop burning?\n\nImgBurn will ask you to confirm in its own window. A write-once disc that's stopped part-way can't be used again."
+                : "Stop burning?\n\nA write-once disc that's stopped part-way can't be used again.";
+            var ans = owner is null
+                ? MessageBox.Show(msg, "Cancel burn", MessageBoxButton.YesNo, MessageBoxImage.Warning)
+                : MessageBox.Show(owner, msg, "Cancel burn", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (ans != MessageBoxResult.Yes) return;
+        }
+        cancelRequested = true;
+        cts.Cancel();
+    }
+
+    private void Eject()
+    {
+        var letter = DriveLetter;
+        _ = Task.Run(() => TrayControlService.EjectWithoutVolume(letter));
+        Reset();
+    }
+
+    private void OpenIsoFolder()
+    {
+        var dir = isoPath is null ? null : Path.GetDirectoryName(isoPath);
+        if (dir is null) return;
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = dir, UseShellExecute = true }); } catch { }
+    }
+
+    private void Reset()
+    {
+        state = State.Idle;
+        isoPath = null;
+        result = null;
+        progress = null;
+    }
+
+    // Never cancel a burn just because the screen was redrawn; the burn
+    // carries on in the background and the updater won't interrupt it.
+    public void Dispose() { }
+}

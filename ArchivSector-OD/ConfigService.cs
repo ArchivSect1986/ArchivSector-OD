@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Text.Json;
 
 namespace ArchivSector_OD
@@ -24,6 +24,16 @@ namespace ArchivSector_OD
         // Ported from the Python app's "sound_alerts" (on by default):
         // a system beep when a rip completes successfully.
         public bool SoundAlerts { get; set; } = true;
+
+        // v3.3: which program burns ISOs to blank discs -- "Windows" (the
+        // built-in burning engine) or "ImgBurn". Remembered from the bay's
+        // burn screen. Empty = not chosen yet: ImgBurn is used when it's
+        // installed (it can use the whole of a BD-R), otherwise Windows.
+        public string BurnEngine { get; set; } = "";
+
+        // v3.3: move the ISO to the Recycle Bin after a burn that was
+        // verified (every byte matched). Off by default.
+        public bool DeleteIsoAfterBurn { get; set; } = false;
 
         // Ask GitHub for a newer release each time the app starts, and
         // offer to install it (Settings -> "Check for updates when the
@@ -69,6 +79,7 @@ namespace ArchivSector_OD
         public bool AutoSpan { get; set; } = false;
         public bool Parity { get; set; } = false;
         public bool Noise { get; set; } = false;
+        public bool PadIsoCopy { get; set; } = true;   // v3.3 "Pad an existing ISO": copy (true) or pad the original
         public bool Stealth { get; set; } = false;
         public bool Sound { get; set; } = true;        // "Audio Feedback Cues"
 
