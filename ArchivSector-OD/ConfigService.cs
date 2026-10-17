@@ -35,6 +35,10 @@ namespace ArchivSector_OD
         // verified (every byte matched). Off by default.
         public bool DeleteIsoAfterBurn { get; set; } = false;
 
+        // v3.4: shortcuts the user said "No" to repointing ("<link>|<target>"),
+        // so they aren't asked about again.
+        public List<string> IgnoredShortcuts { get; set; } = new();
+
         // Ask GitHub for a newer release each time the app starts, and
         // offer to install it (Settings -> "Check for updates when the
         // app starts").

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -48,6 +48,10 @@ namespace ArchivSector_OD
             new MediaPreset("DVD-5 4.7GB", 4700372992L, false, 2),   // 2,295,104 sectors: DVD+R (DVD-R is a little bigger)
             new MediaPreset("DVD-9 8.5GB", 8543666176L, false, 3),   // 4,171,712 sectors: DVD-R DL (DVD+R DL is a little bigger)
             new MediaPreset("Blu-ray BD-25", 25025314816L, false, 4),
+            // v3.4: what Windows' own burning engine can write to a blank
+            // BD-R (it keeps 768 MB spare for error handling). For burning
+            // without ImgBurn.
+            new MediaPreset("Blu-ray BD-25 (Windows burn)", 24220008448L, false, 4),
             new MediaPreset("Blu-ray BD-50", 50050629632L, false, 4),
             new MediaPreset("Blu-ray BD-100", 100103356416L, false, 4),
             new MediaPreset("Blu-ray BD-128", 128001769472L, false, 4),

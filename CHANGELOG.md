@@ -4,6 +4,15 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v3.4 - 2026-10-17
+
+### ✨ Added
+* **Shortcut check:** if a Desktop, Start Menu or taskbar shortcut opens an older copy of ArchivSector-OD (one the updater doesn't reach, like an old folder in Downloads), the app offers to point it to the copy you're running. The older copy isn't deleted, and "No" is remembered.
+* **New TargetFill disc size: "Blu-ray BD-25 (Windows burn)"** (24,220,008,448 bytes), exactly what Windows' own burning engine can write to a BD-R. Fill or pad to 100% and burn without ImgBurn.
+* **🔎 Look up Title ID** for Xbox 360 dumps that couldn't be named automatically: searches the web for the game's Title ID (and copies it), so you can find the name and type it in.
+
+---
+
 ## v3.3 - 2026-10-15
 
 ### ✨ Added

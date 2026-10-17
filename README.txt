@@ -1,8 +1,8 @@
-﻿🌟 [RELEASE] ArchivSector-OD v3.3 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [RELEASE] ArchivSector-OD v3.4 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v3.3**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v3.4**! Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -21,10 +21,22 @@ handful of improvements on top.
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
    Redumper, ImgBurn), then insert a disc.
 
-Already on v2.3 or later? The app offers v3.3 by itself when it starts -- just
+Already on v2.3 or later? The app offers v3.4 by itself when it starts -- just
 click Yes. Updating from an older v2 version? Just replace your old folder with this one. Your
 settings, history, and cached artwork are kept — they're stored
 separately in your AppData folder.
+
+========================================================================
+🔗 NEW IN V3.4 — SHORTCUT CHECK & SMALL ADDITIONS
+========================================================================
+
+• If a shortcut on your Desktop, Start Menu or taskbar opens an older
+  copy of ArchivSector-OD, the app offers to point it to the copy you're
+  running, so your shortcut always opens the updated version.
+• TargetFill: new "Blu-ray BD-25 (Windows burn)" size, for filling a
+  BD-R to 100% and burning it without ImgBurn.
+• Xbox 360 dumps that can't be named automatically get a
+  "🔎 Look up Title ID" button to help find the game's name.
 
 ========================================================================
 🔥 NEW IN V3.3 — BURN DISCS & PAD EXISTING ISOs

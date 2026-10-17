@@ -21,7 +21,7 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 * 🔥 **Disc Burning:** Burn ISOs to blank CDs, DVDs and Blu-rays right from the drive bay, with ImgBurn (uses the whole disc) or Windows' built-in burning engine, then verify the disc byte for byte against the ISO. Blank discs are detected automatically, with their type and free space.
 * 🔬 **Disc Health Check:** Reads every sector of a disc (Blu-ray, DVD or CD, including music CDs) and shows a live map of slow or unreadable areas from the inner to the outer edge, so you can spot a disc starting to fail and back it up in time. Saves a report and records the result in History. Read-only.
 * ⚡ **Smart Workflow Automation:** Duplicate-output warnings, a completion sound and Windows notification, and physical optical tray auto-ejection upon completion.
-* 🔄 **One-Click Updates:** Checks GitHub for a new version at startup (can be turned off in Settings). With one click it downloads the update, verifies it, installs it and restarts, keeping your settings and history. It never updates in the middle of a rip.
+* 🔄 **One-Click Updates:** Checks GitHub for a new version at startup (can be turned off in Settings). With one click it downloads the update, verifies it, installs it and restarts, keeping your settings and history. It never updates in the middle of a rip, and it offers to fix shortcuts that still open an older copy.
 
 ---
 

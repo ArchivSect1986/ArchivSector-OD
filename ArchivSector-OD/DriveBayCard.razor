@@ -190,6 +190,11 @@
             @if (gameNameNote is not null)
             {
                 @gameNameNote
+                @if (lastTitleId is not null)
+                {
+                    <button class="shortcut-btn" style="margin-left: 6px;" @onclick="LookUpTitleId"
+                            title="Searches the web for this Title ID (and copies it), so you can find the game's name">🔎 Look up Title ID</button>
+                }
             }
             else if (isRunning)
             {
@@ -595,6 +600,7 @@
     // after, the Rename button renames the finished folder and files.
     private string gameNameDraft = "";
     private string? gameNameNote = null;
+    private string? lastTitleId = null;   // v3.4: an Xbox 360 dump that couldn't be named automatically
     private string? lastGameFolder = null; // folder of the last finished game dump
     private string? lastGameName = null;   // name its files currently use
     private string? lastGameIso = null;    // its .iso path
@@ -1040,6 +1046,19 @@
         AddLog($"Moved to {target}");
     }
 
+    // v3.4: an Xbox 360 game's name isn't readable from the disc, but its
+    // Title ID is. This searches the web for it (and copies it to the
+    // clipboard), so the name can be found and typed in the name box.
+    private void LookUpTitleId()
+    {
+        if (lastTitleId is null) return;
+        try { System.Windows.Clipboard.SetText(lastTitleId); } catch { }
+        var url = "https://www.google.com/search?q=" + Uri.EscapeDataString("Xbox 360 title ID " + lastTitleId);
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+        catch (Exception ex) { AddLog("Couldn't open the web browser: " + ex.Message); }
+        AddLog($"Looking up Title ID {lastTitleId} (copied to the clipboard)");
+    }
+
     // Names a finished game dump automatically: Redump's exact name when the
     // dump matches an imported Redump DAT (any console), otherwise the real
     // name stored inside an Original Xbox game. Xbox 360 games keep their
@@ -1066,6 +1085,7 @@
                     AddLog("Xbox 360 games store their name encrypted. Import Redump's Xbox 360 DAT (Settings → Import DAT File) " +
                            "and future 360 dumps are named automatically. You can type the name in the name box above.");
                     gameNameNote = $"Title ID {info.TitleId} -- type the name above, or import the Redump Xbox 360 DAT for automatic names.";
+                    lastTitleId = info.TitleId;
                 }
             }
         }
@@ -1077,6 +1097,7 @@
         {
             if (!RenameGameOutput(clean)) return;
             gameNameNote = $"✓ Named '{clean}' from {source}";
+            lastTitleId = null;
             AddLog($"{operationLabel}: named '{clean}' from {source}");
         }
         StateHasChanged();
@@ -1307,6 +1328,7 @@
             if (oldIso is not null && lastGameIso is not null)
                 HistoryService.UpdateRenamed(oldIso, lastGameIso, wanted);
             gameNameNote = $"✓ Renamed to '{wanted}'";
+            lastTitleId = null;
         }
         StateHasChanged();
     }
@@ -2366,6 +2388,7 @@
 
             // A new disc starts with a blank name box and no console
             // carried over from the last disc's Redumper log.
+            lastTitleId = null;
             logGameSystem = null;
             logAudioCd = false;
             gameNameDraft = "";

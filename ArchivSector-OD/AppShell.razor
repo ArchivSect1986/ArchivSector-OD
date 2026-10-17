@@ -243,6 +243,8 @@
         startupUpdateCheckDone = true;
         if (fillOnly) return;
 
+        await CheckShortcutsAsync();
+
         if (!ConfigService.Load().CheckForUpdatesOnStartup) return;
 
         await Task.Delay(TimeSpan.FromSeconds(4));
@@ -250,6 +252,56 @@
         if (result.Status != UpdateCheckService.UpdateStatus.UpdateAvailable) return;
 
         await InvokeAsync(() => UpdateInstallService.OfferAndRunAsync(result, System.Windows.Application.Current.MainWindow));
+    }
+
+    // v3.4: a shortcut that opens an older copy of the app (one the
+    // updater never reaches) is offered to be pointed at this copy.
+    // Debug builds (run from Visual Studio) only log what they'd offer, so
+    // a test build never takes over the real shortcuts.
+    private async Task CheckShortcutsAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            var stale = await Task.Run(ShortcutService.FindStaleShortcuts);
+            if (stale.Count == 0) return;
+
+            var lines = string.Join("\n", stale.Select(s =>
+                $"• {s.Where}: {Path.GetFileNameWithoutExtension(s.LinkPath)} → " +
+                (s.TargetVersion is null ? $"a copy that's no longer there ({s.Target})" : $"v{s.TargetVersion} in {Path.GetDirectoryName(s.Target)}")));
+            if (ShortcutService.IsDebugBuild)
+            {
+                LogService.Write("App", "Shortcut check (debug build, nothing changed). Would offer to fix:\n" + lines);
+                return;
+            }
+            var owner = System.Windows.Application.Current.MainWindow;
+            var msg = (stale.Count == 1 ? "A shortcut opens" : "These shortcuts open") +
+                      " an older copy of ArchivSector-OD, which doesn't get updates:\n\n" + lines +
+                      $"\n\nPoint {(stale.Count == 1 ? "it" : "them")} to this copy (v{UpdateCheckService.CurrentVersionDisplay})?\n" +
+                      "The older copy isn't deleted.";
+            var answer = System.Windows.MessageBox.Show(owner, msg, "ArchivSector-OD — Shortcuts",
+                System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question);
+            if (answer != System.Windows.MessageBoxResult.Yes)
+            {
+                ShortcutService.Ignore(stale);
+                LogService.Write("App", "Shortcut check: left as they are:\n" + lines);
+                return;
+            }
+            var failed = await Task.Run(() => ShortcutService.Repoint(stale));
+            LogService.Write("App", $"Shortcut check: pointed {stale.Count - failed.Count} shortcut(s) to {Environment.ProcessPath}" +
+                (failed.Count > 0 ? "; couldn't change: " + string.Join(", ", failed.Select(f => f.Shortcut.LinkPath + " (" + f.Error + ")")) : ""));
+            if (failed.Count > 0)
+                System.Windows.MessageBox.Show(owner,
+                    "These shortcuts couldn't be changed:\n\n" + string.Join("\n", failed.Select(f => $"• {f.Shortcut.LinkPath} ({f.Error})")) +
+                    "\n\nYou can delete them and use \"📌 Create Desktop Shortcut\" instead.",
+                    "ArchivSector-OD — Shortcuts", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            else
+            {
+                shortcutMessage = stale.Count == 1 ? "Shortcut updated to this copy." : $"{stale.Count} shortcuts updated to this copy.";
+                StateHasChanged();
+            }
+        }
+        catch { /* never let this get in the way of starting up */ }
     }
 
     // Reload before saving, so changes the drive bays saved in the
