@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- ArchivSector-OD burning engine.
+	     All disc burning / reading / verifying code lives here, with no UI,
+	     so the main app (and any future standalone burner) can share it.
+	     Uses IMAPI2, which is built into Windows - nothing extra to install. -->
+
+	<PropertyGroup>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<RootNamespace>ArchivSector_OD.Burning</RootNamespace>
+		<AssemblyName>ArchivSector-OD.Burning</AssemblyName>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	</PropertyGroup>
+
+	<!-- Release builds only: no .pdb file, same as the main project. -->
+	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
+		<DebugType>none</DebugType>
+	</PropertyGroup>
+
+</Project>

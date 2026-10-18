@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
@@ -25,6 +25,12 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="8.0.40" />
+	</ItemGroup>
+
+	<!-- Burning engine (IMAPI2 wrapper). Lives in its own project so a
+	     standalone burner could reuse it later. -->
+	<ItemGroup>
+		<ProjectReference Include="..\ArchivSector-OD.Burning\ArchivSector-OD.Burning.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

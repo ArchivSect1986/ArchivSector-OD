@@ -1,0 +1,194 @@
+﻿@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Burn tab: every recorder, what it can write, and what disc is in it.
+    A drive with a blank disc gets the same burn screen as the drive bays
+    (BurnPanel), backed by the shared engine in ArchivSector-OD.Burning.
+
+    AppShell keeps every tab loaded and only hides the inactive ones, so
+    this waits until it's first shown (Visible) before scanning -- it never
+    spins up the drives just because the app started. Drives that are busy
+    ripping, burning or being checked are skipped, so their work isn't
+    disturbed. Uses the app's own styles, so it follows the theme.
+*@
+
+<div class="bays-grid" style="grid-template-columns: 1fr;">
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+        <div>
+            <h2 style="margin: 0;">🔥 Burn</h2>
+            <p class="bay-subtitle" style="margin: 2px 0 0; color: var(--text-muted); font-size: 12px;">
+                Your disc recorders and the disc in each one.
+            </p>
+        </div>
+        <button class="shortcut-btn" @onclick="ScanAsync" disabled="@scanning">
+            @(scanning ? "⏳ Scanning drives…" : "🔄 Refresh drives")
+        </button>
+    </div>
+
+    @if (error is not null)
+    {
+        <p style="color: var(--danger); margin: 0;">⚠ @error</p>
+    }
+    else if (drives is null)
+    {
+        <p style="color: var(--text-muted); margin: 0;">Scanning drives… (a drive may need a moment to spin up)</p>
+    }
+    else if (drives.Count == 0)
+    {
+        <p style="color: var(--text-muted); margin: 0;">No disc recorders were found on this PC.</p>
+    }
+    else
+    {
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px;">
+            @foreach (var drive in drives)
+            {
+                <div class="bay-card">
+                    <h2>@drive.DisplayName</h2>
+
+                    @if (drive.Error is not null)
+                    {
+                        <p style="color: var(--danger); font-size: 13px; margin: 8px 0 0;">⚠ Couldn't read this drive: @drive.Error</p>
+                    }
+                    else
+                    {
+                        <p class="bay-subtitle">
+                            Firmware @(drive.Firmware.Length > 0 ? drive.Firmware : "—") • Writes @drive.WriteFormatsText
+                        </p>
+
+                        @if (drive.Busy)
+                        {
+                            <p class="bay-meta" style="color: var(--amber);">⏳ In use (ripping, burning or checking) — the disc wasn't read, so that work isn't disturbed.</p>
+                        }
+                        else if (drive.Media.State == MediaState.NoDisc)
+                        {
+                            <p class="bay-meta">No disc in drive</p>
+                        }
+                        else
+                        {
+                            <div style="display: flex; flex-direction: column; gap: 3px; font-size: 13px;">
+                                <div style="display: flex; justify-content: space-between; gap: 10px;">
+                                    <span style="color: var(--text-muted);">Disc</span>
+                                    <span>@drive.Media.TypeName@(drive.Media.IsRewritable ? " (rewritable)" : "")</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; gap: 10px;">
+                                    <span style="color: var(--text-muted);">Status</span>
+                                    <span style="color: @(drive.Media.CanBurnNow ? "var(--success)" : "var(--text-muted)"); font-weight: @(drive.Media.CanBurnNow ? "600" : "400");">@drive.Media.StateText</span>
+                                </div>
+                                @if (drive.Media.TotalSectors > 0)
+                                {
+                                    <div style="display: flex; justify-content: space-between; gap: 10px;">
+                                        <span style="color: var(--text-muted);">Capacity</span>
+                                        <span>@DiscHealthService.FormatBytes(drive.Media.FullDiscBytes)</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; gap: 10px;">
+                                        <span style="color: var(--text-muted);">Free</span>
+                                        <span>@DiscHealthService.FormatBytes(drive.Media.State == MediaState.Blank ? drive.Media.FullDiscBytes : drive.Media.FreeBytes)</span>
+                                    </div>
+                                    @if (drive.Media.WindowsSpareBytes > 0)
+                                    {
+                                        <span class="bay-subtitle" style="margin: 4px 0 0;">
+                                            Windows' burning engine keeps @(DiscHealthService.FormatBytes(drive.Media.WindowsSpareBytes)) of this disc spare and can write
+                                            @(DiscHealthService.FormatBytes(drive.Media.TotalBytes)); ImgBurn uses the whole disc.
+                                        </span>
+                                    }
+                                }
+                            </div>
+                        }
+
+                        @* Burning: a blank disc (or a burn that's running or just
+                           finished on this drive) shows the burn screen. *@
+                        @if (CanShowBurn(drive))
+                        {
+                            <BurnPanel DriveLetter="@Letter(drive)"
+                                       BlankMediaType="@(drive.Media.State == MediaState.Blank ? drive.Media.TypeName : "")"
+                                       BlankFreeBytes="@drive.Media.FreeBytes"
+                                       BlankTotalBytes="@drive.Media.TotalBytes"
+                                       DriveModel="@ModelName(drive)"
+                                       Disabled="@false"
+                                       BusyChanged="@(b => OnBurnBusy(drive, b))"
+                                       BurnFinished="@(_ => OnBurnFinished(drive))" />
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>True while the Burn tab is the one showing.</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    private IReadOnlyList<BurnerDrive>? drives;
+    private bool scanning;
+    private bool scannedOnce;
+    private string? error;
+    private bool disposed;
+
+    // Drives whose burn screen is in use here (burning, or showing a result),
+    // kept on screen even though the scan now reports them busy or not blank.
+    private readonly HashSet<string> burnScreens = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string Letter(BurnerDrive d) => d.DriveLetter.TrimEnd(':');
+    private static string ModelName(BurnerDrive d) => (d.Vendor + " " + d.Model).Trim();
+
+    // A burn screen that's in use here always stays (even while the scan
+    // reports the drive busy); otherwise only a writer with a blank disc.
+    private bool CanShowBurn(BurnerDrive d) =>
+        d.DriveLetter.Length > 0 &&
+        (burnScreens.Contains(Letter(d)) || (!d.Busy && d.CanWrite && d.Media.State == MediaState.Blank));
+
+    private void OnBurnBusy(BurnerDrive d, bool busy)
+    {
+        if (busy) burnScreens.Add(Letter(d));
+    }
+
+    // After a burn the disc isn't blank any more: re-read just that drive
+    // (the burn screen stays up to show the result until it's closed).
+    private async Task OnBurnFinished(BurnerDrive d)
+    {
+        try
+        {
+            var fresh = await BurnerScanner.ScanDriveAsync(d.UniqueId, letter => RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter));
+            if (drives is not null)
+                drives = drives.Select(x => x.UniqueId == d.UniqueId ? fresh : x).ToList();
+        }
+        catch { }
+        if (!disposed) StateHasChanged();
+    }
+
+    // First time the tab is shown: scan. After that, only "Refresh drives".
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && !scannedOnce)
+        {
+            scannedOnce = true;
+            await ScanAsync();
+        }
+    }
+
+    private async Task ScanAsync()
+    {
+        if (scanning) return;
+        scanning = true;
+        error = null;
+        StateHasChanged();
+        try
+        {
+            // The drive bays and burns report busy drives here.
+            drives = await BurnerScanner.ScanAsync(letter => RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter));
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            scanning = false;
+        }
+        if (!disposed) StateHasChanged();
+    }
+
+    public void Dispose() => disposed = true;
+}

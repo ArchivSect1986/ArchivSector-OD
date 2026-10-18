@@ -43,8 +43,11 @@
             <button class="shortcut-btn @(activeTab == "bays" ? "active-toggle" : "")" @onclick='() => activeTab = "bays"'>
                 💿 Drive Bays
             </button>
-            <button class="shortcut-btn @(activeTab == "fill" ? "active-toggle" : "")" style="margin-left: 8px; margin-right: 16px;" @onclick='() => activeTab = "fill"'>
+            <button class="shortcut-btn @(activeTab == "fill" ? "active-toggle" : "")" style="margin-left: 8px;" @onclick='() => activeTab = "fill"'>
                 🎯 TargetFill
+            </button>
+            <button class="shortcut-btn @(activeTab == "burn" ? "active-toggle" : "")" style="margin-left: 8px; margin-right: 16px;" @onclick='() => activeTab = "burn"'>
+                🔥 Burn
             </button>
             <button class="shortcut-btn @(config.UnattendedAutoStart ? "active-toggle" : "")" @onclick="ToggleUnattendedMode"
                     title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
@@ -90,6 +93,11 @@
 
     @if (!fillOnly)
     {
+    @* Burn tab (in progress). It only scans the drives once it's first shown. *@
+    <div style="display: @(activeTab == "burn" ? "block" : "none");">
+        <BurnTab Visible="@(activeTab == "burn")" />
+    </div>
+
     <div style="display: @(activeTab == "bays" ? "block" : "none");">
     @if (driveStates.Count == 0)
     {

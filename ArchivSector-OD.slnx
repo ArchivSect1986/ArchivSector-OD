@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="ArchivSector-OD/ArchivSector-OD.csproj" />
+  <Project Path="ArchivSector-OD.Burning/ArchivSector-OD.Burning.csproj" />
 </Solution>

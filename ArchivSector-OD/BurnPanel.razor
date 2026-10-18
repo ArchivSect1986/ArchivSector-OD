@@ -5,6 +5,7 @@
    tells the bay while a burn runs. *@
 
 @using System.IO
+@using ArchivSector_OD.Burning
 @using System.Windows
 @implements IDisposable
 
@@ -145,8 +146,8 @@ else if (state == State.Done && result is not null)
     private string? isoPath;
     private long isoBytes;
     private bool verify = true;
-    private BurnService.Progress? progress;
-    private BurnService.Result? result;
+    private BurnEngine.Progress? progress;
+    private BurnEngine.Result? result;
     private CancellationTokenSource? cts;
     private bool cancelRequested;
     private bool useImgBurn;          // this burn's engine (Windows when false)
@@ -268,15 +269,15 @@ else if (state == State.Done && result is not null)
         bool imgBurn = useImgBurn;
         bool delete = deleteIso && verify;
         LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {(imgBurn ? "ImgBurn" : "Windows")} (verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");
-        var reporter = new Progress<BurnService.Progress>(p => InvokeAsync(() => { progress = p; StateHasChanged(); }));
-        BurnService.Result r;
+        var reporter = new Progress<BurnEngine.Progress>(p => InvokeAsync(() => { progress = p; StateHasChanged(); }));
+        BurnEngine.Result r;
         try
         {
             r = await BurnService.BurnAsync(DriveLetter, path, verify, title, DriveModel, reporter, cts.Token, imgBurn, delete);
         }
         catch (Exception ex)
         {
-            r = new BurnService.Result { Message = $"The burn failed: {ex.Message}" };
+            r = new BurnEngine.Result { Message = $"The burn failed: {ex.Message}" };
         }
         LogService.Write($"{DriveLetter}:", "Burn finished: " + r.Message);
 
