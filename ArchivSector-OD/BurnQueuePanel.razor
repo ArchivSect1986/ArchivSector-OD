@@ -1,0 +1,411 @@
+@using System.IO
+@using System.Windows
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Burn queue (v4.0 week 2): several ISOs burned one after another on one
+    drive. For each ISO it waits for a blank disc, burns it (Windows or
+    ImgBurn, the same engine as everywhere else), verifies it, can run a
+    disc health check on the fresh disc, then ejects it and asks for the
+    next blank. The drive is marked busy for the whole queue, so the drive
+    bays and the Burn tab's scan leave it alone.
+*@
+
+<div class="bay-card">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+        <h2 style="margin: 0;">📚 Burn queue</h2>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <button class="shortcut-btn" @onclick="AddIsos" disabled="@running">➕ Add ISOs…</button>
+            @if (items.Count > 0 && !running)
+            {
+                <button class="shortcut-btn" @onclick="ClearList">Clear</button>
+            }
+        </div>
+    </div>
+    <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs one after another. After each disc it's ejected, and the next one starts when you put in a blank.</p>
+
+    @if (items.Count == 0)
+    {
+        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add ISOs to start a queue.</p>
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            @foreach (var it in items)
+            {
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary);">
+                    <span style="width: 18px; text-align: center;">@Icon(it)</span>
+                    <span style="flex: 1; min-width: 0; overflow-wrap: anywhere;" title="@it.Path">
+                        <strong>@Path.GetFileName(it.Path)</strong>
+                        <span style="display: block; font-size: 12px; color: var(--text-secondary);">@Line(it)</span>
+                    </span>
+                    @if (!running)
+                    {
+                        <button class="shortcut-btn" @onclick="() => MoveUp(it)" disabled="@(items.IndexOf(it) == 0)" title="Burn this one earlier">▲</button>
+                        <button class="shortcut-btn" @onclick="() => { items.Remove(it); }" title="Take it off the list (the file isn't touched)">✖</button>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (!running)
+        {
+            <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; margin-top: 12px; color: var(--text-primary);">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <strong style="min-width: 80px;">Drive</strong>
+                    <select class="settings-input" @bind="driveLetter" style="flex: 1; font-size: 13px;">
+                        @foreach (var d in Drives)
+                        {
+                            <option value="@Letter(d)" style="background: var(--bg-panel-alt); color: var(--text-primary);">@d.DisplayName</option>
+                        }
+                    </select>
+                </div>
+                <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center;">
+                    <strong style="min-width: 80px;">Burn with</strong>
+                    <label style="display: flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: @(imgBurnPath is null ? "default" : "pointer"); opacity: @(imgBurnPath is null ? "0.6" : "1");">
+                        <input type="radio" name="queue-engine" checked="@useImgBurn" disabled="@(imgBurnPath is null)" @onchange="() => useImgBurn = true" />
+                        ImgBurn @(imgBurnPath is null ? "(not installed)" : "(whole disc)")
+                    </label>
+                    <label style="display: flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer;">
+                        <input type="radio" name="queue-engine" checked="@(!useImgBurn)" @onchange="() => useImgBurn = false" />
+                        Windows (built in)
+                    </label>
+                </div>
+                <label style="display: flex; gap: 8px; align-items: flex-start; color: var(--text-primary); cursor: pointer;">
+                    <input type="checkbox" @bind="verify" style="margin-top: 3px;" />
+                    <span><strong>Verify each disc</strong> (recommended)<br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the disc back and compares every byte with its ISO.</span></span>
+                </label>
+                <label style="display: flex; gap: 8px; align-items: flex-start; color: var(--text-primary); cursor: pointer;">
+                    <input type="checkbox" @bind="healthCheck" style="margin-top: 3px;" />
+                    <span><strong>Disc health check after each burn</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the fresh disc and shows any weak or slow areas. Adds about as long as a verify.</span></span>
+                </label>
+                <label style="display: flex; gap: 8px; align-items: flex-start; color: var(--text-primary); cursor: @(verify ? "pointer" : "default"); opacity: @(verify ? "1" : "0.6");">
+                    <input type="checkbox" checked="@(deleteIso && verify)" disabled="@(!verify)" @onchange="e => deleteIso = (bool)(e.Value ?? false)" style="margin-top: 3px;" />
+                    <span><strong>Move each ISO to the Recycle Bin</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Only after its disc is burned and verified. You can restore it from the Recycle Bin.</span></span>
+                </label>
+            </div>
+        }
+
+        @if (running)
+        {
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 10px;">
+                <span style="font-size: 13px; color: var(--text-primary);"><strong>Disc @current of @total</strong> — @status</span>
+                <div class="progress-bar"><div class="progress-fill" style="width: @F(OverallPercent)%;"></div></div>
+                @if (stepPercent >= 0)
+                {
+                    <span style="font-size: 12px; color: var(--text-secondary);">@stepText @stepPercent.ToString("0")%</span>
+                    <div class="progress-bar" style="height: 6px;"><div class="progress-fill" style="width: @F(stepPercent)%;"></div></div>
+                }
+                else if (stepText.Length > 0)
+                {
+                    <span style="font-size: 12px; color: var(--text-secondary);">@stepText</span>
+                }
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <button class="bay-btn tray-btn" style="width: auto; flex: 1; opacity: @(stopAfterCurrent ? "0.85" : "1"); color: var(--text-primary);" @onclick="StopAfterThis" disabled="@stopAfterCurrent">
+                        @(stopAfterCurrent ? "Stopping after this disc…" : "⏸ Stop after this disc")
+                    </button>
+                    <button class="bay-btn cancel-btn" style="width: auto; flex: 1;" @onclick="StopNow">✖ Stop now</button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;">
+                <button class="bay-btn game" style="width: auto; padding: 0 18px;" @onclick="Start" disabled="@(Todo == 0 || string.IsNullOrEmpty(driveLetter))">
+                    🔥 Burn @(Todo == 1 ? "1 ISO" : Todo + " ISOs")
+                </button>
+                @if (items.Any(i => i.State != ItemState.Waiting))
+                {
+                    <button class="shortcut-btn" @onclick="ResetList" title="Lets every ISO be burned again">↺ Reset list</button>
+                }
+            </div>
+        }
+
+        @if (summary is not null)
+        {
+            <span style="font-size: 12px; margin-top: 6px; display: block; color: @SummaryColor;">@SummaryIcon @summary</span>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The writable drives from the Burn tab's last scan.</summary>
+    [Parameter] public IReadOnlyList<BurnerDrive> Drives { get; set; } = Array.Empty<BurnerDrive>();
+
+    /// <summary>Called with the drive letter when a queue ends, so the Burn tab re-reads that drive.</summary>
+    [Parameter] public EventCallback<string> Finished { get; set; }
+
+    private enum ItemState { Waiting, Working, Done, Failed, Skipped }
+
+    private sealed class QueueItem
+    {
+        public string Path = "";
+        public long Bytes;
+        public ItemState State = ItemState.Waiting;
+        public string? Detail;
+    }
+
+    private readonly List<QueueItem> items = new();
+    private string driveLetter = "";
+    private string? imgBurnPath;
+    private bool useImgBurn, verify = true, healthCheck, deleteIso, settingsLoaded;
+
+    private bool running, stopAfterCurrent, disposed;
+    private CancellationTokenSource? cts;
+    private int current, total;
+    private string status = "", stepText = "";
+    private double stepPercent = -1;
+    private string? summary;
+    private bool summaryOk, summaryStopped;
+    // Green when everything burned, grey when you stopped it with nothing
+    // wrong, amber when a disc had a problem or was skipped.
+    private string SummaryColor => summaryOk ? "var(--success)" : summaryStopped ? "var(--text-secondary)" : "var(--amber)";
+    private string SummaryIcon => summaryOk ? "✅" : summaryStopped ? "⏸" : "⚠";
+
+    private int Todo => items.Count(i => i.State == ItemState.Waiting);
+
+    // Each disc counts its own steps (burn, verify, health check), so the
+    // overall bar only moves forward as a disc goes from one step to the next.
+    private int phaseCount = 1, phaseIndex;
+    private double OverallPercent =>
+        total == 0 ? 0 : Math.Clamp(100.0 * (current - 1 + (phaseIndex + Math.Max(0, stepPercent) / 100.0) / phaseCount) / total, 0, 100);
+
+    private void NotePhase(string phase)
+    {
+        int idx = phase switch
+        {
+            "Verifying" => Math.Min(1, phaseCount - 1),
+            "Checking disc health" or "Waiting for the drive" => phaseCount - 1,
+            _ => 0,
+        };
+        if (idx > phaseIndex) phaseIndex = idx;
+    }
+
+    private static string Letter(BurnerDrive d) => d.DriveLetter.TrimEnd(':');
+    private static string F(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private static string Icon(QueueItem it) => it.State switch
+    {
+        ItemState.Working => "⏳",
+        ItemState.Done => "✅",
+        ItemState.Failed => "⚠️",
+        ItemState.Skipped => "⏭",
+        _ => "•",
+    };
+    private static string Line(QueueItem it) => it.Detail ?? $"{DiscHealthService.FormatBytes(it.Bytes)} ({it.Bytes:N0} bytes)";
+
+    protected override void OnParametersSet()
+    {
+        if (!settingsLoaded)
+        {
+            settingsLoaded = true;
+            imgBurnPath = BurnService.ImgBurnPath();
+            var saved = ConfigService.Load();
+            useImgBurn = imgBurnPath is not null && !string.Equals(saved.BurnEngine, "Windows", StringComparison.OrdinalIgnoreCase);
+            deleteIso = saved.DeleteIsoAfterBurn;
+        }
+        // Keep the chosen drive; pick the first one if none is chosen yet.
+        if ((string.IsNullOrEmpty(driveLetter) || !Drives.Any(d => Letter(d) == driveLetter)) && Drives.Count > 0 && !running)
+            driveLetter = Letter(Drives[0]);
+    }
+
+    private void AddIsos()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose the ISOs to burn",
+            Filter = "Disc images (*.iso)|*.iso|All files (*.*)|*.*",
+            Multiselect = true,
+        };
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        foreach (var f in dlg.FileNames)
+        {
+            var full = Path.GetFullPath(f);
+            if (items.Any(i => string.Equals(i.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
+            long bytes = 0;
+            try { bytes = new FileInfo(full).Length; } catch { }
+            items.Add(new QueueItem { Path = full, Bytes = bytes });
+        }
+        summary = null;
+    }
+
+    private void MoveUp(QueueItem it)
+    {
+        int i = items.IndexOf(it);
+        if (i <= 0) return;
+        items.RemoveAt(i);
+        items.Insert(i - 1, it);
+    }
+
+    private void ClearList() { items.Clear(); summary = null; }
+
+    private void ResetList()
+    {
+        foreach (var i in items) { i.State = ItemState.Waiting; i.Detail = null; }
+        summary = null;
+    }
+
+    private void StopAfterThis() => stopAfterCurrent = true;
+
+    private void StopNow()
+    {
+        var owner = System.Windows.Application.Current?.MainWindow;
+        var msg = "Stop the queue now?\n\nIf a disc is being written, it can't be used again.";
+        var ans = owner is null
+            ? MessageBox.Show(msg, "Burn queue", MessageBoxButton.YesNo, MessageBoxImage.Warning)
+            : MessageBox.Show(owner, msg, "Burn queue", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (ans == MessageBoxResult.Yes) cts?.Cancel();
+    }
+
+    private void Ui() { if (!disposed) InvokeAsync(StateHasChanged); }
+
+    private async Task Start()
+    {
+        var todo = items.Where(i => i.State == ItemState.Waiting).ToList();
+        if (todo.Count == 0 || string.IsNullOrEmpty(driveLetter)) return;
+        var letter = driveLetter;
+        var model = Drives.FirstOrDefault(d => Letter(d) == letter) is { } dr ? (dr.Vendor + " " + dr.Model).Trim() : "";
+        bool imgBurn = useImgBurn && imgBurnPath is not null;
+        bool doVerify = verify, doHealth = healthCheck, doDelete = deleteIso && verify;
+
+        running = true;
+        stopAfterCurrent = false;
+        summary = null;
+        total = todo.Count;
+        cts = new CancellationTokenSource();
+        var ct = cts.Token;
+        // The whole queue owns the drive: the bays and the Burn tab's scan leave it alone.
+        RipActivity.Set(letter, "queue", true);
+        LogService.Write($"{letter}:", $"Burn queue started: {total} ISO(s), {(imgBurn ? "ImgBurn" : "Windows")}, verify {(doVerify ? "on" : "off")}, health check {(doHealth ? "on" : "off")}");
+        int ok = 0, failed = 0, skipped = 0;
+        bool userStopped = false;
+
+        try
+        {
+            for (int n = 0; n < todo.Count; n++)
+            {
+                if (ct.IsCancellationRequested || stopAfterCurrent) break;
+                var it = todo[n];
+                current = n + 1;
+                it.State = ItemState.Working;
+                it.Detail = null;
+                stepPercent = -1;
+                phaseIndex = 0;
+
+                // 1. Wait for a blank disc that the ISO fits on.
+                status = $"Insert a blank disc in {letter}: for {Path.GetFileName(it.Path)}";
+                stepText = "Waiting for a blank disc…";
+                Ui();
+                BurnEngine.BlankInfo? blank = null;
+                while (!ct.IsCancellationRequested && !stopAfterCurrent)
+                {
+                    blank = await Task.Run(() => BurnService.QueryBlank(letter));
+                    if (blank is not null) break;
+                    try { await Task.Delay(3000, ct); } catch (OperationCanceledException) { }
+                }
+                if (blank is null) { it.State = ItemState.Waiting; break; }
+
+                long limit = imgBurn ? BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes)) : blank.FreeBytes;
+                if (it.Bytes > limit)
+                {
+                    it.State = ItemState.Skipped;
+                    it.Detail = $"Skipped: too big for the {blank.MediaType} in the drive ({DiscHealthService.FormatBytes(it.Bytes)}, the disc takes {DiscHealthService.FormatBytes(limit)}" +
+                                (imgBurn ? ")." : " with Windows; ImgBurn can use the whole disc).");
+                    skipped++;
+                    LogService.Write($"{letter}:", "Burn queue: skipped " + it.Path + " — " + it.Detail);
+                    continue;   // the blank disc stays in for the next ISO
+                }
+
+                // 2. Burn (and verify).
+                phaseIndex = 0;
+                phaseCount = 1 + (doVerify && !imgBurn ? 1 : 0) + (doHealth ? 1 : 0);
+                status = $"Burning {Path.GetFileName(it.Path)} to {blank.MediaType}";
+                stepText = imgBurn ? "Burning with ImgBurn (progress in its window)…" : "Preparing…";
+                Ui();
+                var reporter = new Progress<BurnEngine.Progress>(p =>
+                {
+                    stepText = p.Phase + "…";
+                    NotePhase(p.Phase);
+                    stepPercent = p.Percent;
+                    Ui();
+                });
+                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete);
+                stepPercent = -1;
+                LogService.Write($"{letter}:", "Burn queue: " + it.Path + " — " + r.Message);
+
+                if (!r.Burned)
+                {
+                    it.State = ItemState.Failed;
+                    it.Detail = r.Message;
+                    failed++;
+                    if (r.Cancelled || ct.IsCancellationRequested) break;
+                }
+                else
+                {
+                    bool good = r.Verified != false;
+                    string detail = r.Message;
+
+                    // 3. Optional disc health check on the fresh disc.
+                    if (doHealth && !ct.IsCancellationRequested)
+                    {
+                        status = $"Checking the burned disc ({Path.GetFileName(it.Path)})";
+                        stepText = "Waiting for the drive…";
+                        Ui();
+                        var health = await BurnService.HealthCheckAfterBurnAsync(letter, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct);
+                        stepPercent = -1;
+                        if (health is not null)
+                        {
+                            detail += " " + BurnService.HealthLine(health);
+                            if (health.Verdict == DiscHealthService.Level.Damaged) good = false;
+                        }
+                    }
+
+                    it.State = good ? ItemState.Done : ItemState.Failed;
+                    it.Detail = detail;
+                    if (good) ok++; else failed++;
+                }
+
+                // 4. Eject, ready for the next blank (not after the last one).
+                bool more = todo.Skip(n + 1).Any() && !stopAfterCurrent && !ct.IsCancellationRequested;
+                if (more || r.Burned)
+                {
+                    stepText = "Ejecting…";
+                    Ui();
+                    await Task.Run(() => TrayControlService.EjectWithoutVolume(letter));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.Write($"{letter}:", "Burn queue stopped by an error: " + ex.Message);
+            summary = "The queue stopped because of an error: " + ex.Message;
+        }
+        finally
+        {
+            userStopped = stopAfterCurrent || cts.IsCancellationRequested;
+            RipActivity.Set(letter, "queue", false);
+            foreach (var i in todo.Where(i => i.State == ItemState.Working)) { i.State = ItemState.Waiting; i.Detail = null; }
+            cts.Dispose();
+            cts = null;
+            running = false;
+            stepText = "";
+            stepPercent = -1;
+        }
+
+        int left = todo.Count(i => i.State == ItemState.Waiting);
+        bool clean = failed == 0 && skipped == 0;
+        summary ??= (userStopped && left > 0 ? "Stopped. " : "") +
+                    $"{ok} disc(s) burned{(failed > 0 ? $", {failed} with a problem" : "")}{(skipped > 0 ? $", {skipped} skipped" : "")}" +
+                    (left > 0 ? $", {left} still to do." : ".");
+        summaryOk = clean && left == 0;
+        summaryStopped = clean && left > 0 && userStopped;
+        LogService.Write($"{letter}:", "Burn queue finished: " + summary);
+        try { if (ConfigService.Load().SoundAlerts) System.Media.SystemSounds.Exclamation.Play(); } catch { }
+        Ui();
+        // The Burn tab still shows the drive as "in use" from its last scan.
+        if (!disposed) await Finished.InvokeAsync(letter);
+    }
+
+    // Leaving the tab never stops a running queue; it carries on.
+    public void Dispose() => disposed = true;
+}

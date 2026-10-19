@@ -62,6 +62,11 @@ else if (state == State.Confirm && isoPath is not null)
             <input type="checkbox" checked="@(deleteIso && verify)" disabled="@(!verify)" @onchange="e => SetDeleteIso((bool)(e.Value ?? false))" />
             Move the ISO to the Recycle Bin once the disc is burned and verified
         </label>
+        <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;"
+               title="Reads the whole fresh disc and saves a health report, like the bay's Disc health check. Adds about as long as a verify.">
+            <input type="checkbox" checked="@healthCheck" @onchange="e => healthCheck = (bool)(e.Value ?? false)" />
+            Disc health check after burning (shows any weak or slow areas)
+        </label>
         <span class="bay-subtitle" style="margin: 0; color: var(--amber);">
             Burning can't be undone. Don't eject the disc or let the PC sleep while it burns.
         </span>
@@ -101,7 +106,7 @@ else if (state == State.Running)
             }
         </span>
         <button class="bay-btn cancel-btn" @onclick="Cancel" disabled="@cancelRequested">
-            @(cancelRequested ? "Stopping…" : progress?.Phase == "Verifying" ? "✖ Stop checking" : "✖ Cancel burn")
+            @(cancelRequested ? "Stopping…" : progress?.Phase is "Verifying" or "Checking disc health" or "Waiting for the drive" ? "✖ Stop checking" : "✖ Cancel burn")
         </button>
     </div>
 }
@@ -118,6 +123,10 @@ else if (state == State.Done && result is not null)
             @if (result.Verified is not null)
             {
                 <text> • checked in @Dur(result.VerifyTime)</text>
+            }
+            @if (health is not null && health.ReportPath is not null)
+            {
+                <text> • health report saved</text>
             }
         </span>
         <div style="display: flex; gap: 6px; flex-wrap: wrap;">
@@ -154,6 +163,8 @@ else if (state == State.Done && result is not null)
     private string? imgBurnPath;      // null = ImgBurn not found
     private bool engineLoaded;
     private bool deleteIso;           // move the ISO to the Recycle Bin after a verified burn
+    private static bool healthCheck;  // health check after burning (remembered for this session)
+    private DiscHealthService.Result? health;
 
     // The last folder an ISO was picked from (this session).
     private static string? lastIsoFolder;
@@ -162,21 +173,11 @@ else if (state == State.Done && result is not null)
     // The disc's full size, and how much the chosen program can write.
     // On BD-R, Windows' burning engine can report less free space than the
     // disc really has; ImgBurn writes the whole disc.
-    private long DiscBytes => FullDiscBytes(BlankMediaType, Math.Max(BlankTotalBytes, BlankFreeBytes));
+    private long DiscBytes => BurnEngine.FullDiscBytes(BlankMediaType, Math.Max(BlankTotalBytes, BlankFreeBytes));
 
-    // Windows formats a blank BD-R/BD-RE with spare areas for error handling
-    // (768 MB on a single-layer disc), and only reports what's left: a BD-25
-    // shows as 24,220,008,448 bytes instead of 25,025,314,816. ImgBurn burns
-    // without the spare areas, so the real disc size is worked out here from
-    // the standard Blu-ray sizes. (ImgBurn still checks the size itself.)
-    private const long Bd25 = 12_219_392L * 2048, Bd50 = 24_438_784L * 2048;
-    private static long FullDiscBytes(string mediaType, long reported)
-    {
-        if (!mediaType.StartsWith("BD")) return reported;
-        if (reported <= Bd25) return Bd25;
-        if (reported <= Bd50) return Bd50;
-        return reported;   // BD-XL: use what Windows says
-    }
+    // Windows formats a blank BD-R/BD-RE with spare areas (768 MB on a
+    // single-layer disc) and only reports what's left; ImgBurn burns the
+    // whole disc. BurnEngine.FullDiscBytes works out the real size.
     private long Limit => useImgBurn ? DiscBytes : BlankFreeBytes;
     private bool TooBigForWindows => isoBytes > BlankFreeBytes;
     private bool TooBigForDisc => isoBytes > DiscBytes;
@@ -189,9 +190,10 @@ else if (state == State.Done && result is not null)
     private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min" : $"{t.Seconds}s";
     private static string F(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
 
-    private string ResultColor => result?.Verified == true ? "var(--success)"
+    private bool HealthBad => health?.Verdict == DiscHealthService.Level.Damaged;
+    private string ResultColor => HealthBad ? "var(--danger)" : result?.Verified == true ? "var(--success)"
         : result?.Verified == false || result?.Burned != true ? "var(--danger)" : "var(--amber)";
-    private string ResultIcon => result?.Verified == true ? "✅" : result?.Verified == false || result?.Burned != true ? "⚠" : "✓";
+    private string ResultIcon => HealthBad ? "⚠" : result?.Verified == true ? "✅" : result?.Verified == false || result?.Burned != true ? "⚠" : "✓";
 
     protected override void OnParametersSet()
     {
@@ -281,6 +283,15 @@ else if (state == State.Done && result is not null)
         }
         LogService.Write($"{DriveLetter}:", "Burn finished: " + r.Message);
 
+        // Optional health check on the fresh disc (not after a failed verify:
+        // that disc is already known to be bad).
+        health = null;
+        if (healthCheck && r.Burned && r.Verified != false && !cts.IsCancellationRequested)
+        {
+            health = await BurnService.HealthCheckAfterBurnAsync(DriveLetter, title, DriveModel, reporter, cts.Token);
+            if (health is not null) r.Message += " " + BurnService.HealthLine(health);
+        }
+
         result = r;
         state = State.Done;
         cts.Dispose();
@@ -294,7 +305,7 @@ else if (state == State.Done && result is not null)
     private void Cancel()
     {
         if (cts is null) return;
-        if (progress?.Phase != "Verifying")
+        if (progress?.Phase is not ("Verifying" or "Checking disc health" or "Waiting for the drive"))
         {
             var owner = System.Windows.Application.Current?.MainWindow;
             var msg = progress?.Phase == "Burning with ImgBurn"
@@ -328,6 +339,7 @@ else if (state == State.Done && result is not null)
         state = State.Idle;
         isoPath = null;
         result = null;
+        health = null;
         progress = null;
     }
 

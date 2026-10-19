@@ -72,6 +72,19 @@ namespace ArchivSector_OD.Burning
         public static bool IsPaused(string driveLetter) =>
             PausedUntil.TryGetValue(Norm(driveLetter), out var until) && DateTime.Now < until;
 
+        // The disc's real size. Windows formats a blank BD-R/BD-RE with
+        // spare areas (768 MB on a single-layer disc) and only reports what's
+        // left, so for Blu-ray the standard BD-25 / BD-50 size is used.
+        // ImgBurn (and the direct engine later) burn the whole disc.
+        private const long Bd25Bytes = 12_219_392L * 2048, Bd50Bytes = 24_438_784L * 2048;
+        public static long FullDiscBytes(string mediaType, long reported)
+        {
+            if (!mediaType.StartsWith("BD") || reported <= 0) return reported;
+            if (reported <= Bd25Bytes) return Bd25Bytes;
+            if (reported <= Bd50Bytes) return Bd50Bytes;
+            return reported;   // BD-XL: use what Windows says
+        }
+
         // Sizes in the same units as Windows Explorer (1 GB = 1024^3 bytes).
         private static string Fmt(long b) =>
             b >= 1L << 30 ? $"{b / (double)(1L << 30):0.00} GB" : b >= 1L << 20 ? $"{b / (double)(1L << 20):0.0} MB" : $"{b / 1024.0:0} KB";

@@ -2,7 +2,8 @@
 @implements IDisposable
 
 @*
-    Burn tab: every recorder, what it can write, and what disc is in it.
+    Burn tab: every recorder, what it can write, and what disc is in it,
+    plus the burn queue (several ISOs one after another, v4.0 week 2).
     A drive with a blank disc gets the same burn screen as the drive bays
     (BurnPanel), backed by the shared engine in ArchivSector-OD.Burning.
 
@@ -25,6 +26,13 @@
             @(scanning ? "⏳ Scanning drives…" : "🔄 Refresh drives")
         </button>
     </div>
+
+    @* The burn queue (v4.0 week 2). It's kept on screen through rescans and
+       scan errors, so a running queue is never thrown away. *@
+    @if (queueDrives.Count > 0)
+    {
+        <BurnQueuePanel Drives="@queueDrives" Finished="@OnQueueFinished" />
+    }
 
     @if (error is not null)
     {
@@ -121,6 +129,15 @@
     [Parameter] public bool Visible { get; set; }
 
     private IReadOnlyList<BurnerDrive>? drives;
+    // Recorders the queue can use: writers, plus busy drives (a busy drive
+    // isn't asked what it writes, and may be the one the queue is using).
+    private IReadOnlyList<BurnerDrive> queueDrives = Array.Empty<BurnerDrive>();
+    private void UpdateQueueDrives()
+    {
+        if (drives is null) return;
+        var list = drives.Where(d => d.DriveLetter.Length > 0 && d.Error is null && (d.CanWrite || d.Busy)).ToList();
+        if (list.Count > 0 || queueDrives.Count == 0) queueDrives = list;
+    }
     private bool scanning;
     private bool scannedOnce;
     private string? error;
@@ -152,10 +169,20 @@
         {
             var fresh = await BurnerScanner.ScanDriveAsync(d.UniqueId, letter => RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter));
             if (drives is not null)
+            {
                 drives = drives.Select(x => x.UniqueId == d.UniqueId ? fresh : x).ToList();
+                UpdateQueueDrives();
+            }
         }
         catch { }
         if (!disposed) StateHasChanged();
+    }
+
+    // A burn queue ended: re-read that drive, so it no longer shows "in use".
+    private async Task OnQueueFinished(string letter)
+    {
+        var d = drives?.FirstOrDefault(x => Letter(x).Equals(letter, StringComparison.OrdinalIgnoreCase));
+        if (d is not null) await OnBurnFinished(d);
     }
 
     // First time the tab is shown: scan. After that, only "Refresh drives".
@@ -178,6 +205,7 @@
         {
             // The drive bays and burns report busy drives here.
             drives = await BurnerScanner.ScanAsync(letter => RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter));
+            UpdateQueueDrives();
         }
         catch (Exception ex)
         {

@@ -1,7 +1,8 @@
 ﻿/* ============================================================
-   Theme variables — pulled directly from the current Tkinter
-   app's THEMES dict, so this draft is an honest visual
-   comparison, not a fresh invented palette.
+   Theme variables. Every colour, font and corner size the app
+   uses comes from these, so a new theme is one more block here
+   (v4.0: the greys were brightened so small text is readable,
+   and --on-* say what text colour sits on a coloured button).
    Applied via a data-theme attribute on the app's root wrapper
    in AppShell.razor, scoped with these attribute selectors so
    no JS interop is needed for this first draft.
@@ -13,8 +14,8 @@
     --bg-panel-alt: #1b2438;
     --border: #2a3550;
     --text-primary: #e5e9f5;
-    --text-secondary: #8b93a8;
-    --text-muted: #5b6478;
+    --text-secondary: #a3abbf;
+    --text-muted: #8089a0;
     --accent: #22d3ee;
     --accent-hover: #5fe3f7;
     --success: #10b981;
@@ -24,6 +25,15 @@
     --danger: #ef4444;
     --danger-hover: #f87171;
     --amber: #f59e0b;
+    --on-accent: #04161c;       /* text on an accent-coloured button */
+    --on-success: #042114;
+    --on-danger: #ffffff;
+    --on-amber: #1a1200;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 10px;
+    --radius-sm: 6px;
+    color-scheme: dark;
 }
 
 [data-theme="nova"] {
@@ -32,8 +42,8 @@
     --bg-panel-alt: #16213a;
     --border: #243255;
     --text-primary: #eef2fb;
-    --text-secondary: #93a0c2;
-    --text-muted: #5a6690;
+    --text-secondary: #a8b3d2;
+    --text-muted: #7f8bb3;
     --accent: #2dd4bf;
     --accent-hover: #5eead4;
     --success: #22c55e;
@@ -43,6 +53,15 @@
     --danger: #dc2626;
     --danger-hover: #ef4444;
     --amber: #fbbf24;
+    --on-accent: #03201c;       /* text on an accent-coloured button */
+    --on-success: #042114;
+    --on-danger: #ffffff;
+    --on-amber: #1a1200;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 10px;
+    --radius-sm: 6px;
+    color-scheme: dark;
 }
 
 [data-theme="daylight"] {
@@ -51,8 +70,8 @@
     --bg-panel-alt: #dde1ea;
     --border: #b7c0d1;
     --text-primary: #141a2e;
-    --text-secondary: #4b5570;
-    --text-muted: #8791a8;
+    --text-secondary: #3d465e;
+    --text-muted: #5c6680;
     --accent: #0891b2;
     --accent-hover: #0aa5c2;
     --success: #16a34a;
@@ -61,7 +80,16 @@
     --neutral-hover: #475569;
     --danger: #dc2626;
     --danger-hover: #ef4444;
-    --amber: #d97706;
+    --amber: #b45309;
+    --on-accent: #ffffff;       /* text on an accent-coloured button */
+    --on-success: #ffffff;
+    --on-danger: #ffffff;
+    --on-amber: #ffffff;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 10px;
+    --radius-sm: 6px;
+    color-scheme: light;
 }
 
 /* ============================================================
@@ -79,8 +107,8 @@ html, body, #app {
 
 body {
     font-family: "Segoe UI", system-ui, sans-serif;
-    background: var(--bg-root);
-    color: var(--text-primary);
+    background: #0b1120;
+    color: #e5e9f5;
 }
 
 .app-root {
@@ -88,8 +116,55 @@ body {
     flex-direction: column;
     height: 100vh;
     background: var(--bg-root);
+    /* body sits outside the theme, so the theme's text colour and font are
+       set here. Without this, labels, <strong> and plain <div> text fell
+       back to the browser's black and were hard to read on dark themes. */
+    color: var(--text-primary);
+    font-family: var(--font-body);
     transition: background-color 0.25s ease;
 }
+
+    /* Form controls follow the theme everywhere. */
+    .app-root input[type="checkbox"],
+    .app-root input[type="radio"] {
+        accent-color: var(--accent);
+        width: 16px;
+        height: 16px;
+    }
+
+    .app-root input[type="text"],
+    .app-root input[type="number"],
+    .app-root input[type="search"],
+    .app-root input:not([type]),
+    .app-root select,
+    .app-root textarea {
+        background: var(--bg-panel-alt);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-family: inherit;
+    }
+
+    .app-root select {
+        padding: 6px 8px;
+    }
+
+        .app-root select option {
+            background: var(--bg-panel-alt);
+            color: var(--text-primary);
+        }
+
+    .app-root input:focus-visible,
+    .app-root select:focus-visible,
+    .app-root textarea:focus-visible,
+    .app-root button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+    }
+
+    .app-root label {
+        color: var(--text-primary);
+    }
 
     .app-root h1,
     .app-root h2,
@@ -104,53 +179,207 @@ body {
 
 .app-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
-    padding: 14px 24px;
+    gap: 10px 20px;
+    padding: 12px 24px;
     background: var(--bg-panel);
     border-bottom: 1px solid var(--border);
 }
 
-.app-brand h1 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    color: var(--text-primary);
+.app-brand {
+    flex: 1 1 220px;
+    min-width: 0;
 }
 
-.app-brand p {
-    margin: 2px 0 0;
-    font-size: 12px;
-    color: var(--accent);
-}
-
-.theme-switch {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-}
-
-    .theme-switch button {
-        border: none;
-        padding: 6px 14px;
-        font-size: 12px;
-        font-weight: 600;
-        cursor: pointer;
-        background: var(--bg-panel-alt);
-        color: var(--text-secondary);
-        transition: background-color 0.15s ease, color 0.15s ease;
+    .app-brand h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: var(--text-primary);
     }
 
-        .theme-switch button:hover {
-            background: var(--neutral-hover);
+    .app-brand p {
+        margin: 2px 0 0;
+        font-size: 12px;
+        color: var(--accent);
+    }
+
+/* The tabs: one segmented switcher. */
+.app-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-root);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 0 14px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+    .nav-btn:hover {
+        background: var(--bg-panel-alt);
+        color: var(--text-primary);
+    }
+
+    .nav-btn.active {
+        background: var(--accent);
+        color: var(--on-accent);
+    }
+
+/* Right-hand side: Unattended switch, then small icon buttons. */
+.header-actions {
+    flex: 1 1 220px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    position: relative;
+}
+
+.unattended-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--bg-panel-alt);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+    .unattended-pill .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-muted);
+    }
+
+    .unattended-pill.on {
+        border-color: var(--success);
+        color: var(--success);
+    }
+
+        .unattended-pill.on .dot {
+            background: var(--success);
+            box-shadow: 0 0 6px var(--success);
         }
 
-        .theme-switch button.active {
-            background: var(--accent);
-            color: #000;
-        }
+.icon-btn {
+    width: 38px;
+    height: 38px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-panel-alt);
+    color: var(--text-secondary);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+    .icon-btn:hover,
+    .icon-btn.open {
+        background: var(--neutral-hover);
+        color: var(--text-primary);
+    }
+
+/* Theme picker: a small panel under the 🎨 button. */
+.menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+}
+
+.theme-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 901;
+    width: 300px;
+    max-width: 90vw;
+    padding: 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+    .theme-menu h3 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        color: var(--text-primary);
+    }
+
+.theme-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.theme-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-panel-alt);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+}
+
+    .theme-tile:hover {
+        border-color: var(--text-muted);
+    }
+
+    .theme-tile.active {
+        border-color: var(--accent);
+    }
+
+.theme-preview {
+    height: 38px;
+    border-radius: 5px;
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    padding: 6px;
+    box-sizing: border-box;
+}
+
+    .theme-preview span {
+        height: 10px;
+        border-radius: 3px;
+    }
 
 /* ============================================================
    Drive bay grid
@@ -188,8 +417,8 @@ body {
 
     .bay-card .bay-subtitle {
         margin: 2px 0 12px;
-        font-size: 11px;
-        color: var(--text-muted);
+        font-size: 12px;
+        color: var(--text-secondary);
     }
 
 .bay-actions {
@@ -207,7 +436,7 @@ body {
     font-weight: 700;
     text-align: left;
     cursor: pointer;
-    color: #042114;
+    color: var(--on-success);
     transition: background-color 0.15s ease, transform 0.08s ease;
 }
 
@@ -225,7 +454,7 @@ body {
 
     .bay-btn.dvd {
         background: var(--danger);
-        color: white;
+        color: var(--on-danger);
     }
 
         .bay-btn.dvd:hover {
@@ -234,6 +463,7 @@ body {
 
     .bay-btn.game {
         background: var(--accent);
+        color: var(--on-accent);
     }
 
         .bay-btn.game:hover {
@@ -269,8 +499,8 @@ body {
     background: var(--bg-panel-alt);
     border-radius: 6px;
     padding: 10px 12px;
-    font-size: 11px;
-    color: var(--text-muted);
+    font-size: 12px;
+    color: var(--text-secondary);
 }
 
     .bay-status .standby-dot {
@@ -284,8 +514,8 @@ body {
 
 .bay-meta {
     margin: -8px 0 10px;
-    font-size: 10px;
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--text-secondary);
     letter-spacing: 0.3px;
 }
 
@@ -332,7 +562,7 @@ body {
     font-size: 13px;
     font-weight: 700;
     cursor: pointer;
-    color: #042114;
+    color: var(--on-accent);
     background: var(--accent);
 }
 
@@ -366,7 +596,7 @@ body {
 .history-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 11px;
+    font-size: 12px;
 }
 
     .history-table th {
@@ -399,8 +629,8 @@ body {
 
 .settings-label {
     display: block;
-    font-size: 11px;
-    color: var(--text-muted);
+    font-size: 12px;
+    color: var(--text-secondary);
     margin: 12px 0 4px;
 }
 
@@ -427,7 +657,7 @@ body {
 .cancel-btn {
     margin-top: 8px;
     background: var(--danger);
-    color: white;
+    color: var(--on-danger);
     text-align: center;
 }
 
@@ -438,7 +668,7 @@ body {
 .retry-btn {
     margin-top: 8px;
     background: var(--amber);
-    color: #1a1200;
+    color: var(--on-amber);
     text-align: center;
 }
 
@@ -457,7 +687,7 @@ body {
     background: var(--neutral);
     color: var(--text-primary);
     padding: 6px 10px;
-    font-size: 11px;
+    font-size: 12px;
     flex: 0 0 auto;
 }
 
@@ -484,7 +714,7 @@ body {
 .label-confirm-btn {
     border: none;
     background: var(--success);
-    color: #042114;
+    color: var(--on-success);
     border-radius: 4px;
     padding: 2px 8px;
     margin-left: 4px;
@@ -499,11 +729,17 @@ body {
     font-weight: 600;
     cursor: pointer;
     background: var(--bg-panel-alt);
-    color: var(--text-secondary);
+    color: var(--text-primary);
+    font-family: inherit;
 }
 
     .shortcut-btn:hover {
         background: var(--neutral-hover);
+    }
+
+    .shortcut-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 
 .shortcut-message {
@@ -519,7 +755,7 @@ body {
     background: none;
     border: none;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 12px;
     cursor: pointer;
     padding: 4px 0;
 }
@@ -536,8 +772,8 @@ body {
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 8px;
-    font-family: Consolas, monospace;
-    font-size: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
 }
 
 .log-line {
@@ -587,7 +823,7 @@ body {
 
 .shortcut-btn.active-toggle {
     background: var(--success);
-    color: #042114;
+    color: var(--on-success);
     font-weight: 700;
 }
 

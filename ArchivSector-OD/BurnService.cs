@@ -75,6 +75,59 @@ namespace ArchivSector_OD
             return r;
         }
 
+        // v4.0 week 2: the disc health check on a disc that was just burned.
+        // Waits (up to 2 minutes) for Windows to re-read the fresh disc,
+        // marks the drive busy while it reads, saves the report like the
+        // bay's own health check, and logs the verdict. Returns null if it
+        // couldn't run or was stopped before it started.
+        public static async Task<DiscHealthService.Result?> HealthCheckAfterBurnAsync(string driveLetter, string discTitle, string driveModel,
+            IProgress<BurnEngine.Progress>? progress, CancellationToken ct)
+        {
+            var letter = driveLetter.TrimEnd(':', '\\').ToUpperInvariant();
+            progress?.Report(new BurnEngine.Progress { Phase = "Waiting for the drive", Percent = -1 });
+            var start = DateTime.Now;
+            while (!ct.IsCancellationRequested && DateTime.Now - start < TimeSpan.FromMinutes(2))
+            {
+                bool ready = false;
+                try { ready = new DriveInfo(letter + ":\\").IsReady; } catch { }
+                if (ready) break;
+                try { await Task.Delay(2000, ct); } catch (OperationCanceledException) { }
+            }
+            if (ct.IsCancellationRequested) return null;
+
+            RipActivity.Set(letter, "health", true);
+            try
+            {
+                var reporter = new Progress<DiscHealthService.Progress>(p =>
+                {
+                    double pct = p.TotalSectors > 0 ? Math.Min(100.0, 100.0 * p.SectorsDone / p.TotalSectors) : -1;
+                    var left = p.CurrentBytesPerSec > 0 && p.TotalSectors > p.SectorsDone
+                        ? TimeSpan.FromSeconds((p.TotalSectors - p.SectorsDone) * 2048.0 / p.CurrentBytesPerSec)
+                        : TimeSpan.Zero;
+                    progress?.Report(new BurnEngine.Progress { Phase = "Checking disc health", Percent = pct, BytesPerSec = p.CurrentBytesPerSec, Remaining = left });
+                });
+                var r = await DiscHealthService.RunAsync(letter, reporter, ct);
+                if (r.Final.SectorsDone > 0)
+                    await Task.Run(() => DiscHealthService.SaveReport(r, letter, discTitle, driveModel));
+                LogService.Write($"{letter}:", $"Health check after burning ({discTitle}): {r.VerdictTitle} — {r.BadSectors:N0} unreadable, {r.SlowSectors:N0} slow" +
+                                 (r.ReportPath is not null ? " — report: " + r.ReportPath : ""));
+                return r;
+            }
+            catch (Exception ex)
+            {
+                LogService.Write($"{letter}:", $"Health check after burning ({discTitle}) couldn't run: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                RipActivity.Set(letter, "health", false);
+            }
+        }
+
+        // One line for a burn result: "Health check: Healthy (0 unreadable, 12 slow)."
+        public static string HealthLine(DiscHealthService.Result r) =>
+            $"Health check: {r.VerdictTitle}{(r.Completed ? "" : " (partial)")} ({r.BadSectors:N0} unreadable, {r.SlowSectors:N0} slow).";
+
         private static void RecordHistory(BurnEngine.Result r, string letter, string isoPath, string discTitle, string driveModel)
         {
             try

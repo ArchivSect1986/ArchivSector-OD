@@ -18,6 +18,11 @@
    DriveBayCard reads this fresh on every disc insert to decide
    whether to auto-start a rip.
 
+   v4.0: the header was tidied -- the tabs are one switcher, History,
+   ISO Verifier, Theme and Settings are small icon buttons, the theme
+   buttons became one 🎨 menu, and Create Desktop Shortcut lives only in
+   Settings (it was in both places).
+
    v3.0: two tabs in the header, 💿 Drive Bays and 🎯 TargetFill
    (TargetFillPanel). Both stay mounted so neither loses its work when
    the other is showing.
@@ -37,51 +42,53 @@
             <h1>ARCHIVSECTOR-OD</h1>
             <p>@(fillOnly ? "TargetFill — Disc Fill & Burn Prep" : "Optical Disc Ripping, Archival & Burn Prep")</p>
         </div>
-        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px 0;">
-            @if (!fillOnly)
-            {
-            <button class="shortcut-btn @(activeTab == "bays" ? "active-toggle" : "")" @onclick='() => activeTab = "bays"'>
-                💿 Drive Bays
-            </button>
-            <button class="shortcut-btn @(activeTab == "fill" ? "active-toggle" : "")" style="margin-left: 8px;" @onclick='() => activeTab = "fill"'>
-                🎯 TargetFill
-            </button>
-            <button class="shortcut-btn @(activeTab == "burn" ? "active-toggle" : "")" style="margin-left: 8px; margin-right: 16px;" @onclick='() => activeTab = "burn"'>
-                🔥 Burn
-            </button>
-            <button class="shortcut-btn @(config.UnattendedAutoStart ? "active-toggle" : "")" @onclick="ToggleUnattendedMode"
-                    title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
-                🤖 Unattended Mode @(config.UnattendedAutoStart ? "ON" : "OFF")
-            </button>
-            }
-            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="OpenSettings">
-                ⚙️ Settings
-            </button>
-            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="ShowHistory">
-                📜 History
-            </button>
-            <button class="shortcut-btn" style="margin-left: 8px;" @onclick="OpenIsoVerifier">
-                🔍 ISO Verifier
-            </button>
-            @if (!fillOnly)
-            {
-                <button class="shortcut-btn" style="margin-left: 8px;" @onclick="CreateShortcut" disabled="@isCreatingShortcut">
-                    @(isCreatingShortcut ? "Creating…" : "📌 Create Desktop Shortcut")
-                </button>
-            }
+
+        @if (!fillOnly)
+        {
+            <nav class="app-nav" aria-label="Main">
+                <button class="nav-btn @(activeTab == "bays" ? "active" : "")" @onclick='() => activeTab = "bays"'>💿 Drive Bays</button>
+                <button class="nav-btn @(activeTab == "burn" ? "active" : "")" @onclick='() => activeTab = "burn"'>🔥 Burn</button>
+                <button class="nav-btn @(activeTab == "fill" ? "active" : "")" @onclick='() => activeTab = "fill"'>🎯 TargetFill</button>
+            </nav>
+        }
+
+        <div class="header-actions">
             @if (shortcutMessage is not null)
             {
                 <span class="shortcut-message">@shortcutMessage</span>
             }
-            <div class="theme-switch" style="margin-left: 16px;">
-                @foreach (var theme in Themes)
-                {
-                    <button class="@(theme == currentTheme ? "active" : "")"
-                            @onclick="() => SetTheme(theme)">
-                        @Capitalize(theme)
-                    </button>
-                }
-            </div>
+            @if (!fillOnly)
+            {
+                <button class="unattended-pill @(config.UnattendedAutoStart ? "on" : "")" @onclick="ToggleUnattendedMode"
+                        title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
+                    <span class="dot"></span>Unattended @(config.UnattendedAutoStart ? "on" : "off")
+                </button>
+            }
+            <button class="icon-btn" @onclick="ShowHistory" title="History" aria-label="History">📜</button>
+            <button class="icon-btn" @onclick="OpenIsoVerifier" title="ISO Verifier" aria-label="ISO Verifier">🔍</button>
+            <button class="icon-btn @(themeMenuOpen ? "open" : "")" @onclick="() => themeMenuOpen = !themeMenuOpen" title="Theme" aria-label="Theme" aria-expanded="@(themeMenuOpen ? "true" : "false")">🎨</button>
+            <button class="icon-btn" @onclick="OpenSettings" title="Settings (also has Create Desktop Shortcut)" aria-label="Settings">⚙️</button>
+
+            @if (themeMenuOpen)
+            {
+                <div class="menu-backdrop" @onclick="() => themeMenuOpen = false"></div>
+                <div class="theme-menu" role="dialog" aria-label="Choose a theme">
+                    <h3>Theme</h3>
+                    <div class="theme-grid">
+                        @foreach (var t in Themes)
+                        {
+                            <button class="theme-tile @(t.Id == currentTheme ? "active" : "")" @onclick="() => PickTheme(t.Id)">
+                                <span class="theme-preview" style="background: @t.Background; border: 1px solid @t.Panel;">
+                                    <span style="width: 40%; background: @t.Accent;"></span>
+                                    <span style="width: 25%; background: @t.Panel;"></span>
+                                    <span style="width: 15%; background: @t.Text;"></span>
+                                </span>
+                                @t.Name
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
         </div>
     </header>
 
@@ -152,9 +159,17 @@
 @code {
     private AppConfig config = new();
     private string currentTheme = "midnight";
-    private readonly string[] Themes = { "midnight", "nova", "daylight" };
+    // The themes offered in the 🎨 menu. Each Id matches a [data-theme="…"]
+    // block in app.css; the colours here only draw the little preview tile.
+    private sealed record ThemeInfo(string Id, string Name, string Background, string Panel, string Accent, string Text);
+    private static readonly ThemeInfo[] Themes =
+    {
+        new("midnight", "Midnight", "#0b1120", "#2a3550", "#22d3ee", "#e5e9f5"),
+        new("nova",     "Nova",     "#070d1a", "#243255", "#2dd4bf", "#eef2fb"),
+        new("daylight", "Daylight", "#d8dce6", "#b7c0d1", "#0891b2", "#141a2e"),
+    };
+    private bool themeMenuOpen;
 
-    private bool isCreatingShortcut = false;
 
     // "bays" or "fill" (TargetFill). A drive bay's "Make archival backup
     // disc" button switches to TargetFill with that rip's folder.
@@ -350,18 +365,6 @@
         window.Show();
     }
 
-    private async Task CreateShortcut()
-    {
-        isCreatingShortcut = true;
-        shortcutMessage = null;
-        StateHasChanged();
-
-        var result = await Task.Run(() => ShortcutService.CreateDesktopShortcut());
-
-        isCreatingShortcut = false;
-        shortcutMessage = result.Success ? $"Created: {result.Path}" : result.ErrorMessage;
-        StateHasChanged();
-    }
 
     // ---- drive polling (background) ----
 
@@ -556,8 +559,11 @@
         config = fresh;
     }
 
-    private static string Capitalize(string s) =>
-        string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0]) + s.Substring(1);
+    private void PickTheme(string theme)
+    {
+        SetTheme(theme);
+        themeMenuOpen = false;
+    }
 
     public void Dispose()
     {

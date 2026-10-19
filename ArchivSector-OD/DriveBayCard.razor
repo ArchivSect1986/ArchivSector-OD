@@ -692,6 +692,9 @@
     private async Task TryAutoStart()
     {
         if (isRunning || showModeDialog || healthRunning || burnRunning || burnedDiscInDrive) return;
+        // Something else is using the drive (the Burn tab's burn queue, a burn,
+        // or a health check after burning): never auto-rip the fresh disc.
+        if (RipActivity.IsDriveBusy(DriveLetter) || BurnService.IsBusy(DriveLetter)) return;
         if (Category != DiscCategory.BluRay && Category != DiscCategory.Dvd && Category != DiscCategory.Game) return;
 
         var config = ConfigService.Load();
