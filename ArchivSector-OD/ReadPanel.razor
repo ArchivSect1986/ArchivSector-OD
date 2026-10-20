@@ -1,0 +1,343 @@
+@using System.IO
+@using System.Windows
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Read mode (v4.0 week 3): copies a data disc to an ISO, like ImgBurn's
+    "Create image file from disc". The reading is in the burning library
+    (DiscReader). Movie discs are pointed to their drive bay instead, and
+    music CDs can't be stored as an ISO. The drive is marked busy while it
+    reads, so the bays and the Burn tab leave it alone.
+*@
+
+<div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+    <div>
+        <h2 style="margin: 0;">📀 Read a disc to an ISO</h2>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Copy a data disc (backups, software, photos) to an ISO file, sector by sector.</p>
+    </div>
+
+    @if (state == State.Running)
+    {
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 13px;"><strong>Reading @readLetter:</strong> → @Path.GetFileName(outputPath)</span>
+            <div class="progress-bar"><div class="progress-fill" style="width: @PercentText%;"></div></div>
+            <span style="font-size: 12px; color: var(--text-secondary);">@ProgressLine</span>
+            @if (progress is not null && progress.BadSectors > 0)
+            {
+                <span style="font-size: 12px; color: var(--amber);">⚠ @progress.BadSectors.ToString("N0") sector(s) couldn't be read so far (filled with zeros)</span>
+            }
+            <button class="bay-btn cancel-btn" style="width: auto; align-self: flex-start; padding: 8px 18px;" @onclick="Cancel" disabled="@cancelRequested">
+                @(cancelRequested ? "Stopping…" : "✖ Cancel")
+            </button>
+        </div>
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Drive</strong>
+                <select value="@driveLetter" @onchange="OnDriveChanged" style="flex: 0 1 260px; font-size: 13px;">
+                    @if (drives.Count == 0)
+                    {
+                        <option value="">No disc drives found</option>
+                    }
+                    @foreach (var d in drives)
+                    {
+                        <option value="@d">@d:</option>
+                    }
+                </select>
+                <button class="shortcut-btn" @onclick="RefreshAsync" disabled="@checking">@(checking ? "⏳ Checking…" : "🔄 Check disc")</button>
+            </div>
+
+            <span style="font-size: 12px; margin-left: 100px; color: @DiscColor;">@DiscText</span>
+
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Save ISO as</strong>
+                <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; color: @(outputPath is null ? "var(--text-secondary)" : "var(--text-primary)");">@(outputPath ?? "—")</span>
+                <button class="shortcut-btn" @onclick="ChooseOutput" disabled="@(!CanRead)">💾 Change…</button>
+            </div>
+
+            <label style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Retries</strong>
+                <select @bind="retries" style="flex: 0 1 120px; font-size: 13px;">
+                    <option value="0">None</option>
+                    <option value="3">3 (default)</option>
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                </select>
+                <span style="font-size: 12px; color: var(--text-secondary);">How many more times to try a sector that won't read</span>
+            </label>
+
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" @bind="continueOnErrors" style="margin-top: 3px;" />
+                <span><strong>Keep going past unreadable sectors</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Off: stop at the first sector that won't read, so a damaged copy is never saved. On: fill it with zeros and finish, to rescue what's left of a scratched disc.</span></span>
+            </label>
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" @bind="ejectAfter" style="margin-top: 3px;" />
+                <span><strong>Eject the disc when it's done</strong></span>
+            </label>
+        </div>
+
+        <div>
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(!CanRead || outputPath is null)">📀 Read to ISO</button>
+        </div>
+    }
+
+    @if (result is not null && state != State.Running)
+    {
+        <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <strong style="color: @ResultColor;">@ResultIcon @result.Message</strong>
+            @if (result.Ok)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">Read in @Dur(result.Time) · average @DiscHealthService.FormatSpeed(result.AverageBytesPerSec, OneX(result.Bytes))</span>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="shortcut-btn" @onclick="OpenFolder">📂 Show in folder</button>
+                    @if (!queued)
+                    {
+                        <button class="shortcut-btn" @onclick="QueueResult">🔥 Add to burn queue</button>
+                    }
+                    else
+                    {
+                        <span style="font-size: 12px; color: var(--text-secondary); align-self: center;">Added to the burn queue</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Hands a finished ISO to the burn queue (Write mode), e.g. to copy the disc.</summary>
+    [Parameter] public EventCallback<string> AddToQueue { get; set; }
+    /// <summary>True while Read mode is showing: the drive list is checked then.</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    private enum State { Idle, Running }
+    private State state = State.Idle;
+
+    private List<string> drives = new();
+    private string driveLetter = "";
+    private DiscReader.DiscInfo? disc;
+    private bool checking, busyDrive;
+    private string? outputPath;
+    private int retries = 3;
+    private bool continueOnErrors;
+    private bool ejectAfter = true;
+    private bool wasVisible;
+
+    private string readLetter = "";
+    private DiscReader.Progress? progress;
+    private DiscReader.Result? result;
+    private CancellationTokenSource? cts;
+    private bool cancelRequested, queued, disposed;
+
+    private static string? lastOutputFolder;
+
+    private bool CanRead => !checking && !busyDrive && disc is not null && disc.Ready && disc.Problem is null;
+
+    private string DiscText =>
+        drives.Count == 0 ? "No disc drives on this PC."
+        : checking ? "Checking the disc…"
+        : busyDrive ? "⏳ This drive is busy (ripping, burning or checking). Pick another, or wait until it's done."
+        : disc is null ? ""
+        : disc.Problem is not null ? "⚠ " + disc.Problem
+        : $"{disc.Kind} · {disc.Label} · {disc.FileSystem} · {DiscHealthService.FormatBytes(disc.Bytes)}";
+    private string DiscColor => disc?.Problem is not null || busyDrive ? "var(--amber)" : "var(--text-secondary)";
+
+    private string PercentText => (progress?.Percent ?? 0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private string ProgressLine => progress is null ? "Starting…"
+        : $"{progress.Percent:0.0}% · {DiscHealthService.FormatBytes(progress.SectorsDone * DiscReader.SectorSize)} of {DiscHealthService.FormatBytes(progress.TotalSectors * DiscReader.SectorSize)} · {DiscHealthService.FormatSpeed(progress.BytesPerSec, progress.OneX)} · {Dur(progress.Remaining)} left";
+
+    private string ResultColor => result is null ? "" : result.Ok && result.BadSectors == 0 ? "var(--success)" : result.Cancelled ? "var(--text-secondary)" : result.Ok ? "var(--amber)" : "var(--danger)";
+    private string ResultIcon => result is null ? "" : result.Ok && result.BadSectors == 0 ? "✅" : result.Cancelled ? "⏸" : "⚠";
+
+    private static double OneX(long bytes) => bytes <= 1_000_000_000L ? 153_600 : bytes <= 9_000_000_000L ? 1_385_000 : 4_500_000;
+    private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min {t.Seconds}s" : $"{t.Seconds}s";
+
+    // The first time Read mode is shown, list the drives and check the disc.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && !wasVisible && state == State.Idle)
+        {
+            wasVisible = true;
+            ListDrives();
+            await CheckDiscAsync();
+        }
+        else if (!Visible) wasVisible = false;
+    }
+
+    private void ListDrives()
+    {
+        try
+        {
+            drives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.CDRom)
+                .Select(d => d.Name.TrimEnd('\\', ':')).OrderBy(l => l).ToList();
+        }
+        catch { drives = new(); }
+        if (!drives.Contains(driveLetter)) driveLetter = drives.FirstOrDefault() ?? "";
+    }
+
+    private async Task OnDriveChanged(ChangeEventArgs e)
+    {
+        driveLetter = e.Value?.ToString() ?? "";
+        await CheckDiscAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        ListDrives();
+        await CheckDiscAsync();
+    }
+
+    private async Task CheckDiscAsync()
+    {
+        disc = null;
+        outputPath = null;
+        if (string.IsNullOrEmpty(driveLetter)) return;
+        var letter = driveLetter;
+        busyDrive = RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter);
+        if (busyDrive) { StateHasChanged(); return; }
+        checking = true;
+        StateHasChanged();
+        // Asking a drive about its disc can take seconds while it spins up.
+        var info = await Task.Run(() => DiscReader.DescribeDisc(letter));
+        checking = false;
+        if (letter != driveLetter) return;
+        disc = info;
+        if (info.Ready && info.Problem is null)
+        {
+            var folder = lastOutputFolder;
+            if (folder is null || !Directory.Exists(folder))
+            {
+                var cfg = ConfigService.Load();
+                folder = !string.IsNullOrWhiteSpace(cfg.OutputBaseFolder) && Directory.Exists(cfg.OutputBaseFolder)
+                    ? cfg.OutputBaseFolder
+                    : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+            outputPath = Path.Combine(folder, SafeFileName(info.Label) + ".iso");
+        }
+        if (!disposed) StateHasChanged();
+    }
+
+    private static string SafeFileName(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return name.Trim().Length == 0 ? "disc" : name.Trim();
+    }
+
+    private void ChooseOutput()
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Save the disc's ISO as",
+            Filter = "Disc image (*.iso)|*.iso",
+            FileName = outputPath is null ? "disc.iso" : Path.GetFileName(outputPath),
+            InitialDirectory = outputPath is null ? null : Path.GetDirectoryName(outputPath),
+            OverwritePrompt = true,
+        };
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) == true)
+        {
+            outputPath = dlg.FileName;
+            lastOutputFolder = Path.GetDirectoryName(outputPath);
+        }
+    }
+
+    private async Task Start()
+    {
+        if (!CanRead || outputPath is null) return;
+        var letter = driveLetter;
+        if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter)) { busyDrive = true; return; }
+        if (File.Exists(outputPath))
+        {
+            var owner = System.Windows.Application.Current?.MainWindow;
+            var msg = $"{Path.GetFileName(outputPath)} already exists.\n\nReplace it?";
+            var ans = owner is null
+                ? MessageBox.Show(msg, "Read a disc", MessageBoxButton.YesNo, MessageBoxImage.Question)
+                : MessageBox.Show(owner, msg, "Read a disc", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (ans != MessageBoxResult.Yes) return;
+        }
+
+        state = State.Running;
+        readLetter = letter;
+        progress = null;
+        result = null;
+        queued = false;
+        cancelRequested = false;
+        cts = new CancellationTokenSource();
+        lastOutputFolder = Path.GetDirectoryName(outputPath);
+        var opts = new DiscReader.Options
+        {
+            DriveLetter = letter,
+            OutputPath = outputPath,
+            Retries = retries,
+            ContinueOnErrors = continueOnErrors,
+        };
+        var reporter = new Progress<DiscReader.Progress>(p => { progress = p; if (!disposed) InvokeAsync(StateHasChanged); });
+
+        // The drive is ours while it reads: the bays and the Burn tab leave it alone.
+        RipActivity.Set(letter, "read", true);
+        DiscReader.Result r;
+        try
+        {
+            r = await DiscReader.ReadAsync(opts, reporter, cts.Token, line => LogService.Write($"{letter}:", line));
+        }
+        catch (Exception ex)
+        {
+            r = new DiscReader.Result { Message = "The read stopped: " + ex.Message };
+        }
+        finally
+        {
+            RipActivity.Set(letter, "read", false);
+        }
+        cts.Dispose();
+        cts = null;
+        result = r;
+        state = State.Idle;
+
+        if (r.Ok) RecordHistory(r, letter);
+        if (r.Ok && ejectAfter) _ = Task.Run(() => TrayControlService.Eject(letter));
+        try { if (ConfigService.Load().SoundAlerts) System.Media.SystemSounds.Exclamation.Play(); } catch { }
+        if (!disposed) StateHasChanged();
+    }
+
+    private void RecordHistory(DiscReader.Result r, string letter)
+    {
+        try
+        {
+            HistoryService.Append(new HistoryEntry
+            {
+                Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                DriveLetter = letter,
+                Title = disc?.Label ?? Path.GetFileNameWithoutExtension(r.IsoPath ?? ""),
+                System = "Disc read (ISO)",
+                OutputPath = r.IsoPath ?? "",
+                Capacity = DiscHealthService.FormatBytes(r.Bytes),
+                RedumpMatch = r.BadSectors == 0 ? "Read cleanly" : $"{r.BadSectors:N0} unreadable sectors",
+            });
+        }
+        catch { }
+    }
+
+    private void Cancel()
+    {
+        cancelRequested = true;
+        cts?.Cancel();
+    }
+
+    private async Task QueueResult()
+    {
+        if (result?.IsoPath is null) return;
+        await AddToQueue.InvokeAsync(result.IsoPath);
+        queued = true;
+    }
+
+    private void OpenFolder()
+    {
+        if (result?.IsoPath is null) return;
+        try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{result.IsoPath}\""); } catch { }
+    }
+
+    // Leaving the tab doesn't stop a read; it carries on.
+    public void Dispose() => disposed = true;
+}

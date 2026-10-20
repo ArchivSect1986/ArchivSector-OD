@@ -1,0 +1,352 @@
+@using System.IO
+@using System.Windows
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Build mode (v4.0 week 3): makes an ISO from a folder, like ImgBurn's
+    "Create image file from files/folders". The work is in the burning
+    library (IsoBuilder); this screen picks the folder, the ISO's name and
+    the options, shows progress, and can hand the finished ISO straight to
+    the burn queue. Nothing here uses a drive, so it runs alongside rips
+    and burns.
+*@
+
+<div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+    <div>
+        <h2 style="margin: 0;">📦 Build an ISO</h2>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Make a disc image from a folder. Burn it now, keep it, or both.</p>
+    </div>
+
+    @if (state == State.Running)
+    {
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 13px;"><strong>@(progress?.Phase ?? "Starting")…</strong> @Path.GetFileName(outputPath)</span>
+            <div class="progress-bar"><div class="progress-fill" style="width: @PercentText%; @(Indeterminate ? "opacity: 0.5;" : "")"></div></div>
+            <span style="font-size: 12px; color: var(--text-secondary);">@ProgressLine</span>
+            <button class="bay-btn cancel-btn" style="width: auto; align-self: flex-start; padding: 8px 18px;" @onclick="Cancel" disabled="@cancelRequested">
+                @(cancelRequested ? "Stopping…" : "✖ Cancel")
+            </button>
+        </div>
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Folder</strong>
+                <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; color: @(sourceFolder is null ? "var(--text-secondary)" : "var(--text-primary)");">@(sourceFolder ?? "No folder chosen")</span>
+                <button class="shortcut-btn" @onclick="ChooseFolder">📂 Choose folder…</button>
+            </div>
+            @if (scanning)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary); margin-left: 100px;">Counting files…</span>
+            }
+            else if (folderInfo is not null)
+            {
+                <span style="font-size: 12px; color: @(folderInfo.Error is null ? "var(--text-secondary)" : "var(--danger)"); margin-left: 100px;">
+                    @FolderText
+                </span>
+            }
+
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Save ISO as</strong>
+                <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; color: @(outputPath is null ? "var(--text-secondary)" : "var(--text-primary)");">@(outputPath ?? "—")</span>
+                <button class="shortcut-btn" @onclick="ChooseOutput" disabled="@(sourceFolder is null)">💾 Change…</button>
+            </div>
+
+            <label style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Disc label</strong>
+                <input type="text" value="@label" @onchange="e => label = IsoBuilder.CleanLabel(e.Value?.ToString() ?? string.Empty)"
+                       maxlength="32" style="flex: 1 1 200px; max-width: 320px; padding: 6px 8px; font-size: 13px;" />
+                <span style="font-size: 12px; color: var(--text-secondary);">Letters, numbers and _ only, up to 32</span>
+            </label>
+
+            <label style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Made for</strong>
+                <select @bind="target" style="flex: 0 1 220px; font-size: 13px;">
+                    @foreach (var t in Enum.GetValues<IsoBuilder.MediaTarget>())
+                    {
+                        <option value="@t">@IsoBuilder.NameOf(t)</option>
+                    }
+                </select>
+                <span style="font-size: 12px; color: @(TooBig ? "var(--danger)" : "var(--text-secondary)");">@FitText</span>
+            </label>
+
+            <label style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">File system</strong>
+                <select @bind="fileSystem" style="flex: 0 1 220px; font-size: 13px;">
+                    <option value="@IsoBuilder.FileSystemChoice.Automatic">Automatic (recommended)</option>
+                    <option value="@IsoBuilder.FileSystemChoice.IsoJolietUdf">ISO9660 + Joliet + UDF</option>
+                    <option value="@IsoBuilder.FileSystemChoice.UdfOnly">UDF only</option>
+                </select>
+                <span style="font-size: 12px; color: @(FsProblem ? "var(--danger)" : "var(--text-secondary)");">@FsText</span>
+            </label>
+
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" @bind="includeFolderItself" style="margin-top: 3px;" />
+                <span><strong>Put the folder itself on the disc</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Off: only what's inside the folder goes on the disc (usual). On: the disc holds one folder named @(sourceFolder is null ? "after it" : Path.GetFileName(sourceFolder.TrimEnd('\\'))).</span></span>
+            </label>
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: @(target == IsoBuilder.MediaTarget.Any ? "default" : "pointer"); opacity: @(target == IsoBuilder.MediaTarget.Any ? "0.6" : "1");">
+                <input type="checkbox" checked="@(pad && target != IsoBuilder.MediaTarget.Any)" disabled="@(target == IsoBuilder.MediaTarget.Any)"
+                       @onchange="e => pad = (bool)(e.Value ?? false)" style="margin-top: 3px;" />
+                <span><strong>Pad the ISO to the full disc size</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">@PadHint</span></span>
+            </label>
+            @if (pad && target == IsoBuilder.MediaTarget.Bd25)
+            {
+                <div style="display: flex; gap: 16px; flex-wrap: wrap; margin-left: 26px; font-size: 13px;">
+                    <label style="display: flex; gap: 6px; align-items: center; cursor: pointer;">
+                        <input type="radio" name="build-pad" checked="@(!padWindows)" @onchange="() => padWindows = false" />
+                        Whole disc, @DiscHealthService.FormatBytes(IsoBuilder.CapacityOf(IsoBuilder.MediaTarget.Bd25)) (ImgBurn)
+                    </label>
+                    <label style="display: flex; gap: 6px; align-items: center; cursor: pointer;">
+                        <input type="radio" name="build-pad" checked="@padWindows" @onchange="() => padWindows = true" />
+                        Windows burn size, @DiscHealthService.FormatBytes(IsoBuilder.Bd25WindowsBytes)
+                    </label>
+                </div>
+            }
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" @bind="addToQueue" style="margin-top: 3px;" />
+                <span><strong>Add the ISO to the burn queue when it's built</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">It's added to the list in Write mode; nothing burns until you start the queue.</span></span>
+            </label>
+        </div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@CantStart">📦 Build ISO</button>
+        </div>
+    }
+
+    @if (result is not null && state != State.Running)
+    {
+        <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <strong style="color: @(result.Ok ? "var(--success)" : result.Cancelled ? "var(--text-secondary)" : "var(--danger)");">
+                @(result.Ok ? "✅" : result.Cancelled ? "⏸" : "⚠") @result.Message
+            </strong>
+            @if (result.Ok)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">Built in @Dur(result.Time)@(queued ? " · added to the burn queue" : "")</span>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="shortcut-btn" @onclick="OpenFolder">📂 Show in folder</button>
+                    @if (!queued)
+                    {
+                        <button class="shortcut-btn" @onclick="QueueResult">🔥 Add to burn queue</button>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>Hands a finished ISO to the burn queue (Write mode).</summary>
+    [Parameter] public EventCallback<string> AddToQueue { get; set; }
+
+    private enum State { Idle, Running }
+    private State state = State.Idle;
+
+    private string? sourceFolder;
+    private string? outputPath;
+    private string label = "";
+    private IsoBuilder.MediaTarget target = IsoBuilder.MediaTarget.Any;
+    private IsoBuilder.FileSystemChoice fileSystem = IsoBuilder.FileSystemChoice.Automatic;
+    private bool includeFolderItself;
+    private bool addToQueue;
+    // Pad the ISO with zeros to the disc's size. On unless turned off: it's
+    // how the app prepares discs everywhere else (TargetFill fills them).
+    private bool pad = true;
+    private bool padWindows;    // BD-25 only: pad to what Windows' burning engine can write
+
+    // How big the padded ISO will be (0 = not padded).
+    private long PadBytes =>
+        !pad || target == IsoBuilder.MediaTarget.Any ? 0
+        : target == IsoBuilder.MediaTarget.Bd25 && padWindows ? IsoBuilder.Bd25WindowsBytes
+        : IsoBuilder.CapacityOf(target);
+    private string PadHint => target == IsoBuilder.MediaTarget.Any
+        ? "Pick a disc size under Made for to pad to it."
+        : $"Zeros are added after your files so the ISO is exactly {DiscHealthService.FormatBytes(PadBytes > 0 ? PadBytes : IsoBuilder.CapacityOf(target))}, filling the whole disc. TargetFill's \"Remove padding\" can take them off again.";
+
+    private IsoBuilder.FolderInfo? folderInfo;
+    private bool scanning;
+    private CancellationTokenSource? scanCts;
+
+    private IsoBuilder.Progress? progress;
+    private IsoBuilder.Result? result;
+    private CancellationTokenSource? cts;
+    private bool cancelRequested, queued, disposed;
+
+    private static string? lastFolderParent;
+
+    private string FolderText =>
+        folderInfo is null ? ""
+        : folderInfo.Error is not null ? "Couldn't read the folder: " + folderInfo.Error
+        : $"{folderInfo.Files:N0} files in {folderInfo.Folders:N0} folders · {DiscHealthService.FormatBytes(folderInfo.Bytes)}"
+          + (folderInfo.HasLargeFile ? " · has a file of 2 GB or more" : "");
+
+    // The limit the files must fit in: the padded size when padding to the
+    // Windows size, otherwise the disc.
+    private long Capacity => PadBytes > 0 ? PadBytes : IsoBuilder.CapacityOf(target);
+    // The folder's size is a little under the ISO's (the file system adds
+    // a few MB), so this is a guide; the real size is checked while building.
+    private bool TooBig => Capacity > 0 && folderInfo is not null && folderInfo.Bytes > Capacity;
+    private string FitText =>
+        folderInfo is null || folderInfo.Error is not null ? (Capacity > 0 ? $"Holds {DiscHealthService.FormatBytes(Capacity)}" : "No size limit")
+        : Capacity == 0 ? "No size limit"
+        : TooBig ? $"Too big: the files are {DiscHealthService.FormatBytes(folderInfo.Bytes - Capacity)} over"
+        : $"{100.0 * folderInfo.Bytes / Capacity:0.0}% of the disc";
+
+    private IsoBuilder.FileSystemChoice ResolvedFs => IsoBuilder.Resolve(fileSystem, folderInfo?.HasLargeFile ?? false);
+    private bool FsProblem => fileSystem == IsoBuilder.FileSystemChoice.IsoJolietUdf && (folderInfo?.HasLargeFile ?? false);
+    private string FsText => FsProblem
+        ? "A file is 2 GB or bigger; ISO9660 can't hold it"
+        : IsoBuilder.Describe(ResolvedFs, target) + (ResolvedFs == IsoBuilder.FileSystemChoice.UdfOnly ? " (for files of 2 GB or more)" : " (reads everywhere)");
+
+    private bool CantStart => sourceFolder is null || outputPath is null || scanning || TooBig || FsProblem
+                              || folderInfo is null || folderInfo.Error is not null || (folderInfo.Files == 0 && folderInfo.Folders == 0);
+
+    private bool Indeterminate => progress is null || progress.Percent < 0;
+    private string PercentText => Indeterminate ? "100" : progress!.Percent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private string ProgressLine => progress is null ? "" : progress.Percent < 0
+        ? (folderInfo is null ? "" : $"{folderInfo.Files:N0} files · this can take a moment for big folders")
+        : $"{progress.Percent:0}% · {DiscHealthService.FormatBytes(progress.BytesDone)} of {DiscHealthService.FormatBytes(progress.TotalBytes)} · {progress.BytesPerSec / 1_000_000:0} MB/s · {Dur(progress.Remaining)} left";
+
+    private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min {t.Seconds}s" : $"{t.Seconds}s";
+
+    private async Task ChooseFolder()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Choose the folder to make an ISO from" };
+        if (lastFolderParent is not null && Directory.Exists(lastFolderParent)) dlg.InitialDirectory = lastFolderParent;
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+
+        sourceFolder = dlg.FolderName;
+        lastFolderParent = Path.GetDirectoryName(sourceFolder.TrimEnd('\\'));
+        var name = Path.GetFileName(sourceFolder.TrimEnd('\\'));
+        if (string.IsNullOrEmpty(name)) name = "DISC";                // a whole drive, e.g. D:\
+        label = IsoBuilder.CleanLabel(name);
+        outputPath = Path.Combine(lastFolderParent ?? sourceFolder, SafeFileName(name) + ".iso");
+        result = null;
+        queued = false;
+        await ScanAsync();
+    }
+
+    private void ChooseOutput()
+    {
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Save the ISO as",
+            Filter = "Disc image (*.iso)|*.iso",
+            FileName = outputPath is null ? "disc.iso" : Path.GetFileName(outputPath),
+            InitialDirectory = outputPath is null ? null : Path.GetDirectoryName(outputPath),
+            OverwritePrompt = true,
+        };
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) == true) outputPath = dlg.FileName;
+    }
+
+    private async Task ScanAsync()
+    {
+        scanCts?.Cancel();
+        scanCts = new CancellationTokenSource();
+        var token = scanCts.Token;
+        var folder = sourceFolder!;
+        scanning = true;
+        folderInfo = null;
+        StateHasChanged();
+        try
+        {
+            var info = await Task.Run(() => IsoBuilder.ScanFolder(folder, token), token);
+            if (!token.IsCancellationRequested && folder == sourceFolder)
+            {
+                folderInfo = info;
+                // Pick the smallest disc the files fit on, unless the size
+                // already chosen is big enough (so a bigger pick is kept).
+                if (info.Error is null)
+                {
+                    long cap = IsoBuilder.CapacityOf(target);
+                    if (target == IsoBuilder.MediaTarget.Any || info.Bytes + 16L * 1024 * 1024 > cap)
+                        target = Suggest(info.Bytes);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally { if (folder == sourceFolder) scanning = false; }
+        if (!disposed) StateHasChanged();
+    }
+
+    // The smallest disc the files fit on (with room for the file system).
+    private static IsoBuilder.MediaTarget Suggest(long bytes)
+    {
+        foreach (var t in new[] { IsoBuilder.MediaTarget.Cd, IsoBuilder.MediaTarget.Dvd, IsoBuilder.MediaTarget.DvdDualLayer, IsoBuilder.MediaTarget.Bd25, IsoBuilder.MediaTarget.Bd50 })
+            if (bytes + 16L * 1024 * 1024 <= IsoBuilder.CapacityOf(t)) return t;
+        return IsoBuilder.MediaTarget.Any;
+    }
+
+    private static string SafeFileName(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return name.Trim().Length == 0 ? "disc" : name.Trim();
+    }
+
+    private async Task Start()
+    {
+        if (CantStart) return;
+        if (File.Exists(outputPath))
+        {
+            var owner = System.Windows.Application.Current?.MainWindow;
+            var msg = $"{Path.GetFileName(outputPath)} already exists.\n\nReplace it?";
+            var ans = owner is null
+                ? MessageBox.Show(msg, "Build an ISO", MessageBoxButton.YesNo, MessageBoxImage.Question)
+                : MessageBox.Show(owner, msg, "Build an ISO", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (ans != MessageBoxResult.Yes) return;
+        }
+
+        state = State.Running;
+        progress = null;
+        result = null;
+        queued = false;
+        cancelRequested = false;
+        cts = new CancellationTokenSource();
+        var opts = new IsoBuilder.Options
+        {
+            SourceFolder = sourceFolder!,
+            OutputPath = outputPath!,
+            VolumeLabel = label,
+            FileSystem = fileSystem,
+            Target = target,
+            IncludeFolderItself = includeFolderItself,
+            PadToBytes = PadBytes,
+        };
+        var reporter = new Progress<IsoBuilder.Progress>(p => { progress = p; if (!disposed) InvokeAsync(StateHasChanged); });
+        var r = await IsoBuilder.BuildAsync(opts, reporter, cts.Token, line => LogService.Write("Build", line));
+        cts.Dispose();
+        cts = null;
+        result = r;
+        state = State.Idle;
+        if (r.Ok && addToQueue) await QueueResult();
+        try { if (r.Ok && ConfigService.Load().SoundAlerts) System.Media.SystemSounds.Exclamation.Play(); } catch { }
+        if (!disposed) StateHasChanged();
+    }
+
+    private void Cancel()
+    {
+        cancelRequested = true;
+        cts?.Cancel();
+    }
+
+    private async Task QueueResult()
+    {
+        if (result?.IsoPath is null) return;
+        await AddToQueue.InvokeAsync(result.IsoPath);
+        queued = true;
+    }
+
+    private void OpenFolder()
+    {
+        if (result?.IsoPath is null) return;
+        try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{result.IsoPath}\""); } catch { }
+    }
+
+    // Leaving the tab doesn't stop a build; it carries on.
+    public void Dispose()
+    {
+        disposed = true;
+        scanCts?.Cancel();
+    }
+}

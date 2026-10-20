@@ -229,6 +229,18 @@
         summary = null;
     }
 
+    /// <summary>Adds one ISO to the list (from Build mode). Ignored if it's already there.</summary>
+    public void AddIso(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (items.Any(i => string.Equals(i.Path, full, StringComparison.OrdinalIgnoreCase))) return;
+        long bytes = 0;
+        try { bytes = new FileInfo(full).Length; } catch { }
+        items.Add(new QueueItem { Path = full, Bytes = bytes });
+        summary = null;
+        Ui();
+    }
+
     private void MoveUp(QueueItem it)
     {
         int i = items.IndexOf(it);

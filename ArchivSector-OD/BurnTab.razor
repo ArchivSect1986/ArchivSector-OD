@@ -27,11 +27,31 @@
         </button>
     </div>
 
+    @* Modes (v4.0 week 3): Write = the burn queue and the drives; Build =
+       make an ISO from a folder; Read = copy a data disc to an ISO. All
+       stay loaded, so a build, read or queue keeps going while another
+       mode is showing. *@
+    <nav class="app-nav" aria-label="Burn modes" style="justify-self: start;">
+        <button class="nav-btn @(mode == "write" ? "active" : "")" @onclick='() => mode = "write"'>🔥 Write</button>
+        <button class="nav-btn @(mode == "build" ? "active" : "")" @onclick='() => mode = "build"'>📦 Build ISO</button>
+        <button class="nav-btn @(mode == "read" ? "active" : "")" @onclick='() => mode = "read"'>📀 Read disc</button>
+    </nav>
+
+    <div style="display: @(mode == "build" ? "block" : "none");">
+        <BuildPanel AddToQueue="@OnAddToQueue" />
+    </div>
+
+    <div style="display: @(mode == "read" ? "block" : "none");">
+        <ReadPanel AddToQueue="@OnAddToQueue" Visible="@(Visible && mode == "read")" />
+    </div>
+
+    <div style="display: @(mode == "write" ? "flex" : "none"); flex-direction: column; gap: 16px;">
+
     @* The burn queue (v4.0 week 2). It's kept on screen through rescans and
        scan errors, so a running queue is never thrown away. *@
     @if (queueDrives.Count > 0)
     {
-        <BurnQueuePanel Drives="@queueDrives" Finished="@OnQueueFinished" />
+        <BurnQueuePanel @ref="queue" Drives="@queueDrives" Finished="@OnQueueFinished" />
     }
 
     @if (error is not null)
@@ -122,6 +142,7 @@
             }
         </div>
     }
+    </div>
 </div>
 
 @code {
@@ -129,6 +150,11 @@
     [Parameter] public bool Visible { get; set; }
 
     private IReadOnlyList<BurnerDrive>? drives;
+    private string mode = "write";
+    private BurnQueuePanel? queue;
+
+    // Build mode finished an ISO and wants it in the queue.
+    private void OnAddToQueue(string isoPath) => queue?.AddIso(isoPath);
     // Recorders the queue can use: writers, plus busy drives (a busy drive
     // isn't asked what it writes, and may be the one the queue is using).
     private IReadOnlyList<BurnerDrive> queueDrives = Array.Empty<BurnerDrive>();
