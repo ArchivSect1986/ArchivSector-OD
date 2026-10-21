@@ -1,0 +1,159 @@
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Erase (v4.0 week 3): shown on a Burn tab drive card that holds a
+    rewritable disc. Quick or full erase with Windows' burning engine
+    (BurnEngine.EraseAsync); the drive is marked busy while it runs and
+    the card re-reads the drive afterwards, so the now blank disc gets the
+    normal burn screen.
+*@
+
+@if (state == State.Idle)
+{
+    <button class="bay-btn tray-btn" style="width: auto; align-self: flex-start; margin-top: 8px; padding: 8px 14px; color: var(--text-primary);" @onclick="Check">🧽 Erase this disc…</button>
+}
+else if (state == State.Checking)
+{
+    <div class="bay-status" style="margin-top: 8px;"><span>Checking whether this disc can be erased…</span></div>
+}
+else if (state == State.Confirm && info is not null)
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px; margin-top: 8px; color: var(--text-primary);">
+        @if (!info.CanErase)
+        {
+            <span style="color: var(--amber);">⚠ @info.Problem</span>
+            <button class="bay-btn tray-btn" style="width: auto; align-self: flex-start; padding: 6px 14px;" @onclick="Reset">Close</button>
+        }
+        else
+        {
+            <strong>🧽 Erase the @(info.MediaType.Length > 0 ? info.MediaType : "disc") in @DriveLetter:</strong>
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="radio" name="erase-@DriveLetter" checked="@(!full)" @onchange="() => full = false" style="margin-top: 3px;" />
+                <span><strong>Quick erase</strong> (recommended)<br /><span style="font-size: 12px; color: var(--text-secondary);">Clears the disc's contents list. About a minute.</span></span>
+            </label>
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="radio" name="erase-@DriveLetter" checked="@full" @onchange="() => full = true" style="margin-top: 3px;" />
+                <span><strong>Full erase</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Writes over the whole disc. For a disc that misbehaves, or one you're giving away. CD-RW about 10 minutes, DVD-RW up to an hour.</span></span>
+            </label>
+            <span style="font-size: 12px; color: var(--amber);">Everything on the disc will be gone. An erase can't be stopped once it starts.</span>
+            <div style="display: flex; gap: 6px;">
+                <button class="bay-btn dvd" style="flex: 2; text-align: center;" @onclick="Start">🧽 Erase</button>
+                <button class="bay-btn tray-btn" style="flex: 1;" @onclick="Reset">Cancel</button>
+            </div>
+        }
+    </div>
+}
+else if (state == State.Running)
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px; color: var(--text-primary);">
+        <div style="display: flex; justify-content: space-between; gap: 8px;">
+            <strong>🧽 @(full ? "Full erase" : "Quick erase")…</strong>
+            @if (progress is not null && progress.Percent >= 0)
+            {
+                <span>@progress.Percent.ToString("0")%</span>
+            }
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" style="width: @PercentText%; @(Unknown ? "opacity: 0.5;" : "")"></div>
+        </div>
+        <span style="font-size: 12px; color: var(--text-secondary);">@ProgressLine</span>
+    </div>
+}
+else if (state == State.Done && result is not null)
+{
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px;">
+        <strong style="color: @(result.Ok ? "var(--success)" : "var(--danger)");">@(result.Ok ? "✅" : "⚠") @result.Message</strong>
+        <span style="font-size: 12px; color: var(--text-secondary);">Took @Dur(result.Time)</span>
+        <button class="bay-btn tray-btn" style="width: auto; align-self: flex-start; padding: 6px 14px;" @onclick="Close">Close</button>
+    </div>
+}
+
+@code {
+    [Parameter] public string DriveLetter { get; set; } = "";
+    /// <summary>True while an erase runs (the card keeps this screen up meanwhile).</summary>
+    [Parameter] public EventCallback<bool> BusyChanged { get; set; }
+    /// <summary>The erase finished, or its result was closed: the card re-reads the drive.</summary>
+    [Parameter] public EventCallback Finished { get; set; }
+
+    private enum State { Idle, Checking, Confirm, Running, Done }
+    private State state = State.Idle;
+    private BurnEngine.EraseInfo? info;
+    private BurnEngine.EraseProgress? progress;
+    private BurnEngine.EraseResult? result;
+    private bool full;
+    private bool disposed;
+
+    private bool Unknown => progress is null || progress.Percent < 0;
+    private string PercentText => Unknown ? "100" : progress!.Percent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private string ProgressLine => progress is null
+        ? "Starting… don't eject the disc."
+        : progress.Percent >= 0
+            ? $"{Dur(progress.Elapsed)} so far · about {Dur(progress.Remaining)} left · don't eject the disc"
+            : $"{Dur(progress.Elapsed)} so far · don't eject the disc";
+
+    private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min {t.Seconds}s" : $"{t.Seconds}s";
+
+    private async Task Check()
+    {
+        state = State.Checking;
+        StateHasChanged();
+        var letter = DriveLetter;
+        info = await Task.Run(() => BurnEngine.QueryErase(letter));
+        full = false;
+        state = State.Confirm;
+        if (!disposed) StateHasChanged();
+    }
+
+    private async Task Start()
+    {
+        var letter = DriveLetter;
+        if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter))
+        {
+            info = new BurnEngine.EraseInfo { Problem = "The drive is busy (ripping, burning or checking). Try again when it's done." };
+            return;
+        }
+        state = State.Running;
+        progress = null;
+        await BusyChanged.InvokeAsync(true);
+        StateHasChanged();
+
+        var reporter = new Progress<BurnEngine.EraseProgress>(p => { progress = p; if (!disposed) InvokeAsync(StateHasChanged); });
+        RipActivity.Set(letter, "erase", true);
+        BurnEngine.EraseResult r;
+        try
+        {
+            r = await BurnEngine.EraseAsync(letter, full, reporter, line => LogService.Write($"{letter}:", line));
+        }
+        catch (Exception ex)
+        {
+            r = new BurnEngine.EraseResult { Message = "The erase failed: " + ex.Message };
+        }
+        finally
+        {
+            RipActivity.Set(letter, "erase", false);
+        }
+        result = r;
+        state = State.Done;
+        await BusyChanged.InvokeAsync(false);
+        try { if (ConfigService.Load().SoundAlerts) System.Media.SystemSounds.Exclamation.Play(); } catch { }
+        if (!disposed) StateHasChanged();
+    }
+
+    private async Task Close()
+    {
+        Reset();
+        await Finished.InvokeAsync();
+    }
+
+    private void Reset()
+    {
+        state = State.Idle;
+        info = null;
+        result = null;
+        progress = null;
+    }
+
+    // An erase carries on if the screen is redrawn or the tab changes.
+    public void Dispose() => disposed = true;
+}

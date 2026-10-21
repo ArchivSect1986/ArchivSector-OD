@@ -27,7 +27,7 @@ namespace ArchivSector_OD.Burning
     // IMAPI2 objects are used on their own STA thread. Cancelling during
     // the write leaves a partly written disc that can't be reused (that's
     // how write-once discs work); the screen warns about this first.
-    public static class BurnEngine
+    public static partial class BurnEngine
     {
         private const int Sector = 2048;
 

@@ -158,10 +158,20 @@ public static class BurnerScanner
             long total = Convert.ToInt64(format.TotalSectorsOnMedia);
             long free = Convert.ToInt64(format.FreeSectorsOnMedia);
 
+            // Rewritable discs that are written over in place (BD-RE, DVD+RW)
+            // never get Windows' "blank" flag, even right after an erase:
+            // they always report "overwritable". Windows' own blank check
+            // (it looks at the start of the disc) tells an empty one apart.
+            var state = StateFromFlags(status);
+            if (state is MediaState.Overwritable or MediaState.Appendable or MediaState.Unknown)
+            {
+                try { if ((bool)format.MediaHeuristicallyBlank) state = MediaState.Blank; } catch { }
+            }
+
             return new MediaInfo
             {
                 Type = Enum.IsDefined(typeof(DiscMediaType), type) ? (DiscMediaType)type : DiscMediaType.Unknown,
-                State = StateFromFlags(status),
+                State = state,
                 StatusFlags = status,
                 TotalSectors = total,
                 FreeSectors = free

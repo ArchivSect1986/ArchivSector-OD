@@ -72,7 +72,19 @@
             @foreach (var drive in drives)
             {
                 <div class="bay-card">
-                    <h2>@drive.DisplayName</h2>
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+                        <h2>@drive.DisplayName</h2>
+                        @if (drive.DriveLetter.Length > 0)
+                        {
+                            <button class="icon-btn" style="flex: 0 0 auto; width: auto; padding: 0 10px; font-size: 13px; font-weight: 600;"
+                                    title="@(IsOpen(drive) ? "Close the tray" : "Eject (open the tray)")" aria-label="@(IsOpen(drive) ? "Close tray" : "Eject")"
+                                    @onclick="() => TrayAsync(drive)" disabled="@(!CanEject(drive))">@(IsOpen(drive) ? "⏏ Close" : "⏏ Eject")</button>
+                        }
+                    </div>
+                    @if (ejectMessages.TryGetValue(Letter(drive), out var ejectMsg))
+                    {
+                        <p style="font-size: 12px; color: var(--amber); margin: 4px 0 0;">@ejectMsg</p>
+                    }
 
                     @if (drive.Error is not null)
                     {
@@ -137,6 +149,14 @@
                                        BusyChanged="@(b => OnBurnBusy(drive, b))"
                                        BurnFinished="@(_ => OnBurnFinished(drive))" />
                         }
+
+                        @* Erase (v4.0 week 3): a rewritable disc (CD-RW, DVD-RW…) can be wiped. *@
+                        @if (CanShowErase(drive))
+                        {
+                            <ErasePanel DriveLetter="@Letter(drive)"
+                                        BusyChanged="@(b => OnEraseBusy(drive, b))"
+                                        Finished="@(() => OnEraseFinished(drive))" />
+                        }
                     }
                 </div>
             }
@@ -182,6 +202,83 @@
         d.DriveLetter.Length > 0 &&
         (burnScreens.Contains(Letter(d)) || (!d.Busy && d.CanWrite && d.Media.State == MediaState.Blank));
 
+    // Eject: not while the drive is burning, erasing, ripping or checking.
+    private readonly HashSet<string> ejecting = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> ejectMessages = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool CanEject(BurnerDrive d)
+    {
+        var l = Letter(d);
+        return !ejecting.Contains(l) && !RipActivity.IsDriveBusy(l) && !BurnService.IsBusy(l);
+    }
+
+    // Trays this tab opened. Windows can't say whether a tray is open, so
+    // the button remembers: after an eject it offers Close, and once a
+    // disc shows up again it goes back to Eject.
+    private readonly HashSet<string> openTrays = new(StringComparer.OrdinalIgnoreCase);
+    private bool IsOpen(BurnerDrive d) => openTrays.Contains(Letter(d));
+
+    private Task TrayAsync(BurnerDrive d) => IsOpen(d) ? CloseTrayAsync(d) : EjectAsync(d);
+
+    private async Task CloseTrayAsync(BurnerDrive d)
+    {
+        var l = Letter(d);
+        if (!CanEject(d)) return;
+        ejecting.Add(l);
+        ejectMessages.Remove(l);
+        StateHasChanged();
+        var r = await Task.Run(() => TrayControlService.Close(l));
+        ejecting.Remove(l);
+        if (r.Success) openTrays.Remove(l);
+        else ejectMessages[l] = "⚠ The tray didn't close" + (string.IsNullOrWhiteSpace(r.Detail) ? "." : ": " + r.Detail) + " Some drives (slot-loading, laptop) can only be closed by hand.";
+        StateHasChanged();
+        // Give the drive time to spin up and read the disc before asking it.
+        await Task.Delay(5000);
+        await OnBurnFinished(d);
+    }
+
+    private async Task EjectAsync(BurnerDrive d)
+    {
+        var l = Letter(d);
+        if (!CanEject(d)) return;
+        ejecting.Add(l);
+        ejectMessages.Remove(l);
+        StateHasChanged();
+        // A blank disc (or an empty tray) has no volume, so it needs the
+        // eject that doesn't lock one; a disc with files uses the normal one.
+        bool noVolume = d.Media.State is MediaState.Blank or MediaState.NoDisc || d.Media.IsRewritable;
+        var r = await Task.Run(() => noVolume ? TrayControlService.EjectWithoutVolume(l) : TrayControlService.Eject(l));
+        ejecting.Remove(l);
+        if (r.Success) openTrays.Add(l);
+        else ejectMessages[l] = "⚠ The tray didn't open" + (string.IsNullOrWhiteSpace(r.Detail) ? "." : ": " + r.Detail);
+        // Burn and erase screens for this drive are done with once the disc is out.
+        burnScreens.Remove(l);
+        eraseScreens.Remove(l);
+        await Task.Delay(1500);
+        await OnBurnFinished(d);
+    }
+
+    // Drives whose erase screen is in use (erasing, or showing its result).
+    private readonly HashSet<string> eraseScreens = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool CanShowErase(BurnerDrive d) =>
+        d.DriveLetter.Length > 0 &&
+        (eraseScreens.Contains(Letter(d)) ||
+         (!d.Busy && d.CanWrite && d.Media.IsRewritable && d.Media.State != MediaState.NoDisc && !burnScreens.Contains(Letter(d))));
+
+    private void OnEraseBusy(BurnerDrive d, bool busy)
+    {
+        if (busy) eraseScreens.Add(Letter(d));
+    }
+
+    // The erase result was closed: drop the screen and re-read the drive
+    // (a blank disc then gets the burn screen).
+    private async Task OnEraseFinished(BurnerDrive d)
+    {
+        eraseScreens.Remove(Letter(d));
+        await OnBurnFinished(d);
+    }
+
     private void OnBurnBusy(BurnerDrive d, bool busy)
     {
         if (busy) burnScreens.Add(Letter(d));
@@ -198,6 +295,7 @@
             {
                 drives = drives.Select(x => x.UniqueId == d.UniqueId ? fresh : x).ToList();
                 UpdateQueueDrives();
+                if (fresh.Media.State != MediaState.NoDisc) openTrays.Remove(Letter(fresh));
             }
         }
         catch { }

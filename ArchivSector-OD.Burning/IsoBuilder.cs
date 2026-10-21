@@ -33,7 +33,7 @@ namespace ArchivSector_OD.Burning
         // here fits every brand (DVD-R and DVD+R differ by a few MB).
         public static long CapacityOf(MediaTarget t) => t switch
         {
-            MediaTarget.Cd => 359_849L * Sector,              // 80 min CD-R: 736,970,752 bytes
+            MediaTarget.Cd => 359_844L * Sector,              // 80 min CD-R as drives report it: 736,960,512 bytes
             MediaTarget.Dvd => 2_295_104L * Sector,           // DVD+R: 4,700,372,992 bytes
             MediaTarget.DvdDualLayer => 4_171_712L * Sector,  // DVD-R DL: 8,543,666,176 bytes
             MediaTarget.Bd25 => 12_219_392L * Sector,         // BD-R 25 GB: 25,025,314,816 bytes

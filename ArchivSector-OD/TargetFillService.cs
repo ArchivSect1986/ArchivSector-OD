@@ -44,7 +44,7 @@ namespace ArchivSector_OD
         // smaller of the + and - formats, so an image fits both.
         public static readonly IReadOnlyList<MediaPreset> OpticalPresets = new[]
         {
-            new MediaPreset("CD-R 700MB", 737280000L, false, 1),
+            new MediaPreset("CD-R 700MB", 736960512L, false, 1),   // 359,844 sectors: what 80 min CD-Rs report (737,280,000 was a few sectors too big)
             new MediaPreset("DVD-5 4.7GB", 4700372992L, false, 2),   // 2,295,104 sectors: DVD+R (DVD-R is a little bigger)
             new MediaPreset("DVD-9 8.5GB", 8543666176L, false, 3),   // 4,171,712 sectors: DVD-R DL (DVD+R DL is a little bigger)
             new MediaPreset("Blu-ray BD-25", 25025314816L, false, 4),
