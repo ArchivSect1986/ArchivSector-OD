@@ -16,6 +16,7 @@
 
 @using System.IO
 @using System.Windows
+@using ArchivSector_OD.Burning
 @implements IDisposable
 
 <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; padding: 20px;">
@@ -66,6 +67,56 @@
                 }
                 <button class="shortcut-btn @(mediaKey == CustomUsbKey ? "active-toggle" : "")" style="font-size: 12px;" @onclick="() => SelectMedia(CustomUsbKey)" disabled="@busy">Custom USB (@F(customUsbGb) GB)</button>
             </div>
+            @* v4.0: measure a blank disc in a drive instead of using a fixed size *@
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                @if (mediaKey == DiscKey && discBytes > 0)
+                {
+                    <button class="shortcut-btn active-toggle" disabled="@busy" @onclick="() => showDiscPicker = !showDiscPicker">💿 @DiscPreset.Label (@TargetFillService.FormatBytes(discBytes))</button>
+                }
+                else
+                {
+                    <button class="shortcut-btn" disabled="@busy" @onclick="OpenDiscPicker">💿 Use the blank disc in drive…</button>
+                }
+            </div>
+            @if (showDiscPicker)
+            {
+                <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px; color: var(--text-primary);">
+                    <span style="font-size: 12px; color: var(--text-secondary);">Put a blank disc in a writer, and TargetFill fills to that exact disc instead of a standard size.</span>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                        <select value="@discDrive" @onchange="OnDiscDriveChanged" style="font-size: 13px;" disabled="@measuring">
+                            @if (discDrives.Count == 0)
+                            {
+                                <option value="">No disc drives found</option>
+                            }
+                            @foreach (var d in discDrives)
+                            {
+                                <option value="@d">Drive @d:</option>
+                            }
+                        </select>
+                        <button class="shortcut-btn" @onclick="MeasureDiscAsync" disabled="@(measuring || discDrive.Length == 0)">@(measuring ? "⏳ Reading the disc…" : "📏 Read disc size")</button>
+                    </div>
+                    @if (blank is not null)
+                    {
+                        <span style="font-size: 13px;">Blank <strong>@blank.MediaType</strong> in @measuredDrive:</span>
+                        <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;">
+                            <input type="radio" name="tf-disc-size" checked="@(!discWindows)" @onchange="() => SetDiscSize(false)" />
+                            Whole disc: @BlankWhole.ToString("N0") bytes (ImgBurn)
+                        </label>
+                        @if (blank.FreeBytes < BlankWhole)
+                        {
+                            <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;">
+                                <input type="radio" name="tf-disc-size" checked="@discWindows" @onchange="() => SetDiscSize(true)" />
+                                What Windows can burn: @blank.FreeBytes.ToString("N0") bytes
+                            </label>
+                        }
+                        <button class="shortcut-btn active-toggle" style="align-self: flex-start;" @onclick="UseMeasuredDisc">✔ Fill to this disc</button>
+                    }
+                    else if (discMessage is not null)
+                    {
+                        <span style="font-size: 12px; color: var(--amber);">⚠ @discMessage</span>
+                    }
+                </div>
+            }
             @if (mediaKey == CustomKey || mediaKey == CustomUsbKey)
             {
                 <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
@@ -498,6 +549,90 @@
     private const string CustomKey = "Custom";
     private const string CustomUsbKey = "Custom USB";
     private const string DefaultMedia = "Blu-ray BD-25";
+    private const string DiscKey = "Blank disc";      // v4.0: size read from a blank disc in a drive
+
+    // "Use the blank disc in drive…": the measured size, until the app
+    // closes (it isn't saved -- next time there may be a different disc in).
+    private bool showDiscPicker, measuring, discWindows;
+    private List<string> discDrives = new();
+    private string discDrive = "";
+    private string measuredDrive = "";
+    private BurnEngine.BlankInfo? blank;
+    private string? discMessage;
+    private long discBytes;
+    private string discType = "";
+
+    private long BlankWhole => blank is null ? 0 : BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes));
+    private TargetFillService.MediaPreset DiscPreset
+    {
+        get
+        {
+            int kind = discType.StartsWith("CD") ? 1
+                : discType.StartsWith("DVD") ? (discType.Contains("DL") ? 3 : 2)
+                : 4;
+            string suffix = discWindows ? " (Windows burn)" : "";
+            return new TargetFillService.MediaPreset($"{discType} in {measuredDrive}:{suffix}", discBytes / 2048 * 2048, false, kind);
+        }
+    }
+
+    private void OpenDiscPicker()
+    {
+        showDiscPicker = true;
+        try
+        {
+            discDrives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.CDRom)
+                .Select(d => d.Name.TrimEnd('\\', ':')).OrderBy(l => l).ToList();
+        }
+        catch { discDrives = new(); }
+        if (!discDrives.Contains(discDrive)) discDrive = discDrives.FirstOrDefault() ?? "";
+    }
+
+    private void OnDiscDriveChanged(ChangeEventArgs e)
+    {
+        discDrive = e.Value?.ToString() ?? "";
+        blank = null;
+        discMessage = null;
+    }
+
+    private async Task MeasureDiscAsync()
+    {
+        var letter = discDrive;
+        if (letter.Length == 0) return;
+        blank = null;
+        discMessage = null;
+        if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter))
+        {
+            discMessage = $"Drive {letter}: is busy (ripping, burning or checking). Try again when it's done.";
+            return;
+        }
+        measuring = true;
+        StateHasChanged();
+        var info = await Task.Run(() => BurnService.QueryBlank(letter));
+        measuring = false;
+        if (info is null)
+            discMessage = $"There's no blank disc in drive {letter}: that it can write to. Put one in (or erase a rewritable one in the Burn tab) and try again.";
+        else
+        {
+            blank = info;
+            measuredDrive = letter;
+            discWindows = false;
+        }
+    }
+
+    private void SetDiscSize(bool windows) => discWindows = windows;
+
+    private void UseMeasuredDisc()
+    {
+        if (blank is null) return;
+        discType = blank.MediaType;
+        discBytes = discWindows ? blank.FreeBytes : BlankWhole;
+        mediaKey = DiscKey;
+        showDiscPicker = false;
+        resultMessage = null;
+        string which = discWindows ? " (what Windows can burn)" : " (whole disc)";
+        LogService.Write("TargetFill", $"Filling to the blank {discType} in {measuredDrive}: {discBytes:N0} bytes{which}");
+        Persist();
+    }
 
     private int lastRequestId = -1;
     private string folder = "";
@@ -721,7 +856,8 @@
     private bool HasFolder => !string.IsNullOrWhiteSpace(folder) && Directory.Exists(folder);
 
     private TargetFillService.MediaPreset Medium =>
-        mediaKey == CustomKey ? TargetFillService.CustomOptical(customOpticalGb)
+        mediaKey == DiscKey && discBytes > 0 ? DiscPreset
+        : mediaKey == CustomKey ? TargetFillService.CustomOptical(customOpticalGb)
         : mediaKey == CustomUsbKey ? TargetFillService.CustomUsb(customUsbGb)
         : TargetFillService.OpticalPresets.Concat(TargetFillService.UsbPresets).FirstOrDefault(p => p.Label == mediaKey)
           ?? TargetFillService.OpticalPresets[3];
@@ -764,7 +900,8 @@
     {
         new TargetFillSettings
         {
-            Media = mediaKey,
+            // A measured disc isn't kept between sessions (the next disc may differ).
+            Media = mediaKey == DiscKey ? DefaultMedia : mediaKey,
             CustomOpticalGb = customOpticalGb,
             CustomUsbGb = customUsbGb,
             Placement = (int)placement,
