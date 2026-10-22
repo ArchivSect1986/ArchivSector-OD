@@ -179,6 +179,8 @@ namespace ArchivSector_OD.Burning
             disc.Add("Type", ProfileName(rep.CurrentProfile) ?? $"profile 0x{rep.CurrentProfile:X4}");
             string family = Family(rep.CurrentProfile);
 
+            bool overwriteInPlaceDisc = rep.CurrentProfile is 0x43 or 0x1A or 0x2A or 0x12;
+
             // READ DISC INFORMATION
             var di = new byte[34];
             r = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
@@ -191,15 +193,20 @@ namespace ArchivSector_OD.Burning
                 bool erasable = (di[2] & 0x10) != 0;
                 int sessions = di[4] | (di[9] << 8);
                 lastTrack = di[6] | (di[11] << 8);
+                // BD-RE, DVD+RW and DVD-RAM are written over in place: once
+                // formatted they report "complete" whether or not they hold
+                // anything, so "finalized" would be misleading for them.
+                bool overwriteInPlace = rep.CurrentProfile is 0x43 or 0x1A or 0x2A or 0x12;
                 disc.Add("Status", status switch
                 {
                     0 => "Blank",
+                    2 when overwriteInPlace => "Formatted, can be written over (it may hold data)",
                     1 => "Has data, more can be added",
                     2 => "Finalized (closed)",
                     _ => IsWritable(rep.CurrentProfile) ? "Written over in place (random access)" : "Pressed / read-only",
                 });
                 disc.Add("Rewritable", erasable ? "Yes" : "No");
-                if (!blank && status != 3) disc.Add("Sessions", sessions.ToString());
+                if (!blank && status != 3 && !overwriteInPlace) disc.Add("Sessions", sessions.ToString());
             }
             else rep.Notes.Add("Disc status (READ DISC INFORMATION): " + r.Describe());
 
@@ -209,12 +216,38 @@ namespace ArchivSector_OD.Burning
                 var ti = new byte[48];
                 int track = Math.Max(1, lastTrack);
                 r = drive.Read(new byte[] { 0x52, 0x01, (byte)(track >> 24), (byte)(track >> 16), (byte)(track >> 8), (byte)track, 0, 0, 48, 0 }, ti, 10);
-                if (r.Ok)
-                {
-                    long free = BE32(ti, 16);
+                long free = r.Ok ? BE32(ti, 16) : 0;
+                if (free > 0)
                     disc.Add("Free space", $"{free:N0} sectors = {free * 2048:N0} bytes ({Gb(free * 2048)})");
+                else if (!r.Ok)
+                    rep.Notes.Add("Free space (READ TRACK INFORMATION): " + r.Describe());
+            }
+
+            // Rewritables (BD-RE, DVD+RW, DVD-RAM): the sizes they can be
+            // formatted to. An erased BD-RE has no free space until it's
+            // formatted, so this is where its real size shows.
+            if (overwriteInPlaceDisc)
+            {
+                var fc = new byte[252];
+                r = drive.Read(new byte[] { 0x23, 0, 0, 0, 0, 0, 0, 0, 252, 0 }, fc, 10);
+                if (r.Ok && fc[3] >= 8)
+                {
+                    long cur = BE32(fc, 4);
+                    int curType = fc[8] & 3;   // 1 unformatted, 2 formatted
+                    disc.Add("Formatted", curType == 2 ? $"Yes, {cur:N0} sectors = {cur * 2048:N0} bytes ({Gb(cur * 2048)})" : "No (it's formatted when it's burned)");
+                    long noSpare = 0, withSpare = 0;
+                    for (int off = 12; off + 8 <= 4 + fc[3] && off + 8 <= fc.Length; off += 8)
+                    {
+                        long blocks = BE32(fc, off);
+                        int type = fc[off + 4] >> 2;
+                        if (type == 0x31) noSpare = Math.Max(noSpare, blocks);          // BD-RE, no spare areas
+                        else if (type == 0x30 && withSpare == 0) withSpare = blocks;    // BD-RE, standard spare areas
+                        else if (type == 0x26 && noSpare == 0) noSpare = blocks;        // DVD+RW full format
+                    }
+                    if (noSpare > 0) disc.Add("Whole disc", $"{noSpare:N0} sectors = {noSpare * 2048:N0} bytes ({Gb(noSpare * 2048)}), no spare areas");
+                    if (withSpare > 0 && withSpare != noSpare) disc.Add("With spare areas", $"{withSpare:N0} sectors = {withSpare * 2048:N0} bytes ({Gb(withSpare * 2048)})");
                 }
-                else rep.Notes.Add("Free space (READ TRACK INFORMATION): " + r.Describe());
+                else if (!r.Ok) rep.Notes.Add("Format sizes (READ FORMAT CAPACITIES): " + r.Describe());
             }
             if (!blank)
             {
@@ -271,7 +304,7 @@ namespace ArchivSector_OD.Burning
                             int lm = atip[12], ls = atip[13], lf = atip[14];
                             long leadOut = (lm * 60L + ls) * 75 + lf - 150;
                             if (leadOut > 0)
-                                disc.Add("Real capacity", $"{leadOut:N0} sectors = {leadOut * 2048:N0} bytes ({lm:D2}:{ls:D2}:{lf:D2})");
+                                disc.Add("End marker (ATIP)", $"{lm:D2}:{ls:D2}:{lf:D2} = {leadOut:N0} sectors (the drive keeps the last few for itself; Free space is what can be written)");
                         }
                         else rep.Notes.Add("CD-R maker code (READ TOC ATIP): " + r.Describe());
                     }
