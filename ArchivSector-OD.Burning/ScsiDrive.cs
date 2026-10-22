@@ -23,6 +23,9 @@ namespace ArchivSector_OD.Burning
             public byte SenseKey;           // why it said no: 2 not ready, 3 medium error, 5 illegal request, 6 unit attention
             public byte Asc, Ascq;          // the detailed reason code
             public int BytesReturned;
+            /// <summary>The drive is only busy (getting ready, buffer full, still writing): try again shortly.</summary>
+            public bool IsTryAgain => !Ok && Win32Error == 0 &&
+                (ScsiStatus == 0x08 || (SenseKey == 2 && Asc == 0x04 && Ascq is 0x00 or 0x01 or 0x04 or 0x07 or 0x08));
             public string Describe() =>
                 Ok ? "OK"
                 : Win32Error != 0 ? $"Windows error {Win32Error}"
@@ -53,7 +56,33 @@ namespace ArchivSector_OD.Burning
             return new ScsiDrive(h, letter);
         }
 
-        public void Dispose() => handle.Dispose();
+        public void Dispose()
+        {
+            if (locked) Unlock();
+            handle.Dispose();
+        }
+
+        private bool locked;
+
+        /// <summary>
+        /// Before writing: takes the disc away from Windows (locks and
+        /// dismounts its file system) so Explorer, AutoPlay or antivirus
+        /// can't read it in the middle of a write. A blank disc has no
+        /// file system, so a failure here is normal and harmless.
+        /// </summary>
+        public bool LockAndDismount()
+        {
+            bool ok = DeviceIoControl(handle, FSCTL_LOCK_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+            DeviceIoControl(handle, FSCTL_DISMOUNT_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+            locked = ok;
+            return ok;
+        }
+
+        public void Unlock()
+        {
+            DeviceIoControl(handle, FSCTL_UNLOCK_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero);
+            locked = false;
+        }
 
         /// <summary>A command that reads data back from the drive (or none).</summary>
         public Reply Read(byte[] cdb, byte[]? data, int timeoutSeconds = 30) => Send(cdb, data, DataIn, timeoutSeconds);
@@ -147,6 +176,7 @@ namespace ArchivSector_OD.Burning
         private const uint GENERIC_READ = 0x80000000, GENERIC_WRITE = 0x40000000;
         private const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
         private const uint IOCTL_SCSI_PASS_THROUGH_DIRECT = 0x0004D014;
+        private const uint FSCTL_LOCK_VOLUME = 0x00090018, FSCTL_UNLOCK_VOLUME = 0x0009001C, FSCTL_DISMOUNT_VOLUME = 0x00090020;
         private const byte DataOut = 0, DataIn = 1, DataUnspecified = 2;
         private const byte SenseSize = 32;
 

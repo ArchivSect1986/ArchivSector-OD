@@ -30,7 +30,8 @@ namespace ArchivSector_OD
         }
 
         public static async Task<BurnEngine.Result> BurnAsync(string driveLetter, string isoPath, bool verify, string discTitle, string driveModel,
-            IProgress<BurnEngine.Progress>? progress, CancellationToken ct, bool useImgBurn = false, bool deleteIsoAfter = false)
+            IProgress<BurnEngine.Progress>? progress, CancellationToken ct, bool useImgBurn = false, bool deleteIsoAfter = false,
+            bool direct = false)
         {
             var letter = driveLetter.TrimEnd(':', '\\').ToUpperInvariant();
             string? imgBurn = null;
@@ -45,8 +46,11 @@ namespace ArchivSector_OD
             BurnEngine.Result r;
             try
             {
-                r = await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, imgBurn,
-                    line => LogService.Write($"{letter}:", line));
+                // v4.0: ArchivSector-OD's own writer (BD-RE only for now).
+                r = direct
+                    ? await BurnEngine.BurnDirectAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line))
+                    : await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, imgBurn,
+                        line => LogService.Write($"{letter}:", line));
             }
             finally
             {
@@ -56,7 +60,7 @@ namespace ArchivSector_OD
             // A refused start (already burning) isn't a burn: nothing to record.
             if (r.Message == "This drive is already burning.") return r;
 
-            RecordHistory(r, letter, isoPath, discTitle, driveModel);
+            RecordHistory(r, letter, isoPath, discTitle, driveModel, direct);
 
             // Only a burn that was checked and matched every byte lets the
             // ISO go, and only to the Recycle Bin.
@@ -128,7 +132,7 @@ namespace ArchivSector_OD
         public static string HealthLine(DiscHealthService.Result r) =>
             $"Health check: {r.VerdictTitle}{(r.Completed ? "" : " (partial)")} ({r.BadSectors:N0} unreadable, {r.SlowSectors:N0} slow).";
 
-        private static void RecordHistory(BurnEngine.Result r, string letter, string isoPath, string discTitle, string driveModel)
+        private static void RecordHistory(BurnEngine.Result r, string letter, string isoPath, string discTitle, string driveModel, bool direct = false)
         {
             try
             {
@@ -138,7 +142,7 @@ namespace ArchivSector_OD
                     DriveLetter = letter,
                     DriveModel = driveModel,
                     Title = string.IsNullOrWhiteSpace(discTitle) ? Path.GetFileNameWithoutExtension(isoPath) : discTitle,
-                    System = "Disc burn",
+                    System = direct ? "Disc burn (own writer)" : "Disc burn",
                     OutputPath = isoPath,
                     Capacity = File.Exists(isoPath) ? DiscHealthService.FormatBytes(new FileInfo(isoPath).Length) : "",
                     RedumpMatch = !r.Burned ? (r.Cancelled ? "Cancelled" : "Failed")
