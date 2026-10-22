@@ -1,0 +1,30 @@
+name: 💡 Feature request
+description: An idea for something ArchivSector-OD could do, or do better.
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like it to do?
+      placeholder: "e.g. Let the burn queue use two drives at once"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help you?
+      description: What are you trying to do, and what gets in the way today?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Drive bays (ripping / backup)
+        - Burning
+        - TargetFill
+        - Disc health check
+        - Something new
+        - Not sure
