@@ -1,0 +1,76 @@
+name: 🐞 Bug report
+description: Something in ArchivSector-OD didn't work the way it should.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem! The more of this you fill in, the faster it can be fixed.
+        **Please don't paste API keys** (TMDB, RAWG) — they're in Settings, not in the log.
+
+  - type: input
+    id: version
+    attributes:
+      label: ArchivSector-OD version
+      description: Shown at the bottom of the main window, or in Settings.
+      placeholder: "e.g. 3.4.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Drive bays (ripping / backup)
+        - Burning
+        - TargetFill
+        - Disc health check
+        - ISO Verifier
+        - History
+        - Settings
+        - Updater
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Put a Blu-ray in drive E:
+        2. Clicked Full Backup
+        3. It stopped at 40% with "..."
+    validations:
+      required: true
+
+  - type: input
+    id: drive
+    attributes:
+      label: Drive and disc
+      description: The drive's model (shown on its card) and the kind of disc.
+      placeholder: "e.g. ASUS BW-16D1HT, Verbatim BD-R 25 GB"
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "e.g. Windows 11 24H2"
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: |
+        The lines from the drive's log around when it happened (click the log under the drive card),
+        or the log file from %AppData%\ArchivSector-OD. If the app crashed, crash.log from the same folder helps a lot.
+      render: text
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Optional. Drag images in here.
