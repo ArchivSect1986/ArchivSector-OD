@@ -1,0 +1,153 @@
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Drive info (v4.0 week 4): what a drive says about itself and the disc
+    in it, asked directly (DriveInspector, through ScsiDrive). Read-only:
+    nothing is written. It's also the first check that the direct drive
+    connection works on this PC, before any burning goes through it.
+*@
+
+<div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+    <div>
+        <h2 style="margin: 0;">🔎 Drive info</h2>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Asks the drive directly what it is, what it can write, and what's in it. Nothing is written.</p>
+    </div>
+
+    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px;">
+        <strong style="min-width: 60px;">Drive</strong>
+        <select value="@driveLetter" @onchange="OnDriveChanged" style="font-size: 13px;" disabled="@reading">
+            @if (drives.Count == 0)
+            {
+                <option value="">No disc drives found</option>
+            }
+            @foreach (var d in drives)
+            {
+                <option value="@d">Drive @d:</option>
+            }
+        </select>
+        <button class="bay-btn game" style="width: auto; padding: 0 18px; min-height: 38px;" @onclick="ReadAsync" disabled="@(reading || driveLetter.Length == 0)">
+            @(reading ? "⏳ Asking the drive…" : "🔎 Read drive info")
+        </button>
+        @if (report is not null && report.Problem is null)
+        {
+            <button class="shortcut-btn" @onclick="CopyReport">@(copied ? "✔ Copied" : "📋 Copy report")</button>
+        }
+    </div>
+
+    @if (message is not null)
+    {
+        <span style="font-size: 13px; color: var(--amber);">⚠ @message</span>
+    }
+
+    @if (report is not null)
+    {
+        @if (report.Problem is not null)
+        {
+            <div class="bay-status" style="color: var(--amber);"><span>⚠ @report.Problem</span></div>
+        }
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
+            @foreach (var sec in report.Sections)
+            {
+                <div style="background: var(--bg-panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;">
+                    <div style="font-size: 12px; font-weight: 700; letter-spacing: 0.5px; color: var(--accent); margin-bottom: 8px;">@sec.Title.ToUpperInvariant()</div>
+                    @foreach (var row in sec.Rows)
+                    {
+                        <div style="display: flex; gap: 12px; font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--border);">
+                            <span style="flex: 0 0 120px; color: var(--text-secondary);">@row.Label</span>
+                            <span style="flex: 1; min-width: 0; overflow-wrap: anywhere;">@row.Value</span>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+        @if (report.Notes.Count > 0)
+        {
+            <details style="font-size: 12px; color: var(--text-secondary);">
+                <summary style="cursor: pointer;">@report.Notes.Count question(s) the drive didn't answer (normal for some discs)</summary>
+                <ul style="margin: 6px 0 0; padding-left: 18px;">
+                    @foreach (var n in report.Notes)
+                    {
+                        <li>@n</li>
+                    }
+                </ul>
+            </details>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>True while Drive info is showing: the drive list is refreshed then.</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    private List<string> drives = new();
+    private string driveLetter = "";
+    private bool reading, copied, wasVisible, disposed;
+    private DriveInspector.Report? report;
+    private string? message;
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !wasVisible)
+        {
+            wasVisible = true;
+            try
+            {
+                drives = System.IO.DriveInfo.GetDrives().Where(d => d.DriveType == System.IO.DriveType.CDRom)
+                    .Select(d => d.Name.TrimEnd('\\', ':')).OrderBy(l => l).ToList();
+            }
+            catch { drives = new(); }
+            if (!drives.Contains(driveLetter)) driveLetter = drives.FirstOrDefault() ?? "";
+        }
+        else if (!Visible) wasVisible = false;
+    }
+
+    private void OnDriveChanged(ChangeEventArgs e)
+    {
+        driveLetter = e.Value?.ToString() ?? "";
+        report = null;
+        message = null;
+    }
+
+    private async Task ReadAsync()
+    {
+        var letter = driveLetter;
+        if (letter.Length == 0) return;
+        message = null;
+        copied = false;
+        // Don't ask questions in the middle of a burn, rip or check.
+        if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter))
+        {
+            message = $"Drive {letter}: is busy (ripping, burning, erasing or checking). Try again when it's done.";
+            return;
+        }
+        reading = true;
+        report = null;
+        StateHasChanged();
+        RipActivity.Set(letter, "info", true);
+        try
+        {
+            report = await DriveInspector.InspectAsync(letter);
+            LogService.Write($"{letter}:", "Drive info:\n" + report.ToText());
+        }
+        catch (Exception ex)
+        {
+            message = "The drive couldn't be asked: " + ex.Message;
+        }
+        finally
+        {
+            RipActivity.Set(letter, "info", false);
+            reading = false;
+        }
+        if (!disposed) StateHasChanged();
+    }
+
+    private void CopyReport()
+    {
+        if (report is null) return;
+        try { System.Windows.Clipboard.SetText(report.ToText()); copied = true; }
+        catch { message = "Couldn't copy to the clipboard. The report is also in the log."; }
+    }
+
+    public void Dispose() => disposed = true;
+}
