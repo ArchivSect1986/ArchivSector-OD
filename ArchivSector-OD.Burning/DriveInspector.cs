@@ -191,20 +191,15 @@ namespace ArchivSector_OD.Burning
                 bool erasable = (di[2] & 0x10) != 0;
                 int sessions = di[4] | (di[9] << 8);
                 lastTrack = di[6] | (di[11] << 8);
-                // BD-RE, DVD+RW and DVD-RAM are written over in place: once
-                // formatted they report "complete" whether or not they hold
-                // anything, so "finalized" would be misleading for them.
-                bool overwriteInPlace = rep.CurrentProfile is 0x43 or 0x1A or 0x2A or 0x12;
                 disc.Add("Status", status switch
                 {
                     0 => "Blank",
-                    2 when overwriteInPlace => "Formatted, can be written over (it may hold data)",
                     1 => "Has data, more can be added",
                     2 => "Finalized (closed)",
                     _ => IsWritable(rep.CurrentProfile) ? "Written over in place (random access)" : "Pressed / read-only",
                 });
                 disc.Add("Rewritable", erasable ? "Yes" : "No");
-                if (!blank && status != 3 && !overwriteInPlace) disc.Add("Sessions", sessions.ToString());
+                if (!blank && status != 3) disc.Add("Sessions", sessions.ToString());
             }
             else rep.Notes.Add("Disc status (READ DISC INFORMATION): " + r.Describe());
 
@@ -276,7 +271,7 @@ namespace ArchivSector_OD.Burning
                             int lm = atip[12], ls = atip[13], lf = atip[14];
                             long leadOut = (lm * 60L + ls) * 75 + lf - 150;
                             if (leadOut > 0)
-                                disc.Add("End marker (ATIP)", $"{lm:D2}:{ls:D2}:{lf:D2} = {leadOut:N0} sectors (the drive keeps the last few for itself; Free space is what can be written)");
+                                disc.Add("Real capacity", $"{leadOut:N0} sectors = {leadOut * 2048:N0} bytes ({lm:D2}:{ls:D2}:{lf:D2})");
                         }
                         else rep.Notes.Add("CD-R maker code (READ TOC ATIP): " + r.Describe());
                     }
