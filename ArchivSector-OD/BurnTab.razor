@@ -128,7 +128,7 @@
                                     </div>
                                     <div style="display: flex; justify-content: space-between; gap: 10px;">
                                         <span style="color: var(--text-muted);">Free</span>
-                                        <span>@DiscHealthService.FormatBytes(drive.Media.State == MediaState.Blank ? drive.Media.FullDiscBytes : drive.Media.FreeBytes)</span>
+                                        <span>@DiscHealthService.FormatBytes(drive.Media.State == MediaState.Blank || drive.Media.Type == DiscMediaType.BdRe ? drive.Media.FullDiscBytes : drive.Media.FreeBytes)</span>
                                     </div>
                                     @if (drive.Media.WindowsSpareBytes > 0)
                                     {

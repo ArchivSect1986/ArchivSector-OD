@@ -65,15 +65,18 @@ public sealed class MediaInfo
     private const long Bd25Bytes = 12_219_392L * 2048, Bd50Bytes = 24_438_784L * 2048;
 
     /// <summary>
-    /// The disc's real size. Same as TotalBytes except for blank Blu-ray,
-    /// where it's the standard BD-25 / BD-50 size.
+    /// The disc's real size. Same as TotalBytes except for a blank BD-R
+    /// and any BD-RE, where it's the standard BD-25 / BD-50 size: Windows
+    /// reports them with 768 MB (BD-25) kept spare, but ImgBurn and
+    /// ArchivSector-OD's own writer use the whole disc (a BD-RE is
+    /// reformatted to it when needed), as Drive info confirms.
     /// </summary>
     public long FullDiscBytes
     {
         get
         {
-            bool blankBd = State == MediaState.Blank && (Type is DiscMediaType.BdR or DiscMediaType.BdRe);
-            if (!blankBd || TotalBytes <= 0) return TotalBytes;
+            bool wholeBd = (State == MediaState.Blank && Type == DiscMediaType.BdR) || Type == DiscMediaType.BdRe;
+            if (!wholeBd || TotalBytes <= 0) return TotalBytes;
             if (TotalBytes <= Bd25Bytes) return Bd25Bytes;
             if (TotalBytes <= Bd50Bytes) return Bd50Bytes;
             return TotalBytes;   // BD-XL: use what Windows says
