@@ -55,7 +55,7 @@ else if (state == State.Confirm && isoPath is not null)
             @if (DirectAvailable)
             {
                 <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;"
-                       title="ArchivSector-OD writes the disc itself, talking to the drive directly. New in v4.0: BD-RE and CD-R so far.">
+                       title="ArchivSector-OD writes the disc itself, talking to the drive directly. New in v4.0: BD-RE, CD-R and DVD+R so far.">
                     <input type="radio" name="engine-@DriveLetter" checked="@useDirect" @onchange="SetDirect" />
                     ArchivSector-OD's own writer (new: whole disc, progress shown here)
                 </label>
@@ -171,7 +171,7 @@ else if (state == State.Done && result is not null)
     private string? imgBurnPath;      // null = ImgBurn not found
     private bool engineLoaded;
     private bool deleteIso;           // move the ISO to the Recycle Bin after a verified burn
-    private bool useDirect;           // v4.0: ArchivSector-OD's own writer (BD-RE and CD-R so far; not saved)
+    private bool useDirect;           // v4.0: ArchivSector-OD's own writer (BD-RE, CD-R and DVD+R so far; not saved)
     private bool DirectAvailable => BurnEngine.DirectWriteSupports(BlankMediaType);
     private string EngineName => useDirect ? "ArchivSector-OD's own writer" : useImgBurn ? "ImgBurn" : "Windows";
     private bool runningDirect;       // the burn running now uses our own writer on a disc where stopping is harmless (BD-RE)

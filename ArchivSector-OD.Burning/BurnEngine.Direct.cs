@@ -12,7 +12,10 @@ namespace ArchivSector_OD.Burning
     //   * CD-R / CD-RW (blank): written as one data track ("track at
     //     once"), then the track and the disc are closed so every drive
     //     can read it. A CD-R stopped part-way can't be used again.
-    // DVD and BD-R follow.
+    //   * DVD+R / DVD+R DL (blank): written straight on from the start
+    //     (no write settings needed), then the track is closed and the
+    //     disc finalized, so DVD players and other drives can read it.
+    // DVD-R and BD-R follow.
     //
     // Steps:
     //   1. check the disc and that the ISO fits
@@ -27,10 +30,10 @@ namespace ArchivSector_OD.Burning
     public static partial class BurnEngine
     {
         private const int DirectChunkSectors = 32;     // 64 KB per write
-        private const int ProfileBdRe = 0x43, ProfileCdR = 0x09, ProfileCdRw = 0x0A;
+        private const int ProfileBdRe = 0x43, ProfileCdR = 0x09, ProfileCdRw = 0x0A, ProfileDvdPlusR = 0x1B, ProfileDvdPlusRDl = 0x2B;
 
         /// <summary>Can our own writer handle this kind of disc yet?</summary>
-        public static bool DirectWriteSupports(string mediaType) => mediaType is "BD-RE" or "CD-R" or "CD-RW";
+        public static bool DirectWriteSupports(string mediaType) => mediaType is "BD-RE" or "CD-R" or "CD-RW" or "DVD+R" or "DVD+R DL";
 
         /// <summary>Is stopping our own writer harmless on this disc (it can be written again)?</summary>
         public static bool DirectStopIsSafe(string mediaType) => mediaType is "BD-RE";
@@ -85,12 +88,17 @@ namespace ArchivSector_OD.Burning
             var rep = drive.Read(new byte[] { 0x46, 0x02, 0, 0, 0, 0, 0, 0, 8, 0 }, cfg, 10);
             int profile = rep.Ok ? (cfg[6] << 8) | cfg[7] : 0;
             bool isCd = profile is ProfileCdR or ProfileCdRw;
-            if (profile != ProfileBdRe && !isCd)
+            bool isDvdPlusR = profile is ProfileDvdPlusR or ProfileDvdPlusRDl;
+            if (profile != ProfileBdRe && !isCd && !isDvdPlusR)
             {
-                r.Message = "ArchivSector-OD's own writer writes BD-RE and CD-R discs so far. Use ImgBurn or Windows for this disc.";
+                r.Message = "ArchivSector-OD's own writer writes BD-RE, CD-R and DVD+R discs so far. Use ImgBurn or Windows for this disc.";
                 return;
             }
-            string discName = profile switch { ProfileBdRe => "BD-RE", ProfileCdR => "CD-R", _ => "CD-RW" };
+            string discName = profile switch
+            {
+                ProfileBdRe => "BD-RE", ProfileCdR => "CD-R", ProfileCdRw => "CD-RW",
+                ProfileDvdPlusR => "DVD+R", _ => "DVD+R DL",
+            };
             bool reusable = profile == ProfileBdRe;
             string afterFailure = reusable ? "The BD-RE can be erased and used again." : $"A {discName} written part-way can't be used again{(profile == ProfileCdRw ? " until it's erased" : "")}.";
 
@@ -105,6 +113,10 @@ namespace ArchivSector_OD.Burning
                 if (isCd)
                 {
                     if (!PrepareCd(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
+                }
+                else if (isDvdPlusR)
+                {
+                    if (!PrepareDvdPlusR(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
                 }
                 else
                 {
@@ -138,6 +150,7 @@ namespace ArchivSector_OD.Burning
                 // 6. CD: close the track, then close the disc (finalize) so
                 // every drive and player can read it.
                 if (isCd && !CloseCd(drive, cdTrack, progress, ct, r, log)) return;
+                if (isDvdPlusR && !CloseDvdPlusR(drive, discName, cdTrack, progress, r, log)) return;
 
                 r.BurnTime = clock.Elapsed;
                 r.Burned = true;
@@ -259,6 +272,62 @@ namespace ArchivSector_OD.Burning
                 return false;
             }
             log?.Invoke($"Direct write: blank {discName}, track {track} starts at sector {startLba:N0}, {free:N0} sectors free; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes); track at once");
+            return true;
+        }
+
+        // ---- DVD+R / DVD+R DL: written straight on; no write settings needed ----
+        private static bool PrepareDvdPlusR(ScsiDrive drive, string discName, long isoSectors, long isoBytes, Result r, Action<string>? log, out long startLba, out int track)
+        {
+            startLba = 0;
+            track = 1;
+            var di = new byte[34];
+            var rep = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
+            if (!rep.Ok) { r.Message = $"The drive didn't say what's on the {discName}: " + rep.Describe(); return false; }
+            if ((di[2] & 3) != 0) { r.Message = $"The {discName} isn't blank."; return false; }
+            track = Math.Max(1, di[6] | (di[11] << 8));
+
+            // Fastest write speed the drive offers for this disc.
+            drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
+
+            var ti = new byte[48];
+            rep = drive.Read(new byte[] { 0x52, 0x01, (byte)(track >> 24), (byte)(track >> 16), (byte)(track >> 8), (byte)track, 0, 0, 48, 0 }, ti, 10);
+            if (!rep.Ok) { r.Message = $"The drive didn't say where the {discName}'s track starts: " + rep.Describe(); return false; }
+            bool nwaValid = (ti[7] & 0x01) != 0;
+            startLba = nwaValid ? BE32(ti, 12) : 0;
+            long free = BE32(ti, 16);
+            if (isoSectors > free)
+            {
+                r.Message = $"The ISO ({isoSectors:N0} sectors) is bigger than this {discName} ({free:N0} sectors free).";
+                return false;
+            }
+            log?.Invoke($"Direct write: blank {discName}, track {track} starts at sector {startLba:N0}, {free:N0} sectors free; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes)");
+            return true;
+        }
+
+        // Close the track, then finalize the disc (so DVD players and other
+        // drives can read it). A drive that doesn't know "finalize" for this
+        // disc gets "close session", which also leaves it readable.
+        private static bool CloseDvdPlusR(ScsiDrive drive, string discName, int track, IProgress<Progress>? progress, Result r, Action<string>? log)
+        {
+            progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
+            var rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x01, 0, (byte)(track >> 8), (byte)track, 0, 0, 0, 0 }, 120), 120, 1000);
+            if (!rep.Ok) { r.Message = $"The drive wouldn't close the {discName}'s track: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(5));
+
+            rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x06, 0, 0, 0, 0, 0, 0, 0 }, 300), 120, 1000);   // finalize disc
+            if (!rep.Ok && rep.SenseKey == 5)
+            {
+                log?.Invoke("Direct write: the drive didn't accept \"finalize\"; closing the session instead");
+                rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x02, 0, 0, 0, 0, 0, 0, 0 }, 300), 120, 1000);
+            }
+            if (!rep.Ok) { r.Message = $"The drive wouldn't close the {discName}: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(15)))
+            {
+                r.Message = $"The drive didn't finish closing the {discName} in time.";
+                log?.Invoke("Direct write: " + r.Message);
+                return false;
+            }
+            log?.Invoke($"Direct write: {discName} track closed and disc finalized");
             return true;
         }
 
