@@ -12,10 +12,14 @@ namespace ArchivSector_OD.Burning
     //   * CD-R / CD-RW (blank): written as one data track ("track at
     //     once"), then the track and the disc are closed so every drive
     //     can read it. A CD-R stopped part-way can't be used again.
-    //   * DVD+R / DVD+R DL (blank): written straight on from the start
-    //     (no write settings needed), then the track is closed and the
-    //     disc finalized, so DVD players and other drives can read it.
-    // DVD-R and BD-R follow.
+    //   * DVD+R / DVD+R DL and BD-R (blank): written straight on from the
+    //     start (no write settings needed), then the track is closed and
+    //     the disc finalized, so players and other drives can read it. A
+    //     BD-R is used without spare areas: the whole 25 GB, like ImgBurn.
+    //   * DVD-R (blank): "disc at once". The drive is told the exact size
+    //     first (rounded up to whole 32 KB blocks, padded with zeros), and
+    //     closes the disc by itself once the last sector is written.
+    // DVD-R DL, DVD-RW and BD-R DL ("layer jump") come later.
     //
     // Steps:
     //   1. check the disc and that the ISO fits
@@ -30,10 +34,11 @@ namespace ArchivSector_OD.Burning
     public static partial class BurnEngine
     {
         private const int DirectChunkSectors = 32;     // 64 KB per write
-        private const int ProfileBdRe = 0x43, ProfileCdR = 0x09, ProfileCdRw = 0x0A, ProfileDvdPlusR = 0x1B, ProfileDvdPlusRDl = 0x2B;
+        private const int ProfileBdRe = 0x43, ProfileCdR = 0x09, ProfileCdRw = 0x0A, ProfileDvdPlusR = 0x1B, ProfileDvdPlusRDl = 0x2B,
+            ProfileBdRSrm = 0x41, ProfileDvdDashR = 0x11;
 
         /// <summary>Can our own writer handle this kind of disc yet?</summary>
-        public static bool DirectWriteSupports(string mediaType) => mediaType is "BD-RE" or "CD-R" or "CD-RW" or "DVD+R" or "DVD+R DL";
+        public static bool DirectWriteSupports(string mediaType) => mediaType is "BD-RE" or "CD-R" or "CD-RW" or "DVD+R" or "DVD+R DL" or "BD-R" or "DVD-R";
 
         /// <summary>Is stopping our own writer harmless on this disc (it can be written again)?</summary>
         public static bool DirectStopIsSafe(string mediaType) => mediaType is "BD-RE";
@@ -88,16 +93,19 @@ namespace ArchivSector_OD.Burning
             var rep = drive.Read(new byte[] { 0x46, 0x02, 0, 0, 0, 0, 0, 0, 8, 0 }, cfg, 10);
             int profile = rep.Ok ? (cfg[6] << 8) | cfg[7] : 0;
             bool isCd = profile is ProfileCdR or ProfileCdRw;
-            bool isDvdPlusR = profile is ProfileDvdPlusR or ProfileDvdPlusRDl;
-            if (profile != ProfileBdRe && !isCd && !isDvdPlusR)
+            // DVD+R and BD-R are written and closed the same way ("sequential").
+            bool isDvdPlusR = profile is ProfileDvdPlusR or ProfileDvdPlusRDl or ProfileBdRSrm;
+            bool isDvdDashR = profile == ProfileDvdDashR;
+            if (profile != ProfileBdRe && !isCd && !isDvdPlusR && !isDvdDashR)
             {
-                r.Message = "ArchivSector-OD's own writer writes BD-RE, CD-R and DVD+R discs so far. Use ImgBurn or Windows for this disc.";
+                r.Message = "ArchivSector-OD's own writer writes BD-R, BD-RE, DVD+R, DVD-R and CD-R discs so far. Use ImgBurn or Windows for this disc.";
                 return;
             }
             string discName = profile switch
             {
                 ProfileBdRe => "BD-RE", ProfileCdR => "CD-R", ProfileCdRw => "CD-RW",
-                ProfileDvdPlusR => "DVD+R", _ => "DVD+R DL",
+                ProfileDvdPlusR => "DVD+R", ProfileDvdPlusRDl => "DVD+R DL",
+                ProfileBdRSrm => "BD-R", _ => "DVD-R",
             };
             bool reusable = profile == ProfileBdRe;
             string afterFailure = reusable ? "The BD-RE can be erased and used again." : $"A {discName} written part-way can't be used again{(profile == ProfileCdRw ? " until it's erased" : "")}.";
@@ -110,6 +118,7 @@ namespace ArchivSector_OD.Burning
                 // 3. Get the disc ready; where writing starts.
                 long startLba;
                 int cdTrack = 1;
+                long padSectors = 0;    // DVD-R: zeros written after the ISO to fill the reserved size
                 if (isCd)
                 {
                     if (!PrepareCd(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
@@ -117,6 +126,10 @@ namespace ArchivSector_OD.Burning
                 else if (isDvdPlusR)
                 {
                     if (!PrepareDvdPlusR(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
+                }
+                else if (isDvdDashR)
+                {
+                    if (!PrepareDvdDashR(drive, isoSectors, iso.Length, r, log, out startLba, out padSectors)) return;
                 }
                 else
                 {
@@ -126,7 +139,7 @@ namespace ArchivSector_OD.Burning
 
                 // 4. Write.
                 var clock = Stopwatch.StartNew();
-                long written = WriteSectors(drive, isoPath, startLba, isoSectors, progress, ct, r, log, afterFailure);
+                long written = WriteSectors(drive, isoPath, startLba, isoSectors, padSectors, progress, ct, r, log, afterFailure);
                 if (written < 0) return;   // failed; r.Message says why
 
                 // 5. Empty the drive's buffer onto the disc (also after a cancel,
@@ -151,6 +164,19 @@ namespace ArchivSector_OD.Burning
                 // every drive and player can read it.
                 if (isCd && !CloseCd(drive, cdTrack, progress, ct, r, log)) return;
                 if (isDvdPlusR && !CloseDvdPlusR(drive, discName, cdTrack, progress, r, log)) return;
+                // DVD-R (disc at once): the drive closes the disc by itself
+                // after the last sector; wait until it's done.
+                if (isDvdDashR)
+                {
+                    progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
+                    if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(15)))
+                    {
+                        r.Message = "The drive didn't finish closing the DVD-R in time.";
+                        log?.Invoke("Direct write: " + r.Message);
+                        return;
+                    }
+                    log?.Invoke("Direct write: DVD-R closed by the drive (disc at once)");
+                }
 
                 r.BurnTime = clock.Elapsed;
                 r.Burned = true;
@@ -304,6 +330,62 @@ namespace ArchivSector_OD.Burning
             return true;
         }
 
+        // ---- DVD-R: disc at once ----
+        // Write settings: disc at once, one data track, closed at the end,
+        // buffer-underrun protection on. Then the track is reserved at the
+        // exact size to be written: whole 16-sector (32 KB) blocks, the
+        // smallest piece a DVD is written in, so the ISO is followed by up
+        // to 15 sectors of zeros.
+        private static bool PrepareDvdDashR(ScsiDrive drive, long isoSectors, long isoBytes, Result r, Action<string>? log, out long startLba, out long padSectors)
+        {
+            startLba = 0;
+            padSectors = 0;
+            var di = new byte[34];
+            var rep = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't say what's on the DVD-R: " + rep.Describe(); return false; }
+            if ((di[2] & 3) != 0) { r.Message = "The DVD-R isn't blank."; return false; }
+            int track = Math.Max(1, di[6] | (di[11] << 8));
+
+            var ti = new byte[48];
+            rep = drive.Read(new byte[] { 0x52, 0x01, (byte)(track >> 24), (byte)(track >> 16), (byte)(track >> 8), (byte)track, 0, 0, 48, 0 }, ti, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't say how much fits on the DVD-R: " + rep.Describe(); return false; }
+            long free = BE32(ti, 16);
+            long reserve = (isoSectors + 15) / 16 * 16;
+            if (reserve > free)
+            {
+                r.Message = $"The ISO ({isoSectors:N0} sectors) is bigger than this DVD-R ({free:N0} sectors free).";
+                return false;
+            }
+
+            var mode = new byte[256];
+            rep = drive.Read(new byte[] { 0x5A, 0x08, 0x05, 0, 0, 0, 0, 0x01, 0x00, 0 }, mode, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't share its write settings: " + rep.Describe(); return false; }
+            int p = 8 + ((mode[6] << 8) | mode[7]);
+            if ((mode[p] & 0x3F) != 0x05) { r.Message = "The drive's write settings page wasn't where expected."; return false; }
+            int pageLen = mode[p + 1] + 2;
+            var param = new byte[8 + pageLen];
+            Array.Copy(mode, p, param, 8, pageLen);
+            param[8] &= 0x3F;
+            param[8 + 2] = 0x40 | 0x02;            // buffer-underrun protection on, write type 2 = disc at once, no test
+            param[8 + 3] = 0x05;                   // no more sessions (closed disc); track mode 5 (DVD data)
+            param[8 + 4] = 0x08;                   // data block type 8 = 2048-byte sectors
+            param[8 + 5] = 0;                      // link size
+            rep = drive.Write(new byte[] { 0x55, 0x10, 0, 0, 0, 0, 0, (byte)(param.Length >> 8), (byte)param.Length, 0 }, param, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't accept the DVD-R write settings: " + rep.Describe(); return false; }
+
+            drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
+
+            // RESERVE TRACK: the size (in sectors) goes in bytes 5-8.
+            rep = drive.Command(new byte[] { 0x53, 0, 0, 0, 0, (byte)(reserve >> 24), (byte)(reserve >> 16), (byte)(reserve >> 8), (byte)reserve, 0 }, 60);
+            if (!rep.Ok) { r.Message = "The drive wouldn't set aside the DVD-R's track: " + rep.Describe(); return false; }
+            // The drive may record the reservation now; wait until it's ready for data.
+            WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(3));
+
+            padSectors = reserve - isoSectors;
+            log?.Invoke($"Direct write: blank DVD-R, {free:N0} sectors free; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes), track reserved at {reserve:N0} sectors{(padSectors > 0 ? $" ({padSectors} sectors of zeros after the ISO)" : "")}; disc at once");
+            return true;
+        }
+
         // Close the track, then finalize the disc (so DVD players and other
         // drives can read it). A drive that doesn't know "finalize" for this
         // disc gets "close session", which also leaves it readable.
@@ -356,9 +438,11 @@ namespace ArchivSector_OD.Burning
         // ---- the write loop (every disc type) ----
         // Returns how many sectors were written (fewer if cancelled), or -1 if
         // a write failed (r.Message then says where and why).
-        private static long WriteSectors(ScsiDrive drive, string isoPath, long startLba, long isoSectors, IProgress<Progress>? progress,
+        private static long WriteSectors(ScsiDrive drive, string isoPath, long startLba, long isoSectors, long padSectors, IProgress<Progress>? progress,
             CancellationToken ct, Result r, Action<string>? log, string afterFailure)
         {
+            long total = isoSectors + Math.Max(0, padSectors);
+            var zeros = new byte[DirectChunkSectors * Sector];
             var clock = Stopwatch.StartNew();
             var buf = new byte[DirectChunkSectors * Sector];
             long done = 0;
@@ -367,20 +451,31 @@ namespace ArchivSector_OD.Burning
             long speedFrom = 0;
             var lastReport = TimeSpan.Zero;
             using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-            while (done < isoSectors)
+            while (done < total)
             {
                 if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
-                int n = (int)Math.Min(DirectChunkSectors, isoSectors - done);
+                // The ISO, then (DVD-R) zeros up to the reserved size; a chunk
+                // never mixes the two.
+                bool inIso = done < isoSectors;
+                int n = (int)Math.Min(DirectChunkSectors, inIso ? isoSectors - done : total - done);
                 int bytes = n * Sector;
-                ReadFully(fs, buf, bytes);
-                var data = bytes == buf.Length ? buf : buf.AsSpan(0, bytes).ToArray();
+                byte[] data;
+                if (inIso)
+                {
+                    ReadFully(fs, buf, bytes);
+                    data = bytes == buf.Length ? buf : buf.AsSpan(0, bytes).ToArray();
+                }
+                else data = bytes == zeros.Length ? zeros : new byte[bytes];
                 long lba = startLba + done;
                 var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
 
-                var rep = RetryWhileBusy(() => drive.Write(cdb, data, 60), 200, 50);
+                // A drive that's busy (buffer full, or still calibrating the laser /
+                // recording a DVD-R's reservation before the first data, which
+                // can take a minute or more) is asked again for up to 3 minutes.
+                var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
                 if (!rep.Ok)
                 {
-                    r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / isoSectors:0.0}%): {rep.Describe()}. {afterFailure}";
+                    r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}. {afterFailure}";
                     log?.Invoke("Direct write: " + r.Message);
                     return -1;
                 }
@@ -393,19 +488,32 @@ namespace ArchivSector_OD.Burning
                     speedFrom = done;
                     speedClock.Restart();
                 }
-                if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= isoSectors)
+                if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= total)
                 {
                     lastReport = clock.Elapsed;
                     progress?.Report(new Progress
                     {
                         Phase = "Writing",
-                        Percent = 100.0 * done / isoSectors,
+                        Percent = 100.0 * done / total,
                         BytesPerSec = speed,
-                        Remaining = speed > 0 ? TimeSpan.FromSeconds((isoSectors - done) * (double)Sector / speed) : TimeSpan.Zero,
+                        Remaining = speed > 0 ? TimeSpan.FromSeconds((total - done) * (double)Sector / speed) : TimeSpan.Zero,
                     });
                 }
             }
-            return done;
+            return Math.Min(done, isoSectors);
+        }
+
+        // Like RetryWhileBusy, but for a length of time rather than a count.
+        private static ScsiDrive.Reply RetryWhileBusyFor(Func<ScsiDrive.Reply> send, TimeSpan limit, int waitMs)
+        {
+            var clock = Stopwatch.StartNew();
+            var rep = send();
+            while (!rep.Ok && rep.IsTryAgain && clock.Elapsed < limit)
+            {
+                Thread.Sleep(rep.Asc == 0x04 && rep.Ascq is 0x07 or 0x08 ? 500 : waitMs);   // a long operation: check less often
+                rep = send();
+            }
+            return rep;
         }
 
         // A drive that's only busy (buffer full, still writing) is asked again.
