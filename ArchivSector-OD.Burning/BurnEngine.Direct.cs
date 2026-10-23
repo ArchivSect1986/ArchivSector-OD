@@ -6,33 +6,38 @@ namespace ArchivSector_OD.Burning
     // the drive the write commands itself (through ScsiDrive), instead of
     // asking Windows' burning engine or ImgBurn to do it.
     //
-    // First version: BD-RE only. A BD-RE is the simplest disc to write:
-    // once formatted, data is written straight onto it from the first
-    // sector, with no tracks or sessions to open and close, and a failed
-    // test costs nothing because the disc can be erased and reused. CD-R,
-    // DVD and BD-R follow once this is proven.
+    // Discs so far:
+    //   * BD-RE: formatted to the whole disc (no spare areas) if needed,
+    //     then written straight onto from sector 0. Stopping is harmless.
+    //   * CD-R / CD-RW (blank): written as one data track ("track at
+    //     once"), then the track and the disc are closed so every drive
+    //     can read it. A CD-R stopped part-way can't be used again.
+    // DVD and BD-R follow.
     //
     // Steps:
-    //   1. check it's a BD-RE and the ISO fits the whole disc
+    //   1. check the disc and that the ISO fits
     //   2. take the disc away from Windows (lock + dismount) and stop
     //      the tray being opened mid-write
-    //   3. format it to the whole disc (no spare areas) if it isn't already
-    //   4. write the ISO from sector 0, 64 KB at a time
+    //   3. get the disc ready: format a BD-RE / set up a CD's track
+    //   4. write the ISO, 64 KB at a time
     //   5. tell the drive to finish writing everything in its buffer
-    //   6. (verify) read every sector back directly and compare with the ISO
-    //   7. hand the disc back to Windows
+    //   6. CD: close the track and the disc
+    //   7. (verify) read every sector back directly and compare with the ISO
+    //   8. hand the disc back to Windows
     public static partial class BurnEngine
     {
         private const int DirectChunkSectors = 32;     // 64 KB per write
-        private const int ProfileBdRe = 0x43;
+        private const int ProfileBdRe = 0x43, ProfileCdR = 0x09, ProfileCdRw = 0x0A;
 
-        /// <summary>Can our own writer handle the disc in this drive yet? (BD-RE only for now.)</summary>
-        public static bool DirectWriteSupports(string mediaType) => mediaType == "BD-RE";
+        /// <summary>Can our own writer handle this kind of disc yet?</summary>
+        public static bool DirectWriteSupports(string mediaType) => mediaType is "BD-RE" or "CD-R" or "CD-RW";
+
+        /// <summary>Is stopping our own writer harmless on this disc (it can be written again)?</summary>
+        public static bool DirectStopIsSafe(string mediaType) => mediaType is "BD-RE";
 
         /// <summary>
-        /// Burns an ISO to a BD-RE with ArchivSector-OD's own writer. Same
-        /// progress and result as BurnAsync, so the screens treat it alike.
-        /// Cancelling is safe on a BD-RE: the disc can be written again.
+        /// Burns an ISO with ArchivSector-OD's own writer. Same progress and
+        /// result as BurnAsync, so the screens treat it alike.
         /// </summary>
         public static Task<Result> BurnDirectAsync(string driveLetter, string isoPath, bool verify,
             IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null)
@@ -73,150 +78,77 @@ namespace ArchivSector_OD.Burning
             progress?.Report(new Progress { Phase = "Preparing", Percent = -1 });
             using var drive = ScsiDrive.Open(letter, out var problem);
             if (drive is null) { r.Message = problem ?? "The drive couldn't be opened."; return; }
-
             if (!WaitReady(drive, ct, TimeSpan.FromSeconds(30))) { r.Message = "The drive didn't get ready (is a disc in it?)."; return; }
 
-            // 1. A BD-RE?
+            // 1. Which disc?
             var cfg = new byte[8];
             var rep = drive.Read(new byte[] { 0x46, 0x02, 0, 0, 0, 0, 0, 0, 8, 0 }, cfg, 10);
             int profile = rep.Ok ? (cfg[6] << 8) | cfg[7] : 0;
-            if (profile != ProfileBdRe)
+            bool isCd = profile is ProfileCdR or ProfileCdRw;
+            if (profile != ProfileBdRe && !isCd)
             {
-                r.Message = "ArchivSector-OD's own writer only writes BD-RE discs so far. Use ImgBurn or Windows for this disc.";
+                r.Message = "ArchivSector-OD's own writer writes BD-RE and CD-R discs so far. Use ImgBurn or Windows for this disc.";
                 return;
             }
-
-            // How big can it be formatted, and is it formatted already?
-            var fc = new byte[252];
-            rep = drive.Read(new byte[] { 0x23, 0, 0, 0, 0, 0, 0, 0, 252, 0 }, fc, 10);
-            if (!rep.Ok) { r.Message = "The drive didn't say how big the BD-RE is: " + rep.Describe(); return; }
-            long current = BE32(fc, 4);
-            bool formatted = (fc[8] & 3) == 2;
-            long wholeDisc = 0;
-            for (int off = 12; off + 8 <= 4 + fc[3] && off + 8 <= fc.Length; off += 8)
-                if ((fc[off + 4] >> 2) == 0x31) wholeDisc = Math.Max(wholeDisc, BE32(fc, off));
-            long capacity = formatted ? current : wholeDisc;
-            bool needFormat = !formatted || (wholeDisc > 0 && current < wholeDisc && isoSectors > current);
-            if (needFormat) capacity = wholeDisc;
-            if (capacity <= 0) { r.Message = "The drive didn't offer a size to format this BD-RE to."; return; }
-            if (isoSectors > capacity)
-            {
-                r.Message = $"The ISO ({Fmt(iso.Length)}) is bigger than this BD-RE ({Fmt(capacity * Sector)}).";
-                return;
-            }
-            log?.Invoke($"Direct write: BD-RE in {letter}:, {(formatted ? $"formatted to {current:N0} sectors" : "not formatted")}, whole disc {wholeDisc:N0} sectors; ISO {isoSectors:N0} sectors ({iso.Length:N0} bytes)");
+            string discName = profile switch { ProfileBdRe => "BD-RE", ProfileCdR => "CD-R", _ => "CD-RW" };
+            bool reusable = profile == ProfileBdRe;
+            string afterFailure = reusable ? "The BD-RE can be erased and used again." : $"A {discName} written part-way can't be used again{(profile == ProfileCdRw ? " until it's erased" : "")}.";
 
             // 2. Take the disc from Windows; keep the tray shut while writing.
             drive.LockAndDismount();
             drive.Command(new byte[] { 0x1E, 0, 0, 0, 1, 0 }, 10);   // PREVENT MEDIUM REMOVAL
             try
             {
-                // 3. Format to the whole disc (no spare areas), like ImgBurn.
-                if (needFormat)
+                // 3. Get the disc ready; where writing starts.
+                long startLba;
+                int cdTrack = 1;
+                if (isCd)
                 {
-                    progress?.Report(new Progress { Phase = "Formatting", Percent = -1 });
-                    log?.Invoke($"Direct write: formatting the BD-RE to {wholeDisc:N0} sectors (no spare areas)");
-                    var param = new byte[12];
-                    param[1] = 0x02;                       // IMMED: answer at once, format in the background
-                    param[3] = 8;                          // one 8-byte format descriptor
-                    param[4] = (byte)(wholeDisc >> 24); param[5] = (byte)(wholeDisc >> 16);
-                    param[6] = (byte)(wholeDisc >> 8); param[7] = (byte)wholeDisc;
-                    param[8] = 0x31 << 2;                  // format type 31h: full disc, no spare areas
-                    rep = drive.Write(new byte[] { 0x04, 0x11, 0, 0, 0, 0 }, param, 60);
-                    if (!rep.Ok) { r.Message = "The drive wouldn't format the BD-RE: " + rep.Describe(); return; }
-                    if (!WaitFormatted(drive, progress, ct, TimeSpan.FromMinutes(30)))
-                    {
-                        r.Message = ct.IsCancellationRequested ? "Cancelled while formatting. The BD-RE can be used again." : "The format didn't finish in time.";
-                        r.Cancelled = ct.IsCancellationRequested;
-                        return;
-                    }
+                    if (!PrepareCd(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
+                }
+                else
+                {
+                    if (!PrepareBdRe(drive, letter, isoSectors, iso.Length, progress, ct, r, log)) return;
+                    startLba = 0;
                 }
 
                 // 4. Write.
                 var clock = Stopwatch.StartNew();
-                var buf = new byte[DirectChunkSectors * Sector];
-                long lba = 0;
-                double speed = 0;
-                var speedClock = Stopwatch.StartNew();
-                long speedFrom = 0;
-                var lastReport = TimeSpan.Zero;
-                using (var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan))
-                {
-                    while (lba < isoSectors)
-                    {
-                        if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
-                        int n = (int)Math.Min(DirectChunkSectors, isoSectors - lba);
-                        int bytes = n * Sector;
-                        ReadFully(fs, buf, bytes);
-                        var data = bytes == buf.Length ? buf : buf.AsSpan(0, bytes).ToArray();
-                        var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
-
-                        rep = drive.Write(cdb, data, 60);
-                        for (int tries = 0; !rep.Ok && rep.IsTryAgain && tries < 200; tries++)
-                        {
-                            Thread.Sleep(50);
-                            rep = drive.Write(cdb, data, 60);
-                        }
-                        if (!rep.Ok)
-                        {
-                            r.Message = $"The write failed at sector {lba:N0} ({100.0 * lba / isoSectors:0.0}%): {rep.Describe()}. The BD-RE can be erased and used again.";
-                            log?.Invoke("Direct write: " + r.Message);
-                            return;
-                        }
-                        lba += n;
-
-                        if (speedClock.Elapsed.TotalSeconds >= 1)
-                        {
-                            double now = (lba - speedFrom) * (double)Sector / speedClock.Elapsed.TotalSeconds;
-                            speed = speed <= 0 ? now : speed * 0.7 + now * 0.3;
-                            speedFrom = lba;
-                            speedClock.Restart();
-                        }
-                        if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || lba >= isoSectors)
-                        {
-                            lastReport = clock.Elapsed;
-                            progress?.Report(new Progress
-                            {
-                                Phase = "Writing",
-                                Percent = 100.0 * lba / isoSectors,
-                                BytesPerSec = speed,
-                                Remaining = speed > 0 ? TimeSpan.FromSeconds((isoSectors - lba) * (double)Sector / speed) : TimeSpan.Zero,
-                            });
-                        }
-                    }
-                }
+                long written = WriteSectors(drive, isoPath, startLba, isoSectors, progress, ct, r, log, afterFailure);
+                if (written < 0) return;   // failed; r.Message says why
 
                 // 5. Empty the drive's buffer onto the disc (also after a cancel,
                 // so what was written is complete).
                 progress?.Report(new Progress { Phase = "Finalizing", Percent = -1 });
-                rep = drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600);
-                for (int tries = 0; !rep.Ok && rep.IsTryAgain && tries < 300; tries++)
-                {
-                    Thread.Sleep(1000);
-                    rep = drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600);
-                }
-                r.BurnTime = clock.Elapsed;
+                rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600), 300, 1000);
                 if (r.Cancelled)
                 {
-                    r.Message = $"Cancelled at {100.0 * lba / isoSectors:0.0}%. The BD-RE can be erased and used again.";
+                    r.BurnTime = clock.Elapsed;
+                    r.Message = $"Cancelled at {100.0 * written / isoSectors:0.0}%. {afterFailure}";
                     log?.Invoke("Direct write: " + r.Message);
                     return;
                 }
                 if (!rep.Ok)
                 {
-                    r.Message = "The drive didn't confirm the last of the data was written: " + rep.Describe();
+                    r.Message = "The drive didn't confirm the last of the data was written: " + rep.Describe() + " " + afterFailure;
                     log?.Invoke("Direct write: " + r.Message);
                     return;
                 }
-                r.Burned = true;
-                log?.Invoke($"Direct write: {isoSectors:N0} sectors written in {r.BurnTime:hh\\:mm\\:ss} (average {Fmt((long)(iso.Length / Math.Max(1, r.BurnTime.TotalSeconds)))}/s)");
 
-                // 6. Verify: read every sector back straight from the disc
+                // 6. CD: close the track, then close the disc (finalize) so
+                // every drive and player can read it.
+                if (isCd && !CloseCd(drive, cdTrack, progress, ct, r, log)) return;
+
+                r.BurnTime = clock.Elapsed;
+                r.Burned = true;
+                log?.Invoke($"Direct write: {isoSectors:N0} sectors written to the {discName} in {r.BurnTime:hh\\:mm\\:ss} (average {Fmt((long)(iso.Length / Math.Max(1, r.BurnTime.TotalSeconds)))}/s)");
+
+                // 7. Verify: read every sector back straight from the disc
                 // (not through Windows, so nothing cached is compared).
                 if (verify && !ct.IsCancellationRequested)
                 {
                     var vclock = Stopwatch.StartNew();
-                    DirectVerify(drive, isoPath, isoSectors, progress, ct, r);
+                    DirectVerify(drive, isoPath, startLba, isoSectors, progress, ct, r);
                     r.VerifyTime = vclock.Elapsed;
                     log?.Invoke(r.Verified == true
                         ? $"Direct write: verified, every sector matches ({r.VerifyTime:hh\\:mm\\:ss})"
@@ -236,7 +168,190 @@ namespace ArchivSector_OD.Burning
             }
         }
 
-        private static void DirectVerify(ScsiDrive drive, string isoPath, long isoSectors, IProgress<Progress>? progress, CancellationToken ct, Result r)
+        // ---- BD-RE: format to the whole disc (no spare areas) if needed ----
+        private static bool PrepareBdRe(ScsiDrive drive, string letter, long isoSectors, long isoBytes, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log)
+        {
+            var fc = new byte[252];
+            var rep = drive.Read(new byte[] { 0x23, 0, 0, 0, 0, 0, 0, 0, 252, 0 }, fc, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't say how big the BD-RE is: " + rep.Describe(); return false; }
+            long current = BE32(fc, 4);
+            bool formatted = (fc[8] & 3) == 2;
+            long wholeDisc = 0;
+            for (int off = 12; off + 8 <= 4 + fc[3] && off + 8 <= fc.Length; off += 8)
+                if ((fc[off + 4] >> 2) == 0x31) wholeDisc = Math.Max(wholeDisc, BE32(fc, off));
+            bool needFormat = !formatted || (wholeDisc > 0 && current < wholeDisc && isoSectors > current);
+            long capacity = needFormat ? wholeDisc : current;
+            if (capacity <= 0) { r.Message = "The drive didn't offer a size to format this BD-RE to."; return false; }
+            if (isoSectors > capacity) { r.Message = $"The ISO ({Fmt(isoBytes)}) is bigger than this BD-RE ({Fmt(capacity * Sector)})."; return false; }
+            string state = formatted ? $"formatted to {current:N0} sectors" : "not formatted";
+            log?.Invoke($"Direct write: BD-RE in {letter}:, {state}, whole disc {wholeDisc:N0} sectors; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes)");
+            if (!needFormat) return true;
+
+            progress?.Report(new Progress { Phase = "Formatting", Percent = -1 });
+            log?.Invoke($"Direct write: formatting the BD-RE to {wholeDisc:N0} sectors (no spare areas)");
+            var param = new byte[12];
+            param[1] = 0x02;                       // IMMED: answer at once, format in the background
+            param[3] = 8;                          // one 8-byte format descriptor
+            param[4] = (byte)(wholeDisc >> 24); param[5] = (byte)(wholeDisc >> 16);
+            param[6] = (byte)(wholeDisc >> 8); param[7] = (byte)wholeDisc;
+            param[8] = 0x31 << 2;                  // format type 31h: full disc, no spare areas
+            rep = drive.Write(new byte[] { 0x04, 0x11, 0, 0, 0, 0 }, param, 60);
+            if (!rep.Ok) { r.Message = "The drive wouldn't format the BD-RE: " + rep.Describe(); return false; }
+            if (!WaitFormatted(drive, progress, ct, TimeSpan.FromMinutes(30)))
+            {
+                r.Cancelled = ct.IsCancellationRequested;
+                r.Message = r.Cancelled ? "Cancelled while formatting. The BD-RE can be used again." : "The format didn't finish in time.";
+                return false;
+            }
+            return true;
+        }
+
+        // ---- CD-R / CD-RW: set up one data track, written "track at once" ----
+        private static bool PrepareCd(ScsiDrive drive, string discName, long isoSectors, long isoBytes, Result r, Action<string>? log, out long startLba, out int track)
+        {
+            startLba = 0;
+            track = 1;
+
+            // Blank?
+            var di = new byte[34];
+            var rep = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't say what's on the CD: " + rep.Describe(); return false; }
+            if ((di[2] & 3) != 0) { r.Message = $"The {discName} isn't blank." + (discName == "CD-RW" ? " Erase it first (🧽 Erase this disc…)." : ""); return false; }
+            track = Math.Max(1, di[6] | (di[11] << 8));
+
+            // Write parameters (mode page 05): track at once, a data track
+            // (mode 1, 2048-byte sectors), the disc closed at the end, and
+            // the drive's buffer-underrun protection on.
+            var mode = new byte[256];
+            rep = drive.Read(new byte[] { 0x5A, 0x08, 0x05, 0, 0, 0, 0, 0x01, 0x00, 0 }, mode, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't share its write settings: " + rep.Describe(); return false; }
+            int bdl = (mode[6] << 8) | mode[7];
+            int p = 8 + bdl;
+            if ((mode[p] & 0x3F) != 0x05) { r.Message = "The drive's write settings page wasn't where expected."; return false; }
+            int pageLen = mode[p + 1] + 2;
+            var param = new byte[8 + pageLen];
+            Array.Copy(mode, p, param, 8, pageLen);
+            param[8] &= 0x3F;                      // clear the "saveable" flag; the page code stays 05
+            param[8 + 2] = 0x40 | 0x01;            // buffer-underrun protection on, write type 1 = track at once, no test
+            param[8 + 3] = 0x04;                   // no more sessions after this (closed disc); track mode 4 = data
+            param[8 + 4] = 0x08;                   // data block type 8 = mode 1, 2048-byte sectors
+            param[8 + 5] = 0;                      // link size
+            param[8 + 7] = 0;                      // host application code
+            param[8 + 8] = 0x00;                   // session format: CD-ROM
+            if (pageLen > 15) { param[8 + 10] = param[8 + 11] = param[8 + 12] = param[8 + 13] = 0; }   // packet size: none
+            if (pageLen > 15) { param[8 + 14] = 0; param[8 + 15] = 150; }                               // pause between tracks: 2 s
+            rep = drive.Write(new byte[] { 0x55, 0x10, 0, 0, 0, 0, 0, (byte)(param.Length >> 8), (byte)param.Length, 0 }, param, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't accept the CD write settings: " + rep.Describe(); return false; }
+
+            // Fastest write speed the drive offers for this disc (it picks the best it can).
+            drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
+
+            // Where to start, and how much fits.
+            var ti = new byte[48];
+            rep = drive.Read(new byte[] { 0x52, 0x01, (byte)(track >> 24), (byte)(track >> 16), (byte)(track >> 8), (byte)track, 0, 0, 48, 0 }, ti, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't say where the CD's track starts: " + rep.Describe(); return false; }
+            bool nwaValid = (ti[7] & 0x01) != 0;
+            startLba = nwaValid ? BE32(ti, 12) : 0;
+            long free = BE32(ti, 16);
+            if (isoSectors > free)
+            {
+                r.Message = $"The ISO ({isoSectors:N0} sectors) is bigger than this {discName} ({free:N0} sectors free).";
+                return false;
+            }
+            log?.Invoke($"Direct write: blank {discName}, track {track} starts at sector {startLba:N0}, {free:N0} sectors free; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes); track at once");
+            return true;
+        }
+
+        // Close the track, then the session (this finalizes the disc, since no
+        // more sessions were asked for). The drive writes the CD's lead-in and
+        // lead-out here, which takes a minute or two.
+        private static bool CloseCd(ScsiDrive drive, int track, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log)
+        {
+            progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
+            var rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x01, 0, (byte)(track >> 8), (byte)track, 0, 0, 0, 0 }, 120), 120, 1000);
+            if (!rep.Ok) { r.Message = "The drive wouldn't close the CD's track: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(5));
+
+            rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x02, 0, 0, 0, 0, 0, 0, 0 }, 300), 120, 1000);
+            if (!rep.Ok) { r.Message = "The drive wouldn't close the CD: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(10)))
+            {
+                r.Message = "The drive didn't finish closing the CD in time.";
+                log?.Invoke("Direct write: " + r.Message);
+                return false;
+            }
+            log?.Invoke("Direct write: track and disc closed (finalized)");
+            return true;
+        }
+
+        // ---- the write loop (every disc type) ----
+        // Returns how many sectors were written (fewer if cancelled), or -1 if
+        // a write failed (r.Message then says where and why).
+        private static long WriteSectors(ScsiDrive drive, string isoPath, long startLba, long isoSectors, IProgress<Progress>? progress,
+            CancellationToken ct, Result r, Action<string>? log, string afterFailure)
+        {
+            var clock = Stopwatch.StartNew();
+            var buf = new byte[DirectChunkSectors * Sector];
+            long done = 0;
+            double speed = 0;
+            var speedClock = Stopwatch.StartNew();
+            long speedFrom = 0;
+            var lastReport = TimeSpan.Zero;
+            using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+            while (done < isoSectors)
+            {
+                if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
+                int n = (int)Math.Min(DirectChunkSectors, isoSectors - done);
+                int bytes = n * Sector;
+                ReadFully(fs, buf, bytes);
+                var data = bytes == buf.Length ? buf : buf.AsSpan(0, bytes).ToArray();
+                long lba = startLba + done;
+                var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
+
+                var rep = RetryWhileBusy(() => drive.Write(cdb, data, 60), 200, 50);
+                if (!rep.Ok)
+                {
+                    r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / isoSectors:0.0}%): {rep.Describe()}. {afterFailure}";
+                    log?.Invoke("Direct write: " + r.Message);
+                    return -1;
+                }
+                done += n;
+
+                if (speedClock.Elapsed.TotalSeconds >= 1)
+                {
+                    double now = (done - speedFrom) * (double)Sector / speedClock.Elapsed.TotalSeconds;
+                    speed = speed <= 0 ? now : speed * 0.7 + now * 0.3;
+                    speedFrom = done;
+                    speedClock.Restart();
+                }
+                if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= isoSectors)
+                {
+                    lastReport = clock.Elapsed;
+                    progress?.Report(new Progress
+                    {
+                        Phase = "Writing",
+                        Percent = 100.0 * done / isoSectors,
+                        BytesPerSec = speed,
+                        Remaining = speed > 0 ? TimeSpan.FromSeconds((isoSectors - done) * (double)Sector / speed) : TimeSpan.Zero,
+                    });
+                }
+            }
+            return done;
+        }
+
+        // A drive that's only busy (buffer full, still writing) is asked again.
+        private static ScsiDrive.Reply RetryWhileBusy(Func<ScsiDrive.Reply> send, int tries, int waitMs)
+        {
+            var rep = send();
+            for (int i = 0; !rep.Ok && rep.IsTryAgain && i < tries; i++)
+            {
+                Thread.Sleep(waitMs);
+                rep = send();
+            }
+            return rep;
+        }
+
+        private static void DirectVerify(ScsiDrive drive, string isoPath, long startLba, long isoSectors, IProgress<Progress>? progress, CancellationToken ct, Result r)
         {
             var disc = new byte[DirectChunkSectors * Sector];
             var file = new byte[DirectChunkSectors * Sector];
@@ -251,7 +366,8 @@ namespace ArchivSector_OD.Burning
                 int bytes = n * Sector;
                 ReadFully(fs, file, bytes);
                 var target = bytes == disc.Length ? disc : new byte[bytes];
-                var cdb = new byte[] { 0x28, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
+                long at = startLba + lba;
+                var cdb = new byte[] { 0x28, 0, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, (byte)(n >> 8), (byte)n, 0 };
                 var rep = drive.Read(cdb, target, 60);
                 for (int tries = 0; !rep.Ok && rep.IsTryAgain && tries < 100; tries++) { Thread.Sleep(50); rep = drive.Read(cdb, target, 60); }
                 if (!rep.Ok)
