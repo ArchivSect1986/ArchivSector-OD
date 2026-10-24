@@ -80,6 +80,20 @@ namespace ArchivSector_OD.Burning
                         dynamic data = dataObj;
                         int type = 0;
                         try { data.Recorder = recObj; type = (int)data.CurrentPhysicalMediaType; } catch { }
+                        // A closed CD-RW/DVD-RW isn't "writable" to the data side,
+                        // so ask the drive's current profiles instead.
+                        if (type == 0)
+                        {
+                            try
+                            {
+                                var profiles = new HashSet<int>();
+                                foreach (var o in (object[])rec.CurrentProfiles) profiles.Add(Convert.ToInt32(o));
+                                type = profiles.Contains(0x43) ? 19 : profiles.Contains(0x0A) ? 3
+                                    : profiles.Contains(0x13) || profiles.Contains(0x14) ? 10
+                                    : profiles.Contains(0x1A) ? 7 : profiles.Contains(0x2A) ? 13 : 0;
+                            }
+                            catch { }
+                        }
                         info.MediaType = WritableLabel(type) ?? "";
 
                         eraseObj = Activator.CreateInstance(Type.GetTypeFromProgID("IMAPI2.MsftDiscFormat2Erase")!)!;

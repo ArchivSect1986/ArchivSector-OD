@@ -176,7 +176,12 @@ namespace ArchivSector_OD.Burning
                 disc.Add("Disc", "None (or the drive can't read it)");
                 return rep;
             }
-            disc.Add("Type", ProfileName(rep.CurrentProfile) ?? $"profile 0x{rep.CurrentProfile:X4}");
+            disc.Add("Type", (ProfileName(rep.CurrentProfile) ?? $"profile 0x{rep.CurrentProfile:X4}") + rep.CurrentProfile switch
+            {
+                0x13 => " (overwrite mode)",
+                0x14 => " (sequential mode)",
+                _ => "",
+            });
             string family = Family(rep.CurrentProfile);
 
             bool overwriteInPlaceDisc = rep.CurrentProfile is 0x43 or 0x1A or 0x2A or 0x12;

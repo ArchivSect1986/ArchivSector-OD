@@ -143,11 +143,17 @@ public static class BurnerScanner
             if (!(bool)format.IsRecorderSupported(recorder) ||
                 !(bool)format.IsCurrentMediaSupported(recorder))
             {
-                // A disc is in, but it can't be written (pressed movie/game disc etc.)
+                // A disc is in, but Windows' engine can't write to it: a pressed
+                // movie/game disc, or a closed rewritable one (CD-RW, DVD-RW)
+                // that needs erasing first -- that one says so, so the Burn
+                // tab offers Erase for it.
+                var seenType = TypeFromProfiles(current);
+                bool rewritable = seenType is DiscMediaType.CdRw or DiscMediaType.DvdDashRw or DiscMediaType.DvdPlusRw
+                    or DiscMediaType.DvdPlusRwDualLayer or DiscMediaType.DvdRam or DiscMediaType.BdRe;
                 return new MediaInfo
                 {
-                    State = MediaState.NotWritable,
-                    Type = TypeFromProfiles(current)
+                    State = rewritable ? MediaState.Full : MediaState.NotWritable,
+                    Type = seenType
                 };
             }
 
@@ -205,6 +211,14 @@ public static class BurnerScanner
     /// <summary>Best guess at disc type for discs IMAPI2 won't write to.</summary>
     private static DiscMediaType TypeFromProfiles(HashSet<int> profiles)
     {
+        // Rewritables first: a closed CD-RW also reports the CD-ROM
+        // profile, and must still be recognised as a CD-RW (to erase it).
+        if (profiles.Contains(0x43)) return DiscMediaType.BdRe;
+        if (profiles.Contains(0x0A)) return DiscMediaType.CdRw;
+        if (profiles.Contains(0x13) || profiles.Contains(0x14)) return DiscMediaType.DvdDashRw;
+        if (profiles.Contains(0x1A)) return DiscMediaType.DvdPlusRw;
+        if (profiles.Contains(0x2A)) return DiscMediaType.DvdPlusRwDualLayer;
+        if (profiles.Contains(0x12)) return DiscMediaType.DvdRam;
         if (profiles.Contains(0x40)) return DiscMediaType.BdRom;
         if (profiles.Contains(0x10)) return DiscMediaType.DvdRom;
         if (profiles.Contains(0x08)) return DiscMediaType.CdRom;

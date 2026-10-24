@@ -128,7 +128,7 @@ public sealed class MediaInfo
         MediaState.Blank => "Blank",
         MediaState.Appendable => "Has data - can add more",
         MediaState.Overwritable => "Has data - can be overwritten",
-        MediaState.Full => "Closed - can't write more",
+        MediaState.Full => IsRewritable ? "Closed - erase it to reuse" : "Closed - can't write more",
         MediaState.NotWritable => "Not writable",
         _ => "Unknown"
     };

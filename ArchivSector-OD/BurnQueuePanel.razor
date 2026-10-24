@@ -72,9 +72,9 @@
                         Windows (built in)
                     </label>
                     <label style="display: flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer;"
-                           title="ArchivSector-OD writes the discs itself. New in v4.0: BD-R, BD-RE, DVD+R, DVD-R and CD-R/CD-RW so far.">
+                           title="ArchivSector-OD writes the discs itself. New in v4.0: BD-R, BD-RE, DVD+R, DVD-R, DVD-RW and CD-R/CD-RW so far.">
                         <input type="radio" name="queue-engine" checked="@useDirect" @onchange="() => useDirect = true" />
-                        ArchivSector-OD's own writer (new: BD-R, BD-RE, DVD±R, CD-R)
+                        ArchivSector-OD's own writer (new: BD-R/RE, DVD±R, DVD-RW, CD-R/RW)
                     </label>
                 </div>
                 <label style="display: flex; gap: 8px; align-items: flex-start; color: var(--text-primary); cursor: pointer;">
@@ -330,7 +330,7 @@
                 if (direct && !BurnEngine.DirectWriteSupports(blank.MediaType))
                 {
                     it.State = ItemState.Waiting;
-                    summary = $"Stopped: ArchivSector-OD's own writer doesn't write {blank.MediaType} discs yet (BD-R, BD-RE, DVD+R, DVD-R and CD-R so far). Choose ImgBurn or Windows, or put in a supported disc.";
+                    summary = $"Stopped: ArchivSector-OD's own writer doesn't write {blank.MediaType} discs yet (BD-R, BD-RE, DVD+R, DVD-R, DVD-RW and CD-R/RW so far). Choose ImgBurn or Windows, or put in a supported disc.";
                     LogService.Write($"{letter}:", "Burn queue: " + summary);
                     break;
                 }

@@ -35,6 +35,7 @@
         <button class="nav-btn @(mode == "write" ? "active" : "")" @onclick='() => mode = "write"'>🔥 Write</button>
         <button class="nav-btn @(mode == "build" ? "active" : "")" @onclick='() => mode = "build"'>📦 Build ISO</button>
         <button class="nav-btn @(mode == "read" ? "active" : "")" @onclick='() => mode = "read"'>📀 Read disc</button>
+        <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'>✔ Verify disc</button>
         <button class="nav-btn @(mode == "info" ? "active" : "")" @onclick='() => mode = "info"'>🔎 Drive info</button>
     </nav>
 
@@ -44,6 +45,10 @@
 
     <div style="display: @(mode == "read" ? "block" : "none");">
         <ReadPanel AddToQueue="@OnAddToQueue" Visible="@(Visible && mode == "read")" />
+    </div>
+
+    <div style="display: @(mode == "verify" ? "block" : "none");">
+        <VerifyPanel Visible="@(Visible && mode == "verify")" />
     </div>
 
     <div style="display: @(mode == "info" ? "block" : "none");">

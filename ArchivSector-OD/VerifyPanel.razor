@@ -1,0 +1,195 @@
+@using System.IO
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Verify mode (v4.0 week 5): compares the disc in a drive with an ISO,
+    sector by sector (BurnEngine.VerifyAgainstIsoAsync), like ImgBurn's
+    Verify mode. Read-only. The drive is marked busy while it checks.
+*@
+
+<div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+    <div>
+        <h2 style="margin: 0;">✔ Verify a disc</h2>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Compare a disc with its ISO, sector by sector: for discs burned earlier, burned by another program, or re-checked after time on the shelf. Nothing is written.</p>
+    </div>
+
+    @if (running)
+    {
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 13px;"><strong>Checking @runLetter:</strong> against @Path.GetFileName(isoPath)</span>
+            <div class="progress-bar"><div class="progress-fill" style="width: @PercentText%;"></div></div>
+            <span style="font-size: 12px; color: var(--text-secondary);">@ProgressLine</span>
+            @if (progress is not null && progress.Different + progress.Unreadable > 0)
+            {
+                <span style="font-size: 12px; color: var(--amber);">⚠ So far: @progress.Different.ToString("N0") sector(s) differ, @progress.Unreadable.ToString("N0") couldn't be read</span>
+            }
+            <button class="bay-btn cancel-btn" style="width: auto; align-self: flex-start; padding: 8px 18px;" @onclick="Cancel" disabled="@cancelRequested">
+                @(cancelRequested ? "Stopping…" : "✖ Stop checking")
+            </button>
+        </div>
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 70px;">Drive</strong>
+                <select value="@driveLetter" @onchange="OnDriveChanged" style="font-size: 13px;">
+                    @if (drives.Count == 0)
+                    {
+                        <option value="">No disc drives found</option>
+                    }
+                    @foreach (var d in drives)
+                    {
+                        <option value="@d">Drive @d:</option>
+                    }
+                </select>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 70px;">ISO</strong>
+                <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; color: @(isoPath is null ? "var(--text-secondary)" : "var(--text-primary)");">@(isoPath ?? "No ISO chosen")</span>
+                <button class="shortcut-btn" @onclick="ChooseIso">📂 Choose ISO…</button>
+            </div>
+            @if (isoPath is not null)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary); margin-left: 80px;">@IsoLine</span>
+            }
+        </div>
+        <div>
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(isoPath is null || driveLetter.Length == 0)">✔ Verify</button>
+        </div>
+        @if (message is not null)
+        {
+            <span style="font-size: 13px; color: var(--amber);">⚠ @message</span>
+        }
+    }
+
+    @if (result is not null && !running)
+    {
+        <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px;">
+            <strong style="color: @(result.Ok ? "var(--success)" : result.Cancelled ? "var(--text-secondary)" : "var(--danger)");">@(result.Ok ? "✅" : result.Cancelled ? "⏸" : "⚠") @result.Message</strong>
+            <span style="font-size: 12px; color: var(--text-secondary);">@result.Sectors.ToString("N0") sectors checked in @Dur(result.Time) · average @DiscHealthService.FormatSpeed(result.AverageBytesPerSec, OneX(result.Sectors * 2048))</span>
+            @if (result.BadRanges.Count > 0)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">Problem sectors: @BadText</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>True while Verify mode is showing: the drive list is refreshed then.</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    private List<string> drives = new();
+    private string driveLetter = "";
+    private string? isoPath;
+    private bool running, cancelRequested, wasVisible, disposed;
+    private string runLetter = "";
+    private string? message;
+    private BurnEngine.VerifyProgress? progress;
+    private BurnEngine.VerifyResult? result;
+    private CancellationTokenSource? cts;
+    private static string? lastFolder;
+
+    private string IsoLine
+    {
+        get
+        {
+            try { var len = new FileInfo(isoPath!).Length; return $"{DiscHealthService.FormatBytes(len)} ({len:N0} bytes)"; }
+            catch { return "The ISO can't be opened."; }
+        }
+    }
+    private string PercentText => (progress?.Percent ?? 0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private string ProgressLine => progress is null ? "Starting…"
+        : $"{progress.Percent:0.0}% · {DiscHealthService.FormatSpeed(progress.BytesPerSec, progress.OneX)} · {Dur(progress.Remaining)} left";
+    private string BadText => result is null ? "" :
+        string.Join(", ", result.BadRanges.Take(10).Select(b => b.Count == 1 ? b.Lba.ToString("N0") : $"{b.Lba:N0}–{b.Lba + b.Count - 1:N0}"))
+        + (result.BadRanges.Count > 10 ? $" and {result.BadRanges.Count - 10} more (see the log)" : "");
+
+    private static double OneX(long bytes) => bytes <= 1_000_000_000L ? 153_600 : bytes <= 9_000_000_000L ? 1_385_000 : 4_500_000;
+    private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min {t.Seconds}s" : $"{t.Seconds}s";
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !wasVisible)
+        {
+            wasVisible = true;
+            try
+            {
+                drives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.CDRom)
+                    .Select(d => d.Name.TrimEnd('\\', ':')).OrderBy(l => l).ToList();
+            }
+            catch { drives = new(); }
+            if (!drives.Contains(driveLetter)) driveLetter = drives.FirstOrDefault() ?? "";
+        }
+        else if (!Visible) wasVisible = false;
+    }
+
+    private void OnDriveChanged(ChangeEventArgs e)
+    {
+        driveLetter = e.Value?.ToString() ?? "";
+        message = null;
+    }
+
+    private void ChooseIso()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose the ISO the disc should match",
+            Filter = "Disc images (*.iso)|*.iso|All files (*.*)|*.*",
+        };
+        if (lastFolder is not null && Directory.Exists(lastFolder)) dlg.InitialDirectory = lastFolder;
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        isoPath = dlg.FileName;
+        lastFolder = Path.GetDirectoryName(isoPath);
+        result = null;
+        message = null;
+    }
+
+    private async Task Start()
+    {
+        if (isoPath is null || driveLetter.Length == 0) return;
+        var letter = driveLetter;
+        message = null;
+        if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter))
+        {
+            message = $"Drive {letter}: is busy (ripping, burning or checking). Try again when it's done.";
+            return;
+        }
+        running = true;
+        runLetter = letter;
+        cancelRequested = false;
+        progress = null;
+        result = null;
+        cts = new CancellationTokenSource();
+        var reporter = new Progress<BurnEngine.VerifyProgress>(p => { progress = p; if (!disposed) InvokeAsync(StateHasChanged); });
+        RipActivity.Set(letter, "verify-disc", true);
+        try
+        {
+            result = await BurnEngine.VerifyAgainstIsoAsync(letter, isoPath, reporter, cts.Token, line => LogService.Write($"{letter}:", line));
+        }
+        catch (Exception ex)
+        {
+            result = new BurnEngine.VerifyResult { Message = "The check stopped: " + ex.Message };
+        }
+        finally
+        {
+            RipActivity.Set(letter, "verify-disc", false);
+            cts.Dispose();
+            cts = null;
+            running = false;
+        }
+        try { if (ConfigService.Load().SoundAlerts) System.Media.SystemSounds.Exclamation.Play(); } catch { }
+        if (!disposed) StateHasChanged();
+    }
+
+    private void Cancel()
+    {
+        cancelRequested = true;
+        cts?.Cancel();
+    }
+
+    // Leaving the tab doesn't stop a check; it carries on.
+    public void Dispose() => disposed = true;
+}
