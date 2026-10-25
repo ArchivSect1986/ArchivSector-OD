@@ -9,6 +9,11 @@ namespace ArchivSector_OD.Burning
     // Discs so far:
     //   * BD-RE: formatted to the whole disc (no spare areas) if needed,
     //     then written straight onto from sector 0. Stopping is harmless.
+    //   * DVD+RW: a brand-new one is formatted first (in the background:
+    //     the drive formats while it writes). Then written straight onto
+    //     from sector 0, over whatever was there; no erase needed. If the
+    //     format wasn't finished, "close session" stops it so the disc
+    //     reads in other drives and players. Stopping is harmless.
     //   * CD-R / CD-RW (blank): written as one data track ("track at
     //     once"), then the track and the disc are closed so every drive
     //     can read it. A CD-R stopped part-way can't be used again.
@@ -37,13 +42,13 @@ namespace ArchivSector_OD.Burning
     {
         private const int DirectChunkSectors = 32;     // 64 KB per write
         private const int ProfileBdRe = 0x43, ProfileCdR = 0x09, ProfileCdRw = 0x0A, ProfileDvdPlusR = 0x1B, ProfileDvdPlusRDl = 0x2B,
-            ProfileBdRSrm = 0x41, ProfileDvdDashR = 0x11, ProfileDvdRwSequential = 0x14, ProfileDvdRwOverwrite = 0x13;
+            ProfileBdRSrm = 0x41, ProfileDvdDashR = 0x11, ProfileDvdRwSequential = 0x14, ProfileDvdRwOverwrite = 0x13, ProfileDvdPlusRw = 0x1A;
 
         /// <summary>Can our own writer handle this kind of disc yet?</summary>
-        public static bool DirectWriteSupports(string mediaType) => mediaType is "BD-RE" or "CD-R" or "CD-RW" or "DVD+R" or "DVD+R DL" or "BD-R" or "DVD-R" or "DVD-RW";
+        public static bool DirectWriteSupports(string mediaType) => mediaType is "BD-RE" or "DVD+RW" or "CD-R" or "CD-RW" or "DVD+R" or "DVD+R DL" or "BD-R" or "DVD-R" or "DVD-RW";
 
         /// <summary>Is stopping our own writer harmless on this disc (it can be written again)?</summary>
-        public static bool DirectStopIsSafe(string mediaType) => mediaType is "BD-RE";
+        public static bool DirectStopIsSafe(string mediaType) => mediaType is "BD-RE" or "DVD+RW";
 
         /// <summary>
         /// Burns an ISO with ArchivSector-OD's own writer. Same progress and
@@ -103,20 +108,21 @@ namespace ArchivSector_OD.Burning
                 r.Message = "This DVD-RW is in \"overwrite\" mode, which ArchivSector-OD's own writer doesn't write yet. Give it a full erase (🧽 Erase this disc… → Full erase) to make it fully blank, or burn with ImgBurn or Windows.";
                 return;
             }
-            if (profile != ProfileBdRe && !isCd && !isDvdPlusR && !isDvdDashR)
+            bool isDvdPlusRw = profile == ProfileDvdPlusRw;
+            if (profile != ProfileBdRe && !isDvdPlusRw && !isCd && !isDvdPlusR && !isDvdDashR)
             {
-                r.Message = "ArchivSector-OD's own writer writes BD-R, BD-RE, DVD+R, DVD-R and CD-R discs so far. Use ImgBurn or Windows for this disc.";
+                r.Message = "ArchivSector-OD's own writer writes BD-R, BD-RE, DVD+R, DVD+RW, DVD-R, DVD-RW, CD-R and CD-RW discs so far. Use ImgBurn or Windows for this disc.";
                 return;
             }
             string discName = profile switch
             {
-                ProfileBdRe => "BD-RE", ProfileCdR => "CD-R", ProfileCdRw => "CD-RW",
+                ProfileBdRe => "BD-RE", ProfileDvdPlusRw => "DVD+RW", ProfileCdR => "CD-R", ProfileCdRw => "CD-RW",
                 ProfileDvdPlusR => "DVD+R", ProfileDvdPlusRDl => "DVD+R DL",
                 ProfileBdRSrm => "BD-R", ProfileDvdRwSequential => "DVD-RW", _ => "DVD-R",
             };
-            bool reusable = profile == ProfileBdRe;
+            bool reusable = profile is ProfileBdRe or ProfileDvdPlusRw;
             bool erasable = profile is ProfileCdRw or ProfileDvdRwSequential;
-            string afterFailure = reusable ? "The BD-RE can be erased and used again." : $"A {discName} written part-way can't be used again{(erasable ? " until it's erased" : "")}.";
+            string afterFailure = reusable ? $"The {discName} can simply be written again." : $"A {discName} written part-way can't be used again{(erasable ? " until it's erased" : "")}.";
 
             // 2. Take the disc from Windows; keep the tray shut while writing.
             drive.LockAndDismount();
@@ -127,6 +133,7 @@ namespace ArchivSector_OD.Burning
                 long startLba;
                 int cdTrack = 1;
                 long padSectors = 0;    // DVD-R: zeros written after the ISO to fill the reserved size
+                bool stopBackgroundFormat = false;   // DVD+RW: "close session" at the end
                 if (isCd)
                 {
                     if (!PrepareCd(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
@@ -134,6 +141,11 @@ namespace ArchivSector_OD.Burning
                 else if (isDvdPlusR)
                 {
                     if (!PrepareDvdPlusR(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
+                }
+                else if (isDvdPlusRw)
+                {
+                    if (!PrepareDvdPlusRw(drive, isoSectors, iso.Length, r, log, out stopBackgroundFormat)) return;
+                    startLba = 0;
                 }
                 else if (isDvdDashR)
                 {
@@ -154,6 +166,9 @@ namespace ArchivSector_OD.Burning
                 // so what was written is complete).
                 progress?.Report(new Progress { Phase = "Finalizing", Percent = -1 });
                 rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600), 300, 1000);
+                // DVD+RW whose format was still running: stop it (also after a
+                // cancel), so the disc is readable everywhere.
+                if (isDvdPlusRw && stopBackgroundFormat) StopDvdPlusRwFormat(drive, progress, log);
                 if (r.Cancelled)
                 {
                     r.BurnTime = clock.Elapsed;
@@ -251,6 +266,63 @@ namespace ArchivSector_OD.Burning
                 return false;
             }
             return true;
+        }
+
+        // ---- DVD+RW: format a brand-new disc (in the background), then write from sector 0 ----
+        // A DVD+RW is written over in place, like a BD-RE: no erase needed.
+        // A new one must be formatted first, but the drive does that in the
+        // background ("format type 26h"), so writing can start straight away.
+        private static bool PrepareDvdPlusRw(ScsiDrive drive, long isoSectors, long isoBytes, Result r, Action<string>? log, out bool stopBackgroundFormat)
+        {
+            stopBackgroundFormat = false;
+
+            // Background format state (disc information, byte 7):
+            // 0 = never formatted, 1 = started but stopped part-way,
+            // 2 = formatting right now, 3 = fully formatted.
+            var di = new byte[34];
+            var rep = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't say what's on the DVD+RW: " + rep.Describe(); return false; }
+            int bgFormat = di[7] & 3;
+
+            var fc = new byte[252];
+            rep = drive.Read(new byte[] { 0x23, 0, 0, 0, 0, 0, 0, 0, 252, 0 }, fc, 10);
+            long capacity = rep.Ok ? BE32(fc, 4) : 0;
+            if (capacity <= 0) capacity = 2_295_104;                  // a standard 4.7 GB DVD+RW
+            if (isoSectors > capacity) { r.Message = $"The ISO ({Fmt(isoBytes)}) is bigger than this DVD+RW ({Fmt(capacity * Sector)})."; return false; }
+
+            string state = bgFormat switch { 0 => "not formatted", 1 => "partly formatted", 2 => "formatting", _ => "formatted" };
+            log?.Invoke($"Direct write: DVD+RW, {state}, {capacity:N0} sectors; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes); written from sector 0");
+
+            if (bgFormat == 0)
+            {
+                // FORMAT UNIT, type 26h (DVD+RW full format), size "all of it",
+                // IMMED so the drive answers at once and formats as it goes.
+                var param = new byte[12];
+                param[1] = 0x02;                   // IMMED
+                param[3] = 8;                      // one 8-byte format descriptor
+                param[4] = param[5] = param[6] = param[7] = 0xFF;
+                param[8] = 0x26 << 2;
+                rep = drive.Write(new byte[] { 0x04, 0x11, 0, 0, 0, 0 }, param, 60);
+                if (!rep.Ok) { r.Message = "The drive wouldn't format the DVD+RW: " + rep.Describe(); return false; }
+                log?.Invoke("Direct write: new DVD+RW, formatting in the background while writing");
+                WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(2));
+            }
+            stopBackgroundFormat = bgFormat != 3;
+
+            // Fastest write speed the drive offers for this disc.
+            drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
+            return true;
+        }
+
+        // CLOSE SESSION on a DVD+RW stops an unfinished background format and
+        // writes what other drives and players need to read the disc.
+        private static void StopDvdPlusRwFormat(ScsiDrive drive, IProgress<Progress>? progress, Action<string>? log)
+        {
+            progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
+            var rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x02, 0, 0, 0, 0, 0, 0, 0 }, 300), 120, 1000);
+            if (rep.Ok) WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(10));
+            log?.Invoke(rep.Ok ? "Direct write: DVD+RW background format stopped (session closed)"
+                               : "Direct write: the drive didn't accept \"close session\" on the DVD+RW: " + rep.Describe());
         }
 
         // ---- CD-R / CD-RW: set up one data track, written "track at once" ----
