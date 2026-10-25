@@ -11,7 +11,9 @@ namespace ArchivSector_OD
     //     the bays' polling leave a burning drive alone;
     //   * ImgBurn's location from Settings;
     //   * the app's log and History;
-    //   * moving the ISO to the Recycle Bin after a verified burn.
+    //   * moving the ISO to the Recycle Bin after a verified burn;
+    //   * (v4.0) which program burns by default, and the automatic switch
+    //     to ImgBurn (or Windows) when our own writer can't start.
     // Everything that used BurnService before (bays, tray control, polling)
     // calls the same methods as before.
     public static class BurnService
@@ -28,6 +30,36 @@ namespace ArchivSector_OD
             try { return ImgBurnService.FindExecutable(ConfigService.Load().ImgBurnPathOverride); }
             catch { return null; }
         }
+
+        // v4.0: which program burns. Our own writer unless the user picked
+        // another one on a burn screen (remembered in settings).
+        public enum Writer { Own, ImgBurn, Windows }
+
+        public static Writer SavedWriter()
+        {
+            try
+            {
+                var w = ConfigService.Load().BurnWriter;
+                if (string.Equals(w, "ImgBurn", StringComparison.OrdinalIgnoreCase)) return Writer.ImgBurn;
+                if (string.Equals(w, "Windows", StringComparison.OrdinalIgnoreCase)) return Writer.Windows;
+            }
+            catch { }
+            return Writer.Own;
+        }
+
+        public static void SaveWriter(Writer w)
+        {
+            try
+            {
+                var config = ConfigService.Load();
+                config.BurnWriter = w.ToString();
+                ConfigService.Save(config);
+            }
+            catch { }
+        }
+
+        /// <summary>The program used when our own writer can't burn a disc: ImgBurn if it's installed, otherwise Windows.</summary>
+        public static string FallbackName() => ImgBurnPath() is not null ? "ImgBurn" : "Windows";
 
         public static async Task<BurnEngine.Result> BurnAsync(string driveLetter, string isoPath, bool verify, string discTitle, string driveModel,
             IProgress<BurnEngine.Progress>? progress, CancellationToken ct, bool useImgBurn = false, bool deleteIsoAfter = false,
@@ -46,11 +78,27 @@ namespace ArchivSector_OD
             BurnEngine.Result r;
             try
             {
-                // v4.0: ArchivSector-OD's own writer (BD-RE only for now).
+                // v4.0: ArchivSector-OD's own writer.
                 r = direct
                     ? await BurnEngine.BurnDirectAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line))
                     : await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, imgBurn,
                         line => LogService.Write($"{letter}:", line));
+
+                // Our own writer couldn't start (the drive couldn't be opened,
+                // the disc isn't one it handles, ...) and nothing on the disc
+                // was changed: ImgBurn burns it instead, or Windows without it.
+                if (direct && !r.Burned && !r.Cancelled && r.DiscUntouched && !ct.IsCancellationRequested)
+                {
+                    var why = r.Message.TrimEnd('.', ' ');
+                    var fallback = ImgBurnPath();
+                    string name = fallback is not null ? "ImgBurn" : "Windows";
+                    LogService.Write($"{letter}:", $"Burn: ArchivSector-OD's own writer couldn't start ({why}); burning with {name} instead");
+                    progress?.Report(new BurnEngine.Progress { Phase = "Switching to " + name, Percent = -1 });
+                    r = await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, fallback,
+                        line => LogService.Write($"{letter}:", line));
+                    r.Message = $"ArchivSector-OD's own writer couldn't start ({why}), so {name} burned this disc instead. " + r.Message;
+                    direct = false;
+                }
             }
             finally
             {

@@ -90,6 +90,10 @@ namespace ArchivSector_OD.Burning
             if (iso.Length == 0 || iso.Length % Sector != 0) { r.Message = "This file isn't a disc image made of whole 2 KB sectors, so it can't be burned as-is."; return; }
             long isoSectors = iso.Length / Sector;
 
+            // Until something is sent that changes the disc (a format, a
+            // track reservation, the first write), another program can take
+            // over if this writer can't go on.
+            r.DiscUntouched = true;
             progress?.Report(new Progress { Phase = "Preparing", Percent = -1 });
             using var drive = ScsiDrive.Open(letter, out var problem);
             if (drive is null) { r.Message = problem ?? "The drive couldn't be opened."; return; }
@@ -158,6 +162,7 @@ namespace ArchivSector_OD.Burning
                 }
 
                 // 4. Write.
+                r.DiscUntouched = false;
                 var clock = Stopwatch.StartNew();
                 long written = WriteSectors(drive, isoPath, startLba, isoSectors, padSectors, progress, ct, r, log, afterFailure);
                 if (written < 0) return;   // failed; r.Message says why
@@ -251,6 +256,7 @@ namespace ArchivSector_OD.Burning
 
             progress?.Report(new Progress { Phase = "Formatting", Percent = -1 });
             log?.Invoke($"Direct write: formatting the BD-RE to {wholeDisc:N0} sectors (no spare areas)");
+            r.DiscUntouched = false;
             var param = new byte[12];
             param[1] = 0x02;                       // IMMED: answer at once, format in the background
             param[3] = 8;                          // one 8-byte format descriptor
@@ -302,6 +308,7 @@ namespace ArchivSector_OD.Burning
                 param[3] = 8;                      // one 8-byte format descriptor
                 param[4] = param[5] = param[6] = param[7] = 0xFF;
                 param[8] = 0x26 << 2;
+                r.DiscUntouched = false;
                 rep = drive.Write(new byte[] { 0x04, 0x11, 0, 0, 0, 0 }, param, 60);
                 if (!rep.Ok) { r.Message = "The drive wouldn't format the DVD+RW: " + rep.Describe(); return false; }
                 log?.Invoke("Direct write: new DVD+RW, formatting in the background while writing");
@@ -456,6 +463,7 @@ namespace ArchivSector_OD.Burning
             drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
 
             // RESERVE TRACK: the size (in sectors) goes in bytes 5-8.
+            r.DiscUntouched = false;
             rep = drive.Command(new byte[] { 0x53, 0, 0, 0, 0, (byte)(reserve >> 24), (byte)(reserve >> 16), (byte)(reserve >> 8), (byte)reserve, 0 }, 60);
             if (!rep.Ok) { r.Message = $"The drive wouldn't set aside the {discName}'s track" + (discName == "DVD-RW" ? " (a quick-erased DVD-RW may need a full erase first)" : "") + ": " + rep.Describe(); return false; }
             // The drive may record the reservation now; wait until it's ready for data.

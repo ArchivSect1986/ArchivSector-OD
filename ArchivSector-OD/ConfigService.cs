@@ -25,11 +25,17 @@ namespace ArchivSector_OD
         // a system beep when a rip completes successfully.
         public bool SoundAlerts { get; set; } = true;
 
-        // v3.3: which program burns ISOs to blank discs -- "Windows" (the
-        // built-in burning engine) or "ImgBurn". Remembered from the bay's
-        // burn screen. Empty = not chosen yet: ImgBurn is used when it's
-        // installed (it can use the whole of a BD-R), otherwise Windows.
+        // v3.3: which program burned ISOs ("Windows" or "ImgBurn"). No
+        // longer read from v4.0 on (BurnWriter replaces it); kept so older
+        // settings files load cleanly.
         public string BurnEngine { get; set; } = "";
+
+        // v4.0: which program burns ISOs to blank discs -- "Own"
+        // (ArchivSector-OD's own writer), "ImgBurn" or "Windows".
+        // Remembered from the burn screens. Empty = not chosen yet: the
+        // own writer. A disc the own writer doesn't handle, or a drive it
+        // can't open, goes to ImgBurn (or Windows without ImgBurn).
+        public string BurnWriter { get; set; } = "";
 
         // v3.3: move the ISO to the Recycle Bin after a burn that was
         // verified (every byte matched). Off by default.

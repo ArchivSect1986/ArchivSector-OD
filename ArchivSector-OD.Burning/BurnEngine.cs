@@ -55,6 +55,10 @@ namespace ArchivSector_OD.Burning
             public bool VerifiedByImgBurn;   // ImgBurn did the check (its "Exact Match")
             public bool IsoDeleted;          // the ISO went to the Recycle Bin afterwards
             public string Message = "";
+            // Our own writer stopped before it changed anything on the disc
+            // (drive couldn't be opened, disc type not handled, ...), so
+            // another program can safely burn the same disc instead.
+            public bool DiscUntouched;
             public TimeSpan BurnTime;
             public TimeSpan VerifyTime;
         }

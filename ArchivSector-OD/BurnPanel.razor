@@ -1,5 +1,7 @@
 ﻿@* Burning an ISO to a blank disc, shown inside a drive bay (v3.3), with
-   Windows' built-in burning engine or ImgBurn (the user picks). The bay
+   ArchivSector-OD's own writer (the default from v4.0), ImgBurn or
+   Windows' built-in burning engine (the user picks; remembered). A disc
+   the own writer doesn't handle gets ImgBurn (or Windows) instead. The bay
    gets the blank disc's details from AppShell's drive polling
    (BurnService.QueryBlank); all the work is in BurnService. BusyChanged
    tells the bay while a burn runs. *@
@@ -15,7 +17,7 @@
         <span>💿 <strong>Blank @BlankMediaType</strong> in the drive — @DiscHealthService.FormatBytes(DiscBytes) (@DiscBytes.ToString("N0") bytes)</span>
         @if (DiscBytes > BlankFreeBytes)
         {
-            <span class="bay-subtitle" style="margin: 0;">Windows' burning engine keeps @(DiscHealthService.FormatBytes(DiscBytes - BlankFreeBytes)) of it spare and can write @DiscHealthService.FormatBytes(BlankFreeBytes); ImgBurn uses the whole disc.</span>
+            <span class="bay-subtitle" style="margin: 0;">Windows' burning engine keeps @(DiscHealthService.FormatBytes(DiscBytes - BlankFreeBytes)) of it spare and can write @DiscHealthService.FormatBytes(BlankFreeBytes); ArchivSector-OD's own writer and ImgBurn use the whole disc.</span>
         }
         <button class="bay-btn game" @onclick="ChooseIso" disabled="@Disabled">🔥 Burn an ISO to this disc…</button>
     </div>
@@ -29,11 +31,11 @@ else if (state == State.Confirm && isoPath is not null)
             @DiscHealthService.FormatBytes(isoBytes) of @DiscHealthService.FormatBytes(Limit)
             (@(Limit > 0 ? (100.0 * isoBytes / Limit).ToString("0.0") : "?")% of what @EngineName can write)
         </span>
-        @if (TooBigForWindows && !TooBigForDisc && imgBurnPath is not null)
+        @if (TooBigForWindows && !TooBigForDisc && !useDirect && !useImgBurn && (DirectAvailable || imgBurnPath is not null))
         {
-            <span style="color: var(--amber); font-size: 12px;">⚠ Windows' burning engine can only write @DiscHealthService.FormatBytes(BlankFreeBytes) to this disc. Choose ImgBurn below to burn this ISO.</span>
+            <span style="color: var(--amber); font-size: 12px;">⚠ Windows' burning engine can only write @DiscHealthService.FormatBytes(BlankFreeBytes) to this disc. Choose @WholeDiscWriterName below to burn this ISO.</span>
         }
-        else if (TooBigForWindows && !TooBigForDisc)
+        else if (TooBigForWindows && !TooBigForDisc && !useDirect && !useImgBurn)
         {
             <span style="color: var(--danger); font-size: 12px;">⚠ Windows' burning engine can only write @DiscHealthService.FormatBytes(BlankFreeBytes) to this disc. Install ImgBurn to use the whole disc, or pick a smaller ISO.</span>
         }
@@ -43,22 +45,27 @@ else if (state == State.Confirm && isoPath is not null)
         }
         <div style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
             <span>Burn with:</span>
-            <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;">
-                <input type="radio" name="engine-@DriveLetter" checked="@(!useImgBurn && !useDirect)" @onchange="() => SetEngine(false)" />
-                Windows (built in, progress shown here)
+            <label style="display: flex; gap: 8px; align-items: center; cursor: @(DirectAvailable ? "pointer" : "default"); opacity: @(DirectAvailable ? "1" : "0.5");"
+                   title="ArchivSector-OD writes the disc itself, talking to the drive directly: CD-R/RW, DVD±R, DVD±RW, DVD+R DL, BD-R and BD-RE.">
+                <input type="radio" name="engine-@DriveLetter" checked="@useDirect" disabled="@(!DirectAvailable)" @onchange="() => Pick(BurnService.Writer.Own)" />
+                ArchivSector-OD's own writer @DirectLabel
             </label>
             <label style="display: flex; gap: 8px; align-items: center; cursor: @(imgBurnPath is null ? "default" : "pointer"); opacity: @(imgBurnPath is null ? "0.5" : "1");"
                    title="@(imgBurnPath ?? "ImgBurn wasn't found. Install it, or set where it is in Settings.")">
-                <input type="radio" name="engine-@DriveLetter" checked="@(useImgBurn && !useDirect)" disabled="@(imgBurnPath is null)" @onchange="() => SetEngine(true)" />
+                <input type="radio" name="engine-@DriveLetter" checked="@(useImgBurn && !useDirect)" disabled="@(imgBurnPath is null)" @onchange="() => Pick(BurnService.Writer.ImgBurn)" />
                 ImgBurn @(imgBurnPath is null ? "(not installed)" : "(opens its own window with its progress)")
             </label>
-            @if (DirectAvailable)
+            <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;">
+                <input type="radio" name="engine-@DriveLetter" checked="@(!useImgBurn && !useDirect)" @onchange="() => Pick(BurnService.Writer.Windows)" />
+                Windows (built in, progress shown here)
+            </label>
+            @if (engineNote is not null)
             {
-                <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;"
-                       title="ArchivSector-OD writes the disc itself, talking to the drive directly. New in v4.0: BD-R, BD-RE, DVD+R, DVD-R, DVD-RW and CD-R/RW so far.">
-                    <input type="radio" name="engine-@DriveLetter" checked="@useDirect" @onchange="SetDirect" />
-                    ArchivSector-OD's own writer (new: whole disc, progress shown here)
-                </label>
+                <span class="bay-subtitle" style="margin: 0; font-size: 12px;">ℹ @engineNote</span>
+            }
+            else if (useDirect)
+            {
+                <span class="bay-subtitle" style="margin: 0; font-size: 12px;">@FallbackNote</span>
             }
         </div>
         <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;">
@@ -107,6 +114,10 @@ else if (state == State.Running)
             else if (progress?.Phase == "Finalizing")
             {
                 <text> • closing the disc, this can take a minute or two</text>
+            }
+            else if (Switching)
+            {
+                <text> • @SwitchingNote</text>
             }
             else if (progress?.Phase == "Burning with ImgBurn")
             {
@@ -171,10 +182,17 @@ else if (state == State.Done && result is not null)
     private string? imgBurnPath;      // null = ImgBurn not found
     private bool engineLoaded;
     private bool deleteIso;           // move the ISO to the Recycle Bin after a verified burn
-    private bool useDirect;           // v4.0: ArchivSector-OD's own writer (BD-R/RE, DVD±R, DVD-RW and CD-R/RW so far; not saved)
+    private bool useDirect;           // v4.0: ArchivSector-OD's own writer (the default)
+    private BurnService.Writer preferred = BurnService.Writer.Own;   // what the user picked last (saved)
+    private string? engineNote;       // why the preferred program isn't the one picked for this disc
+    private string DirectLabel => DirectAvailable ? "(recommended: whole disc, progress shown here)" : "(doesn't write " + BlankMediaType + " discs yet)";
+    private string WholeDiscWriterName => DirectAvailable ? "ArchivSector-OD's own writer" : "ImgBurn";
+    private string SwitchingNote => "ArchivSector-OD's own writer couldn't start, so another program is taking over";
+    private string FallbackNote => "If the own writer can't start on this drive, " + BurnService.FallbackName() + " takes over automatically.";
+    private bool Switching => progress is not null && progress.Phase.StartsWith("Switching to");
     private bool DirectAvailable => BurnEngine.DirectWriteSupports(BlankMediaType);
     private string EngineName => useDirect ? "ArchivSector-OD's own writer" : useImgBurn ? "ImgBurn" : "Windows";
-    private bool runningDirect;       // the burn running now uses our own writer on a disc where stopping is harmless (BD-RE)
+    private bool runningDirect;       // the burn running now uses our own writer on a disc where stopping is harmless (BD-RE, DVD+RW)
     private static bool healthCheck;  // health check after burning (remembered for this session)
     private DiscHealthService.Result? health;
 
@@ -227,35 +245,52 @@ else if (state == State.Done && result is not null)
         try { isoBytes = new FileInfo(isoPath).Length; } catch { isoBytes = 0; }
         if (!engineLoaded)
         {
-            // The last engine used, if it's still available.
             imgBurnPath = BurnService.ImgBurnPath();
-            var saved = ConfigService.Load();
-            // ImgBurn first when it's installed, unless Windows was chosen last time.
-            useImgBurn = imgBurnPath is not null &&
-                         !string.Equals(saved.BurnEngine, "Windows", StringComparison.OrdinalIgnoreCase);
-            deleteIso = saved.DeleteIsoAfterBurn;
+            preferred = BurnService.SavedWriter();
+            deleteIso = ConfigService.Load().DeleteIsoAfterBurn;
             engineLoaded = true;
         }
-        // An ISO that only fits with ImgBurn (Windows keeps part of a BD-R
-        // spare) gets ImgBurn picked for it. Not saved as a preference.
-        if (!useImgBurn && imgBurnPath is not null && TooBigForWindows && !TooBigForDisc) useImgBurn = true;
+        ApplyPreferred();
         state = State.Confirm;
         LogService.Write($"{DriveLetter}:", $"Burn: chose {isoPath} ({isoBytes:N0} bytes). Blank {BlankMediaType}: disc {DiscBytes:N0} bytes, Windows engine free {BlankFreeBytes:N0} bytes");
     }
 
-    private void SetDirect() { useDirect = true; }
-
-    private void SetEngine(bool imgBurn)
+    // The program the user prefers, if it can burn this disc; otherwise the
+    // next best (own writer → ImgBurn → Windows), with a note saying why.
+    private void ApplyPreferred()
     {
+        engineNote = null;
         useDirect = false;
-        useImgBurn = imgBurn && imgBurnPath is not null;
-        try
+        useImgBurn = false;
+        var want = preferred;
+        if (want == BurnService.Writer.ImgBurn && imgBurnPath is null) want = BurnService.Writer.Own;
+        if (want == BurnService.Writer.Own && !DirectAvailable)
         {
-            var config = ConfigService.Load();
-            config.BurnEngine = useImgBurn ? "ImgBurn" : "Windows";
-            ConfigService.Save(config);
+            want = imgBurnPath is not null ? BurnService.Writer.ImgBurn : BurnService.Writer.Windows;
+            var instead = imgBurnPath is not null ? "ImgBurn" : "Windows";
+            engineNote = "ArchivSector-OD's own writer doesn't write " + BlankMediaType + " discs yet, so " + instead + " is picked.";
         }
-        catch { }
+        useDirect = want == BurnService.Writer.Own;
+        useImgBurn = want == BurnService.Writer.ImgBurn;
+        // An ISO that only fits on the whole disc (Windows keeps part of a
+        // BD-R spare) gets a program that uses the whole disc. Not saved as
+        // a preference.
+        if (!useDirect && !useImgBurn && TooBigForWindows && !TooBigForDisc && (DirectAvailable || imgBurnPath is not null))
+        {
+            useDirect = DirectAvailable;
+            useImgBurn = !DirectAvailable;
+            engineNote = "Windows can't fit this ISO on the disc (it keeps part of it spare), so " + WholeDiscWriterName + " is picked.";
+        }
+    }
+
+    // A program picked on this screen is remembered for next time.
+    private void Pick(BurnService.Writer w)
+    {
+        engineNote = null;
+        useDirect = w == BurnService.Writer.Own && DirectAvailable;
+        useImgBurn = w == BurnService.Writer.ImgBurn && imgBurnPath is not null;
+        preferred = w;
+        BurnService.SaveWriter(w);
     }
 
     private void SetDeleteIso(bool on)
@@ -289,7 +324,13 @@ else if (state == State.Done && result is not null)
         bool delete = deleteIso && verify;
         string engineName = direct ? "ArchivSector-OD's own writer" : imgBurn ? "ImgBurn" : "Windows";
         LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {engineName} (verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");
-        var reporter = new Progress<BurnEngine.Progress>(p => InvokeAsync(() => { progress = p; StateHasChanged(); }));
+        var reporter = new Progress<BurnEngine.Progress>(p => InvokeAsync(() =>
+        {
+            progress = p;
+            // Our own writer handed over to another program: stopping that one isn't harmless.
+            if (p.Phase.StartsWith("Switching to")) runningDirect = false;
+            StateHasChanged();
+        }));
         BurnEngine.Result r;
         try
         {
@@ -323,7 +364,7 @@ else if (state == State.Done && result is not null)
     private void Cancel()
     {
         if (cts is null) return;
-        // Stopping our own writer on a BD-RE doesn't ruin the disc, so no warning is needed.
+        // Stopping our own writer on a BD-RE or DVD+RW doesn't ruin the disc, so no warning is needed.
         if (!runningDirect && progress?.Phase is not ("Verifying" or "Checking disc health" or "Waiting for the drive"))
         {
             var owner = System.Windows.Application.Current?.MainWindow;

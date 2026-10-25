@@ -5,8 +5,10 @@
 
 @*
     Burn queue (v4.0 week 2): several ISOs burned one after another on one
-    drive. For each ISO it waits for a blank disc, burns it (Windows or
-    ImgBurn, the same engine as everywhere else), verifies it, can run a
+    drive. For each ISO it waits for a blank disc, burns it (ArchivSector-
+    OD's own writer by default, or ImgBurn or Windows: the same choice as
+    everywhere else, remembered; a disc the own writer doesn't handle gets
+    ImgBurn, or Windows without it), verifies it, can run a
     disc health check on the fresh disc, then ejects it and asks for the
     next blank. The drive is marked busy for the whole queue, so the drive
     bays and the Burn tab's scan leave it alone.
@@ -63,20 +65,24 @@
                 </div>
                 <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center;">
                     <strong style="min-width: 80px;">Burn with</strong>
+                    <label style="display: flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer;"
+                           title="ArchivSector-OD writes the discs itself: CD-R/RW, DVD±R, DVD±RW, DVD+R DL, BD-R and BD-RE. Other discs, or a drive it can't open, go to @BurnService.FallbackName().">
+                        <input type="radio" name="queue-engine" checked="@useDirect" @onchange="() => Pick(BurnService.Writer.Own)" />
+                        ArchivSector-OD's own writer (recommended)
+                    </label>
                     <label style="display: flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: @(imgBurnPath is null ? "default" : "pointer"); opacity: @(imgBurnPath is null ? "0.6" : "1");">
-                        <input type="radio" name="queue-engine" checked="@(useImgBurn && !useDirect)" disabled="@(imgBurnPath is null)" @onchange="() => { useImgBurn = true; useDirect = false; }" />
+                        <input type="radio" name="queue-engine" checked="@(useImgBurn && !useDirect)" disabled="@(imgBurnPath is null)" @onchange="() => Pick(BurnService.Writer.ImgBurn)" />
                         ImgBurn @(imgBurnPath is null ? "(not installed)" : "(whole disc)")
                     </label>
                     <label style="display: flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer;">
-                        <input type="radio" name="queue-engine" checked="@(!useImgBurn && !useDirect)" @onchange="() => { useImgBurn = false; useDirect = false; }" />
+                        <input type="radio" name="queue-engine" checked="@(!useImgBurn && !useDirect)" @onchange="() => Pick(BurnService.Writer.Windows)" />
                         Windows (built in)
                     </label>
-                    <label style="display: flex; gap: 6px; align-items: center; color: var(--text-primary); cursor: pointer;"
-                           title="ArchivSector-OD writes the discs itself. New in v4.0: BD-R, BD-RE, DVD+R, DVD-R, DVD-RW and CD-R/CD-RW so far.">
-                        <input type="radio" name="queue-engine" checked="@useDirect" @onchange="() => useDirect = true" />
-                        ArchivSector-OD's own writer (new: BD-R/RE, DVD±R, DVD-RW, CD-R/RW)
-                    </label>
                 </div>
+                @if (useDirect)
+                {
+                    <span style="font-size: 12px; color: var(--text-secondary); margin: -4px 0 0 90px;">A disc the own writer doesn't handle, or a drive it can't open, is burned with @BurnService.FallbackName() instead.</span>
+                }
                 <label style="display: flex; gap: 8px; align-items: flex-start; color: var(--text-primary); cursor: pointer;">
                     <input type="checkbox" @bind="verify" style="margin-top: 3px;" />
                     <span><strong>Verify each disc</strong> (recommended)<br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the disc back and compares every byte with its ISO.</span></span>
@@ -155,7 +161,7 @@
     private string driveLetter = "";
     private string? imgBurnPath;
     private bool useImgBurn, verify = true, healthCheck, deleteIso, settingsLoaded;
-    private bool useDirect;     // v4.0: ArchivSector-OD's own writer (not saved while it's new)
+    private bool useDirect;     // v4.0: ArchivSector-OD's own writer (the default; remembered with the other choices)
 
     private bool running, stopAfterCurrent, disposed;
     private CancellationTokenSource? cts;
@@ -206,13 +212,23 @@
         {
             settingsLoaded = true;
             imgBurnPath = BurnService.ImgBurnPath();
-            var saved = ConfigService.Load();
-            useImgBurn = imgBurnPath is not null && !string.Equals(saved.BurnEngine, "Windows", StringComparison.OrdinalIgnoreCase);
-            deleteIso = saved.DeleteIsoAfterBurn;
+            var want = BurnService.SavedWriter();
+            if (want == BurnService.Writer.ImgBurn && imgBurnPath is null) want = BurnService.Writer.Own;
+            useDirect = want == BurnService.Writer.Own;
+            useImgBurn = want == BurnService.Writer.ImgBurn;
+            deleteIso = ConfigService.Load().DeleteIsoAfterBurn;
         }
         // Keep the chosen drive; pick the first one if none is chosen yet.
         if ((string.IsNullOrEmpty(driveLetter) || !Drives.Any(d => Letter(d) == driveLetter)) && Drives.Count > 0 && !running)
             driveLetter = Letter(Drives[0]);
+    }
+
+    // A program picked here is remembered (the same setting as the bays' burn screen).
+    private void Pick(BurnService.Writer w)
+    {
+        useDirect = w == BurnService.Writer.Own;
+        useImgBurn = w == BurnService.Writer.ImgBurn && imgBurnPath is not null;
+        BurnService.SaveWriter(w);
     }
 
     private void AddIsos()
@@ -283,9 +299,9 @@
         if (todo.Count == 0 || string.IsNullOrEmpty(driveLetter)) return;
         var letter = driveLetter;
         var model = Drives.FirstOrDefault(d => Letter(d) == letter) is { } dr ? (dr.Vendor + " " + dr.Model).Trim() : "";
-        bool direct = useDirect;
-        bool imgBurn = !direct && useImgBurn && imgBurnPath is not null;
-        string engineName = direct ? "ArchivSector-OD's own writer" : imgBurn ? "ImgBurn" : "Windows";
+        bool wantDirect = useDirect;
+        bool wantImgBurn = !wantDirect && useImgBurn && imgBurnPath is not null;
+        string engineName = wantDirect ? "ArchivSector-OD's own writer" : wantImgBurn ? "ImgBurn" : "Windows";
         bool doVerify = verify, doHealth = healthCheck, doDelete = deleteIso && verify;
 
         running = true;
@@ -325,15 +341,12 @@
                 }
                 if (blank is null) { it.State = ItemState.Waiting; break; }
 
-                // Our own writer doesn't write every kind of disc yet: stop
-                // (rather than skip every ISO on the same unsupported disc).
-                if (direct && !BurnEngine.DirectWriteSupports(blank.MediaType))
-                {
-                    it.State = ItemState.Waiting;
-                    summary = $"Stopped: ArchivSector-OD's own writer doesn't write {blank.MediaType} discs yet (BD-R, BD-RE, DVD+R, DVD-R, DVD-RW and CD-R/RW so far). Choose ImgBurn or Windows, or put in a supported disc.";
-                    LogService.Write($"{letter}:", "Burn queue: " + summary);
-                    break;
-                }
+                // This disc's program: our own writer doesn't write every kind
+                // of disc yet, so those go to ImgBurn (or Windows without it).
+                bool direct = wantDirect && BurnEngine.DirectWriteSupports(blank.MediaType);
+                bool imgBurn = wantImgBurn || (wantDirect && !direct && imgBurnPath is not null);
+                if (wantDirect && !direct)
+                    LogService.Write($"{letter}:", $"Burn queue: ArchivSector-OD's own writer doesn't write {blank.MediaType} discs yet; burning this one with {(imgBurn ? "ImgBurn" : "Windows")}");
 
                 bool wholeDisc = imgBurn || direct;
                 long limit = wholeDisc ? BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes)) : blank.FreeBytes;
