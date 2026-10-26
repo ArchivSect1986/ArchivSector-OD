@@ -68,6 +68,36 @@ else if (state == State.Confirm && isoPath is not null)
                 <span class="bay-subtitle" style="margin: 0; font-size: 12px;">@FallbackNote</span>
             }
         </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px;">
+            <span>Speed:</span>
+            @if (speedsLoading)
+            {
+                <span class="bay-subtitle" style="margin: 0;">checking what the drive offers…</span>
+            }
+            else if (speeds.Count > 1)
+            {
+                <select value="@SpeedKey(speedX)" @onchange="OnSpeedChanged" style="font-size: 13px;">
+                    <option value="0">Fastest (@speeds[0].Label)</option>
+                    @foreach (var sp in speeds.Skip(1))
+                    {
+                        <option value="@SpeedKey(sp.X)">@sp.Label</option>
+                    }
+                </select>
+                @if (speedX > 0 && !useDirect && !useImgBurn)
+                {
+                    <span class="bay-subtitle" style="margin: 0; font-size: 12px;">@WindowsSpeedNote</span>
+                }
+            }
+            else if (speeds.Count == 1)
+            {
+                <strong>@speeds[0].Label</strong>
+                <span class="bay-subtitle" style="margin: 0; font-size: 12px;">@OnlySpeedNote</span>
+            }
+            else
+            {
+                <span class="bay-subtitle" style="margin: 0;">@NoSpeedsNote</span>
+            }
+        </div>
         <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;">
             <input type="checkbox" checked="@verify" @onchange="e => verify = (bool)(e.Value ?? false)" />
             Verify after burning (reads the disc back and compares every byte, recommended)
@@ -189,6 +219,36 @@ else if (state == State.Done && result is not null)
     private string WholeDiscWriterName => DirectAvailable ? "ArchivSector-OD's own writer" : "ImgBurn";
     private string SwitchingNote => "ArchivSector-OD's own writer couldn't start, so another program is taking over";
     private string FallbackNote => "If the own writer can't start on this drive, " + BurnService.FallbackName() + " takes over automatically.";
+    // Write speed (v4.0 week 6): the speeds the drive offers for this disc,
+    // asked when an ISO is chosen. 0 = fastest. Not saved: it depends on the disc.
+    private List<BurnEngine.WriteSpeed> speeds = new();
+    private bool speedsLoading;
+    private double speedX;
+    private string OnlySpeedNote => "the only speed this drive offers for this disc";
+    private string NoSpeedsNote => "the fastest the drive allows (it didn't list its speeds)";
+    private string WindowsSpeedNote => "Windows' burning engine may ignore the speed and write at its own";
+    private static string SpeedKey(double x) => x.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private string SpeedLog => speedX > 0 ? BurnEngine.SpeedText(speedX) : "fastest";
+
+    private void OnSpeedChanged(ChangeEventArgs e)
+    {
+        speedX = double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x) ? x : 0;
+    }
+
+    private async Task LoadSpeeds()
+    {
+        speedsLoading = true;
+        speeds = new();
+        speedX = 0;
+        var letter = DriveLetter;
+        List<BurnEngine.WriteSpeed> found;
+        try { found = await Task.Run(() => BurnEngine.QueryWriteSpeeds(letter)); }
+        catch { found = new(); }
+        speeds = found;
+        speedsLoading = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
     private bool Switching => progress is not null && progress.Phase.StartsWith("Switching to");
     private bool DirectAvailable => BurnEngine.DirectWriteSupports(BlankMediaType);
     private string EngineName => useDirect ? "ArchivSector-OD's own writer" : useImgBurn ? "ImgBurn" : "Windows";
@@ -252,6 +312,7 @@ else if (state == State.Done && result is not null)
         }
         ApplyPreferred();
         state = State.Confirm;
+        _ = LoadSpeeds();
         LogService.Write($"{DriveLetter}:", $"Burn: chose {isoPath} ({isoBytes:N0} bytes). Blank {BlankMediaType}: disc {DiscBytes:N0} bytes, Windows engine free {BlankFreeBytes:N0} bytes");
     }
 
@@ -323,7 +384,8 @@ else if (state == State.Done && result is not null)
         bool imgBurn = useImgBurn && !direct;
         bool delete = deleteIso && verify;
         string engineName = direct ? "ArchivSector-OD's own writer" : imgBurn ? "ImgBurn" : "Windows";
-        LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {engineName} (verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");
+        double speed = speedX;
+        LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {engineName} (speed: {SpeedLog}, verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");
         var reporter = new Progress<BurnEngine.Progress>(p => InvokeAsync(() =>
         {
             progress = p;
@@ -334,7 +396,7 @@ else if (state == State.Done && result is not null)
         BurnEngine.Result r;
         try
         {
-            r = await BurnService.BurnAsync(DriveLetter, path, verify, title, DriveModel, reporter, cts.Token, imgBurn, delete, direct);
+            r = await BurnService.BurnAsync(DriveLetter, path, verify, title, DriveModel, reporter, cts.Token, imgBurn, delete, direct, speed);
         }
         catch (Exception ex)
         {

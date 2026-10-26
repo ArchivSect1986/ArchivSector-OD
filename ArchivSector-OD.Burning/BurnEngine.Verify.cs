@@ -58,6 +58,7 @@ namespace ArchivSector_OD.Burning
             using var drive = ScsiDrive.Open(letter, out var problem);
             if (drive is null) { r.Message = problem ?? "The drive couldn't be opened."; return; }
             if (!WaitReady(drive, ct, TimeSpan.FromSeconds(30))) { r.Message = "There's no readable disc in the drive."; return; }
+            FullDriveSpeed(drive);   // read at full speed, even if a slower one was set when burning
 
             // How much is on the disc?
             var cap = new byte[8];

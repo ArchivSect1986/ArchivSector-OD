@@ -55,7 +55,7 @@ namespace ArchivSector_OD.Burning
         /// result as BurnAsync, so the screens treat it alike.
         /// </summary>
         public static Task<Result> BurnDirectAsync(string driveLetter, string isoPath, bool verify,
-            IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null)
+            IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, double speedX = 0)
         {
             var letter = Norm(driveLetter);
             if (!Busy.TryAdd(letter, true))
@@ -66,7 +66,7 @@ namespace ArchivSector_OD.Burning
                 var r = new Result();
                 try
                 {
-                    DirectBurn(letter, isoPath, verify, progress, ct, r, log);
+                    DirectBurn(letter, isoPath, verify, progress, ct, r, log, speedX);
                 }
                 catch (Exception ex)
                 {
@@ -83,7 +83,7 @@ namespace ArchivSector_OD.Burning
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        private static void DirectBurn(string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log)
+        private static void DirectBurn(string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, double speedX = 0)
         {
             var iso = new FileInfo(isoPath);
             if (!iso.Exists) { r.Message = "The ISO file isn't there any more."; return; }
@@ -161,6 +161,9 @@ namespace ArchivSector_OD.Burning
                     startLba = 0;
                 }
 
+                // The speed asked for (0 = the fastest the drive offers, set above).
+                SetDirectWriteSpeed(drive, profile, speedX, startLba + isoSectors + padSectors - 1, log);
+
                 // 4. Write.
                 r.DiscUntouched = false;
                 var clock = Stopwatch.StartNew();
@@ -208,6 +211,7 @@ namespace ArchivSector_OD.Burning
 
                 r.BurnTime = clock.Elapsed;
                 r.Burned = true;
+                RestoreDriveSpeed(drive, profile, speedX);   // the verify reads at full speed
                 log?.Invoke($"Direct write: {isoSectors:N0} sectors written to the {discName} in {r.BurnTime:hh\\:mm\\:ss} (average {Fmt((long)(iso.Length / Math.Max(1, r.BurnTime.TotalSeconds)))}/s)");
 
                 // 7. Verify: read every sector back straight from the disc
@@ -230,6 +234,7 @@ namespace ArchivSector_OD.Burning
             }
             finally
             {
+                RestoreDriveSpeed(drive, profile, speedX);
                 drive.Command(new byte[] { 0x1E, 0, 0, 0, 0, 0 }, 10);   // ALLOW MEDIUM REMOVAL
                 drive.Unlock();
             }

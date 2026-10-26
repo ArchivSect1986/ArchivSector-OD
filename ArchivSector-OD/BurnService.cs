@@ -63,7 +63,7 @@ namespace ArchivSector_OD
 
         public static async Task<BurnEngine.Result> BurnAsync(string driveLetter, string isoPath, bool verify, string discTitle, string driveModel,
             IProgress<BurnEngine.Progress>? progress, CancellationToken ct, bool useImgBurn = false, bool deleteIsoAfter = false,
-            bool direct = false)
+            bool direct = false, double speedX = 0)
         {
             var letter = driveLetter.TrimEnd(':', '\\').ToUpperInvariant();
             string? imgBurn = null;
@@ -80,9 +80,9 @@ namespace ArchivSector_OD
             {
                 // v4.0: ArchivSector-OD's own writer.
                 r = direct
-                    ? await BurnEngine.BurnDirectAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line))
+                    ? await BurnEngine.BurnDirectAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line), speedX)
                     : await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, imgBurn,
-                        line => LogService.Write($"{letter}:", line));
+                        line => LogService.Write($"{letter}:", line), speedX);
 
                 // Our own writer couldn't start (the drive couldn't be opened,
                 // the disc isn't one it handles, ...) and nothing on the disc
@@ -95,7 +95,7 @@ namespace ArchivSector_OD
                     LogService.Write($"{letter}:", $"Burn: ArchivSector-OD's own writer couldn't start ({why}); burning with {name} instead");
                     progress?.Report(new BurnEngine.Progress { Phase = "Switching to " + name, Percent = -1 });
                     r = await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, fallback,
-                        line => LogService.Write($"{letter}:", line));
+                        line => LogService.Write($"{letter}:", line), speedX);
                     r.Message = $"ArchivSector-OD's own writer couldn't start ({why}), so {name} burned this disc instead. " + r.Message;
                     direct = false;
                 }

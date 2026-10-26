@@ -245,7 +245,7 @@ namespace ArchivSector_OD.Burning
         /// A drive that's already burning is refused.
         /// </summary>
         public static Task<Result> BurnAsync(string driveLetter, string isoPath, bool verify,
-            IProgress<Progress>? progress, CancellationToken ct, string? imgBurnPath = null, Action<string>? log = null)
+            IProgress<Progress>? progress, CancellationToken ct, string? imgBurnPath = null, Action<string>? log = null, double speedX = 0)
         {
             // Marked busy right away (before the task starts), so the bay
             // polling stops asking the drive anything before the burn begins.
@@ -260,8 +260,8 @@ namespace ArchivSector_OD.Burning
                 try
                 {
                     var burnClock = Stopwatch.StartNew();
-                    if (useImgBurn) BurnWithImgBurn(imgBurnPath!, letter, isoPath, verify, progress, ct, r, log);
-                    else RunSta(() => Burn(letter, isoPath, progress, ct, r));
+                    if (useImgBurn) BurnWithImgBurn(imgBurnPath!, letter, isoPath, verify, progress, ct, r, log, speedX);
+                    else RunSta(() => Burn(letter, isoPath, progress, ct, r, speedX));
                     r.BurnTime = burnClock.Elapsed;
 
                     if (useImgBurn)
@@ -305,7 +305,7 @@ namespace ArchivSector_OD.Burning
             }, ct, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        private static void Burn(string letter, string isoPath, IProgress<Progress>? progress, CancellationToken ct, Result r)
+        private static void Burn(string letter, string isoPath, IProgress<Progress>? progress, CancellationToken ct, Result r, double speedX = 0)
         {
             long isoBytes = new FileInfo(isoPath).Length;
             if (isoBytes == 0 || isoBytes % Sector != 0)
@@ -328,6 +328,7 @@ namespace ArchivSector_OD.Burning
 
                 fmt.ClientName = "ArchivSector-OD";
                 fmt.ForceMediaToBeClosed = true;
+                SetImapiWriteSpeed(fmt, speedX);   // 0 = fastest (Windows may ignore it)
 
                 SHCreateStreamOnFileEx(isoPath, 0x00000000 /* STGM_READ */ | 0x00000020 /* STGM_SHARE_DENY_WRITE */, 0, false, null, out IStream stream);
 
@@ -415,7 +416,7 @@ namespace ArchivSector_OD.Burning
         // progress there). When Verify is ticked, ImgBurn verifies too (it
         // also compares every sector with the ISO), and its result is read
         // from its log -- so the disc isn't read through twice.
-        private static void BurnWithImgBurn(string exe, string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? logLine)
+        private static void BurnWithImgBurn(string exe, string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? logLine, double speedX = 0)
         {
             if (!File.Exists(exe))
             {
@@ -460,6 +461,7 @@ namespace ArchivSector_OD.Burning
                 "/EJECT", "NO",
                 "/DELETEIMAGE", "NO",   // the app deletes it instead, and only after a verified burn
                 "/LOG", logPath,
+                "/SPEED", speedX > 0 ? SpeedText(speedX) : "MAX",
                 "/START", "/CLOSESUCCESS", "/NOSAVESETTINGS", "/NOIMAGEDETAILS",
             })
                 psi.ArgumentList.Add(arg);

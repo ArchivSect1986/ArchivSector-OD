@@ -83,6 +83,15 @@
                 {
                     <span style="font-size: 12px; color: var(--text-secondary); margin: -4px 0 0 90px;">A disc the own writer doesn't handle, or a drive it can't open, is burned with @BurnService.FallbackName() instead.</span>
                 }
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <strong style="min-width: 80px;">Speed</strong>
+                    <select class="settings-input" @bind="speedChoice" style="font-size: 13px;">
+                        <option value="Fastest" style="background: var(--bg-panel-alt); color: var(--text-primary);">Fastest</option>
+                        <option value="Middle" style="background: var(--bg-panel-alt); color: var(--text-primary);">Middle</option>
+                        <option value="Slowest" style="background: var(--bg-panel-alt); color: var(--text-primary);">Slowest</option>
+                    </select>
+                    <span style="font-size: 12px; color: var(--text-secondary);">@SpeedHelp</span>
+                </div>
                 <label style="display: flex; gap: 8px; align-items: flex-start; color: var(--text-primary); cursor: pointer;">
                     <input type="checkbox" @bind="verify" style="margin-top: 3px;" />
                     <span><strong>Verify each disc</strong> (recommended)<br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the disc back and compares every byte with its ISO.</span></span>
@@ -162,6 +171,12 @@
     private string? imgBurnPath;
     private bool useImgBurn, verify = true, healthCheck, deleteIso, settingsLoaded;
     private bool useDirect;     // v4.0: ArchivSector-OD's own writer (the default; remembered with the other choices)
+    // v4.0 week 6: write speed, picked for each disc from the speeds the
+    // drive offers for it (discs differ, so not one fixed speed).
+    private string speedChoice = "Fastest";
+    private string SpeedHelp => speedChoice == "Fastest"
+        ? "The fastest the drive offers for each disc."
+        : "Picked for each disc from the speeds the drive offers for it. A disc with only one speed uses that.";
 
     private bool running, stopAfterCurrent, disposed;
     private CancellationTokenSource? cts;
@@ -312,7 +327,8 @@
         var ct = cts.Token;
         // The whole queue owns the drive: the bays and the Burn tab's scan leave it alone.
         RipActivity.Set(letter, "queue", true);
-        LogService.Write($"{letter}:", $"Burn queue started: {total} ISO(s), {engineName}, verify {(doVerify ? "on" : "off")}, health check {(doHealth ? "on" : "off")}");
+        string speedPick = speedChoice;
+        LogService.Write($"{letter}:", $"Burn queue started: {total} ISO(s), {engineName}, speed {speedPick.ToLowerInvariant()}, verify {(doVerify ? "on" : "off")}, health check {(doHealth ? "on" : "off")}");
         int ok = 0, failed = 0, skipped = 0;
         bool userStopped = false;
 
@@ -360,6 +376,10 @@
                     continue;   // the blank disc stays in for the next ISO
                 }
 
+                // This disc's speed (0 = fastest).
+                double speedX = speedPick == "Fastest" ? 0 : await Task.Run(() => BurnEngine.PickSpeed(letter, speedPick));
+                if (speedX > 0) LogService.Write($"{letter}:", $"Burn queue: {speedPick.ToLowerInvariant()} speed for this {blank.MediaType} is {BurnEngine.SpeedText(speedX)}");
+
                 // 2. Burn (and verify).
                 phaseIndex = 0;
                 phaseCount = 1 + (doVerify && !imgBurn ? 1 : 0) + (doHealth ? 1 : 0);
@@ -373,7 +393,7 @@
                     stepPercent = p.Percent;
                     Ui();
                 });
-                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete, direct);
+                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete, direct, speedX);
                 stepPercent = -1;
                 LogService.Write($"{letter}:", "Burn queue: " + it.Path + " — " + r.Message);
 
