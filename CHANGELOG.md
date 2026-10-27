@@ -4,6 +4,51 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v4.0.0-beta1 - 2026-10-27 (pre-release)
+
+A test version of v4.0. Everything below is new since v3.4. Please report anything odd (see **Reporting a problem** at the end).
+
+### ✨ Added
+* **🔥 A new Burn tab**, with every disc recorder, the disc in each one, and five modes:
+  * **Write:** burn ISOs, one at a time or as a queue.
+  * **Build ISO:** make an ISO from a folder. It suggests the smallest disc that fits and pads the ISO to fill it exactly, and files of 2 GB or more are handled automatically.
+  * **Read disc:** copy a data disc to an ISO (movie discs and music CDs are left to the drive bays).
+  * **Verify disc:** compare a disc with its ISO, sector by sector, for discs burned earlier or by another program.
+  * **Drive info:** everything the drive says about itself and the disc in it: what it can write, the disc's maker code and **who made it**, its write speeds, its exact size. **📋 Copy report** puts it on the clipboard.
+* **ArchivSector-OD's own writer.** The app now talks to the drive itself instead of going through Windows or ImgBurn, and uses the whole disc. It writes **CD-R, CD-RW, DVD+R, DVD+R DL, DVD+RW, DVD-R, DVD-RW, BD-R and BD-RE**, and it's the default. If it can't burn a disc (a type it doesn't write yet, or a drive it can't open), **ImgBurn takes over automatically**, or Windows without ImgBurn. You can still pick ImgBurn or Windows yourself, and your choice is remembered. Stopping a burn on a BD-RE or DVD+RW is harmless: the disc can simply be written again.
+* **Write speed choice:** the burn screen lists the speeds your drive offers for the disc in it, with **Fastest** as the default. The burn queue offers Fastest, Middle or Slowest, picked for each disc.
+* **📚 Burn queue:** several ISOs burned one after another on one drive. After each disc it's verified, can get a disc health check, is ejected, and the next one starts when you put in a blank. Stop after the current disc, or stop now.
+* **Disc health check after burning** (optional), on the burn screen and in the queue.
+* **🧽 Erase** for CD-RW and DVD-RW (quick or full). BD-RE and DVD+RW don't need erasing: they're written over.
+* **Drive cards look after themselves:** the ⏏ Eject / Close button follows the real tray, even when it's opened with the drive's own button or pushed shut by hand, and the card re-reads the disc by itself. The cards also show the disc's maker and write speeds.
+* **TargetFill: 💿 Use the blank disc in drive…** measures the exact size of the blank disc in a drive and fills to it.
+* **🎨 Themes:** eleven themes (Midnight, Nova, Console, Studio Light, Rack, Library, Swiss, Power Table, Neon, Catalog and Big Tiles), each with its own colours, fonts and corners. Plus **holiday themes** that come on by themselves for their week: 🎃 Halloween, Remembrance Day, 🎄 Christmas, 🍁 Canada Day and Independence Day. Pick your usual theme during that week and it stays; untick **Switch to holiday themes automatically** to turn them off.
+* **A tidier top bar:** the tabs, the Unattended switch, and small icon buttons for History, ISO Verifier, Theme and Settings. Create Desktop Shortcut has moved to Settings.
+
+### 🔧 Changed
+* **Clearer messages when a disc fails while burning:** what happened in plain words, and what to try (another disc, a slower speed, or another drive).
+* **Movie artwork (TMDB):** a film whose title matches exactly now comes first, ahead of sequels and spin-offs ("Jumanji" finds *Jumanji*, not *Jumanji: Open World*).
+* **TargetFill's CD-R size** is now 736,960,512 bytes (359,844 sectors), what a blank 80-minute CD-R really holds. It was 5 sectors too big.
+
+### 🐛 Fixed
+* **Dark, hard-to-read text** in some places on the dark themes.
+* **An erased BD-RE still showed "Has data"**, and a BD-RE showed the smaller Windows size instead of the whole disc.
+* **A finished (closed) CD-RW or DVD-RW showed as "Not writable"** and couldn't be erased.
+
+### ⚠ Known issues
+* **CD-RW written over several times** may fail its verify in some drives (seen on old stock Verbatim High Speed CD-RW: first burns verify, rewrites can fail near the outer edge, with ImgBurn too). Try the disc in another drive, and use CD-R for anything important.
+* **Dual-layer DVD-R DL and BD-R DL** aren't written by the own writer yet: ImgBurn takes over for those.
+* **A DVD-RW in "overwrite" mode** needs a full erase before the own writer can burn it.
+* The own writer has been tested on an **ASUS BW-16D1HT**. Other drives should work the same way, and that's exactly what this beta is for.
+
+### Reporting a problem
+Open an issue on GitHub (there's a bug report form) and include:
+* your **drive model and firmware**: **Burn → Drive info → 📋 Copy report** gives you both, plus the disc's details;
+* the **disc type and brand**;
+* the **log** for that day, from `%AppData%\ArchivSector-OD\Logs`.
+
+---
+
 ## v3.4 - 2026-10-17
 
 ### ✨ Added
