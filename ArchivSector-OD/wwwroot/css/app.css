@@ -8,34 +8,45 @@
    no JS interop is needed for this first draft.
    ============================================================ */
 
+/* v4.0 week 6: ten themes, one per look on the "ArchivSector-OD v4.0
+   look" design canvas (A-J). Colours, fonts and corners only: the
+   layouts on that canvas are for later. Fonts are ones that come with
+   Windows (Segoe UI, Bahnschrift, Georgia, Arial, Franklin Gothic,
+   Consolas, Courier New), so nothing is downloaded and every theme works
+   offline. "daylight" keeps its id so a saved choice carries over, and
+   Nova from v3 stays as an eleventh. */
+
+/* A · Midnight: deep navy with a sky-blue accent (Nova is the teal one). */
 [data-theme="midnight"] {
-    --bg-root: #0b1120;
-    --bg-panel: #141b2d;
-    --bg-panel-alt: #1b2438;
-    --border: #2a3550;
+    --bg-root: #0a1022;
+    --bg-panel: #121a30;
+    --bg-panel-alt: #19233d;
+    --border: #283456;
     --text-primary: #e5e9f5;
-    --text-secondary: #a3abbf;
-    --text-muted: #8089a0;
-    --accent: #22d3ee;
-    --accent-hover: #5fe3f7;
+    --text-secondary: #a7b0c6;
+    --text-muted: #8c96b0;
+    --accent: #38bdf8;
+    --accent-hover: #7dd3fc;
     --success: #10b981;
     --success-hover: #34d399;
-    --neutral: #3b4560;
-    --neutral-hover: #4b5680;
+    --neutral: #33405f;
+    --neutral-hover: #435178;
     --danger: #ef4444;
     --danger-hover: #f87171;
     --amber: #f59e0b;
-    --on-accent: #04161c;       /* text on an accent-coloured button */
+    --on-accent: #03121c;       /* text on an accent-coloured button */
     --on-success: #042114;
-    --on-danger: #ffffff;
+    --on-danger: #1f0505;
     --on-amber: #1a1200;
     --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;   /* headings and the app name */
     --font-mono: Consolas, "Cascadia Mono", monospace;
     --radius: 10px;
     --radius-sm: 6px;
     color-scheme: dark;
 }
 
+/* Nova: like Midnight, a shade darker with a teal accent (from v3). */
 [data-theme="nova"] {
     --bg-root: #070d1a;
     --bg-panel: #0f1729;
@@ -43,53 +54,450 @@
     --border: #243255;
     --text-primary: #eef2fb;
     --text-secondary: #a8b3d2;
-    --text-muted: #7f8bb3;
+    --text-muted: #8590b8;
     --accent: #2dd4bf;
     --accent-hover: #5eead4;
     --success: #22c55e;
     --success-hover: #4ade80;
     --neutral: #33415f;
     --neutral-hover: #40507a;
-    --danger: #dc2626;
-    --danger-hover: #ef4444;
+    --danger: #f05252;
+    --danger-hover: #f87171;
     --amber: #fbbf24;
     --on-accent: #03201c;       /* text on an accent-coloured button */
     --on-success: #042114;
-    --on-danger: #ffffff;
+    --on-danger: #1f0505;
     --on-amber: #1a1200;
     --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: "Segoe UI", system-ui, sans-serif;   /* headings and the app name */
     --font-mono: Consolas, "Cascadia Mono", monospace;
     --radius: 10px;
     --radius-sm: 6px;
     color-scheme: dark;
 }
 
+/* B · Console: graphite with an amber accent. */
+[data-theme="console"] {
+    --bg-root: #0c0e11;
+    --bg-panel: #15181d;
+    --bg-panel-alt: #1c2026;
+    --border: #2e333b;
+    --text-primary: #ecedef;
+    --text-secondary: #c7cbd2;
+    --text-muted: #9ba1ab;
+    --accent: #f5a524;
+    --accent-hover: #ffc35c;
+    --success: #34d399;
+    --success-hover: #6ee7b7;
+    --neutral: #2e333b;
+    --neutral-hover: #3b414b;
+    --danger: #ef4444;
+    --danger-hover: #f87171;
+    --amber: #fcd34d;
+    --on-accent: #1d1404;       /* text on an accent-coloured button */
+    --on-success: #042114;
+    --on-danger: #1f0505;
+    --on-amber: #1a1200;
+    --font-body: Bahnschrift, "Segoe UI", sans-serif;
+    --font-display: "Bahnschrift SemiBold", Bahnschrift, "Segoe UI", sans-serif;   /* headings and the app name */
+    --font-mono: "Cascadia Mono", Consolas, monospace;
+    --radius: 12px;
+    --radius-sm: 8px;
+    color-scheme: dark;
+}
+
+/* C · Studio Light: warm white, cobalt accent. */
 [data-theme="daylight"] {
-    --bg-root: #d8dce6;
-    --bg-panel: #eef0f5;
-    --bg-panel-alt: #dde1ea;
-    --border: #b7c0d1;
-    --text-primary: #141a2e;
-    --text-secondary: #3d465e;
-    --text-muted: #5c6680;
-    --accent: #0891b2;
-    --accent-hover: #0aa5c2;
-    --success: #16a34a;
-    --success-hover: #22c55e;
-    --neutral: #64748b;
-    --neutral-hover: #475569;
-    --danger: #dc2626;
-    --danger-hover: #ef4444;
-    --amber: #b45309;
+    --bg-root: #f2f3ef;
+    --bg-panel: #ffffff;
+    --bg-panel-alt: #eceee8;
+    --border: #d3d7cf;
+    --text-primary: #16181c;
+    --text-secondary: #40454d;
+    --text-muted: #5a6069;
+    --accent: #1f43b8;
+    --accent-hover: #16348f;
+    --success: #1d7a4a;
+    --success-hover: #22915a;
+    --neutral: #e3e5df;
+    --neutral-hover: #d3d6ce;
+    --danger: #a3201f;
+    --danger-hover: #c42b2a;
+    --amber: #b4500f;
+    --on-accent: #ffffff;       /* text on an accent-coloured button */
+    --on-success: #ffffff;
+    --on-danger: #ffffff;
+    --on-amber: #ffffff;
+    --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    --font-display: "Segoe UI Variable Display", "Segoe UI", sans-serif;   /* headings and the app name */
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 16px;
+    --radius-sm: 10px;
+    color-scheme: light;
+}
+
+/* D · Rack: matte hardware grey, LED green. */
+[data-theme="rack"] {
+    --bg-root: #18191b;
+    --bg-panel: #1f2023;
+    --bg-panel-alt: #2a2b2e;
+    --border: #3a3c40;
+    --text-primary: #e9eaec;
+    --text-secondary: #c3c6cc;
+    --text-muted: #a3a6ad;
+    --accent: #7dff9b;
+    --accent-hover: #b5ffc6;
+    --success: #2dd4bf;
+    --success-hover: #5eead4;
+    --neutral: #3a3c40;
+    --neutral-hover: #4a4d52;
+    --danger: #f87171;
+    --danger-hover: #fca5a5;
+    --amber: #fbbf24;
+    --on-accent: #0b1a0f;       /* text on an accent-coloured button */
+    --on-success: #0b1a0f;
+    --on-danger: #1f0707;
+    --on-amber: #1a1200;
+    --font-body: Bahnschrift, "Segoe UI", sans-serif;
+    --font-display: "Bahnschrift SemiBold Condensed", "Bahnschrift Condensed", Bahnschrift, sans-serif;   /* headings and the app name */
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 6px;
+    --radius-sm: 4px;
+    color-scheme: dark;
+}
+
+/* E · Library: dark walnut, warm gold, serif headings. */
+[data-theme="library"] {
+    --bg-root: #161412;
+    --bg-panel: #201d1a;
+    --bg-panel-alt: #2a2622;
+    --border: #3d362f;
+    --text-primary: #efe9e1;
+    --text-secondary: #d6cec3;
+    --text-muted: #b8ad9f;
+    --accent: #e9b872;
+    --accent-hover: #f5d39f;
+    --success: #8cc79a;
+    --success-hover: #b0dbb9;
+    --neutral: #3d362f;
+    --neutral-hover: #4d443b;
+    --danger: #e57373;
+    --danger-hover: #f2b8b8;
+    --amber: #f0a35e;
+    --on-accent: #231a0c;       /* text on an accent-coloured button */
+    --on-success: #0f2214;
+    --on-danger: #200909;
+    --on-amber: #231a0c;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: Georgia, "Times New Roman", serif;   /* headings and the app name */
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 18px;
+    --radius-sm: 10px;
+    color-scheme: dark;
+}
+
+/* F · Swiss: white paper, black buttons, signal red for warnings. */
+[data-theme="swiss"] {
+    --bg-root: #ffffff;
+    --bg-panel: #ffffff;
+    --bg-panel-alt: #efefef;
+    --border: #111111;
+    --text-primary: #111111;
+    --text-secondary: #333333;
+    --text-muted: #555555;
+    --accent: #111111;
+    --accent-hover: #3a3a3a;
+    --success: #0a7d32;
+    --success-hover: #0c9a3e;
+    --neutral: #e6e6e6;
+    --neutral-hover: #cccccc;
+    --danger: #d40000;
+    --danger-hover: #a80000;
+    --amber: #8a5200;
+    --on-accent: #ffffff;       /* text on an accent-coloured button */
+    --on-success: #ffffff;
+    --on-danger: #ffffff;
+    --on-amber: #ffffff;
+    --font-body: Arial, "Helvetica Neue", sans-serif;
+    --font-display: "Arial Black", Arial, sans-serif;   /* headings and the app name */
+    --font-mono: Consolas, "Courier New", monospace;
+    --radius: 0px;
+    --radius-sm: 0px;
+    color-scheme: light;
+}
+
+/* G · Power Table: cool grey and IBM blue, tight corners. */
+[data-theme="table"] {
+    --bg-root: #f4f4f4;
+    --bg-panel: #ffffff;
+    --bg-panel-alt: #e8e8e8;
+    --border: #c6c6c6;
+    --text-primary: #161616;
+    --text-secondary: #393939;
+    --text-muted: #525252;
+    --accent: #0f62fe;
+    --accent-hover: #0043ce;
+    --success: #0e6027;
+    --success-hover: #198038;
+    --neutral: #e0e0e0;
+    --neutral-hover: #c6c6c6;
+    --danger: #a2191f;
+    --danger-hover: #da1e28;
+    --amber: #684e00;
     --on-accent: #ffffff;       /* text on an accent-coloured button */
     --on-success: #ffffff;
     --on-danger: #ffffff;
     --on-amber: #ffffff;
     --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Semibold", "Segoe UI", sans-serif;   /* headings and the app name */
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 4px;
+    --radius-sm: 2px;
+    color-scheme: light;
+}
+
+/* H · Neon: deep violet with cyan and magenta glow. */
+[data-theme="neon"] {
+    --bg-root: #100820;
+    --bg-panel: #1a0f33;
+    --bg-panel-alt: #23154a;
+    --border: #3a2a6b;
+    --text-primary: #f1eaff;
+    --text-secondary: #cfc2ec;
+    --text-muted: #a99bd0;
+    --accent: #3df5ff;
+    --accent-hover: #a6fbff;
+    --success: #7dffb0;
+    --success-hover: #b0ffd0;
+    --neutral: #2e1f5c;
+    --neutral-hover: #3d2a78;
+    --danger: #ff4fc3;
+    --danger-hover: #ff8ad8;
+    --amber: #ffd166;
+    --on-accent: #071a22;       /* text on an accent-coloured button */
+    --on-success: #06210f;
+    --on-danger: #22041a;
+    --on-amber: #1f1400;
+    --font-body: Bahnschrift, "Segoe UI", sans-serif;
+    --font-display: "Bahnschrift SemiBold", Bahnschrift, sans-serif;   /* headings and the app name */
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 8px;
+    --radius-sm: 6px;
+    color-scheme: dark;
+}
+
+/* I · Catalog: archive-card paper, ink blue, typewriter numbers. */
+[data-theme="catalog"] {
+    --bg-root: #dfe0d8;
+    --bg-panel: #f7f6f0;
+    --bg-panel-alt: #ecebe3;
+    --border: #b9bbae;
+    --text-primary: #23261f;
+    --text-secondary: #3d4137;
+    --text-muted: #575b4f;
+    --accent: #2f5d8a;
+    --accent-hover: #24496d;
+    --success: #2e6b3a;
+    --success-hover: #3a8549;
+    --neutral: #d6d7cd;
+    --neutral-hover: #c4c6b9;
+    --danger: #9a2a1f;
+    --danger-hover: #b3261e;
+    --amber: #7f5300;
+    --on-accent: #f7f6f0;       /* text on an accent-coloured button */
+    --on-success: #ffffff;
+    --on-danger: #ffffff;
+    --on-amber: #ffffff;
+    --font-body: "Franklin Gothic Book", "Segoe UI", sans-serif;
+    --font-display: "Franklin Gothic Medium", "Segoe UI", sans-serif;   /* headings and the app name */
+    --font-mono: "Courier New", Courier, monospace;
+    --radius: 4px;
+    --radius-sm: 3px;
+    color-scheme: light;
+}
+
+/* J · Big Tiles: black and bold yellow, high contrast. */
+[data-theme="kiosk"] {
+    --bg-root: #000000;
+    --bg-panel: #1c1c1c;
+    --bg-panel-alt: #2a2a2a;
+    --border: #3d3d3d;
+    --text-primary: #ffffff;
+    --text-secondary: #d4d4d4;
+    --text-muted: #a8a8a8;
+    --accent: #ffd60a;
+    --accent-hover: #ffe866;
+    --success: #4ade80;
+    --success-hover: #86efac;
+    --neutral: #333333;
+    --neutral-hover: #4a4a4a;
+    --danger: #ff453a;
+    --danger-hover: #ff6961;
+    --amber: #ff9f0a;
+    --on-accent: #000000;       /* text on an accent-coloured button */
+    --on-success: #000000;
+    --on-danger: #000000;
+    --on-amber: #000000;
+    --font-body: Bahnschrift, "Segoe UI", sans-serif;
+    --font-display: "Bahnschrift SemiBold Condensed", "Bahnschrift Condensed", Bahnschrift, sans-serif;   /* headings and the app name */
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 18px;
+    --radius-sm: 12px;
+    color-scheme: dark;
+}
+
+/* Seasonal themes (v4.0): offered in the 🎨 menu only around their date
+   (AppShell.razor holds the dates). Once the week is over, anyone using
+   one goes back to their everyday theme. */
+
+/* Halloween (Oct 25 - Nov 1): pumpkin orange, slime green, haunted purple. */
+[data-theme="halloween"] {
+    --bg-root: #120a05;
+    --bg-panel: #1c120b;
+    --bg-panel-alt: #26180e;
+    --border: #3d2a1c;
+    --text-primary: #f6ece2;
+    --text-secondary: #d9c6b4;
+    --text-muted: #b39c87;
+    --accent: #ff7a1a;
+    --accent-hover: #ff9a4d;
+    --success: #8bd450;
+    --success-hover: #a8e27a;
+    --neutral: #3b2350;
+    --neutral-hover: #4c2d68;
+    --danger: #e85068;
+    --danger-hover: #ec6a7d;
+    --amber: #ffc94d;
+    --on-accent: #1f0d00;
+    --on-success: #0e1f05;
+    --on-danger: #1f0508;
+    --on-amber: #1f1400;
+    --font-body: Bahnschrift, "Segoe UI", system-ui, sans-serif;
+    --font-display: "Bahnschrift SemiBold Condensed", "Bahnschrift Condensed", Bahnschrift, sans-serif;
     --font-mono: Consolas, "Cascadia Mono", monospace;
     --radius: 10px;
     --radius-sm: 6px;
+    color-scheme: dark;
+}
+
+/* Remembrance Day (Nov 5 - 11): poppy red on charcoal, serif headings. */
+[data-theme="remembrance"] {
+    --bg-root: #111111;
+    --bg-panel: #1a1a1a;
+    --bg-panel-alt: #242424;
+    --border: #383838;
+    --text-primary: #f2f2f2;
+    --text-secondary: #cfcfcf;
+    --text-muted: #a6a6a6;
+    --accent: #ef5058;
+    --accent-hover: #f6777d;
+    --success: #6fbf73;
+    --success-hover: #8fd093;
+    --neutral: #333333;
+    --neutral-hover: #444444;
+    --danger: #ff8a65;
+    --danger-hover: #ffab91;
+    --amber: #e8b04a;
+    --on-accent: #1a0204;
+    --on-success: #06200a;
+    --on-danger: #200a04;
+    --on-amber: #1f1400;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: Georgia, "Times New Roman", serif;
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 8px;
+    --radius-sm: 5px;
+    color-scheme: dark;
+}
+
+/* Christmas (Dec 19 - 26): pine green, berry red, gold. */
+[data-theme="christmas"] {
+    --bg-root: #0d1f16;
+    --bg-panel: #13291e;
+    --bg-panel-alt: #1a3527;
+    --border: #2c4d3b;
+    --text-primary: #f3f7f2;
+    --text-secondary: #cfdccf;
+    --text-muted: #a3b8a6;
+    --accent: #f25757;
+    --accent-hover: #f77b7b;
+    --success: #7ed99a;
+    --success-hover: #a3e6b8;
+    --neutral: #24402f;
+    --neutral-hover: #2f523d;
+    --danger: #ff8a8a;
+    --danger-hover: #ffadad;
+    --amber: #f2c94c;
+    --on-accent: #1f0505;
+    --on-success: #06210f;
+    --on-danger: #200606;
+    --on-amber: #1f1400;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: Georgia, "Times New Roman", serif;
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 12px;
+    --radius-sm: 8px;
+    color-scheme: dark;
+}
+
+/* Canada Day (Jun 25 - Jul 1): maple red on white. */
+[data-theme="canada"] {
+    --bg-root: #fbf4f4;
+    --bg-panel: #ffffff;
+    --bg-panel-alt: #f6eded;
+    --border: #e3cfcf;
+    --text-primary: #1a1212;
+    --text-secondary: #4a3a3a;
+    --text-muted: #6b5656;
+    --accent: #d52b1e;
+    --accent-hover: #b02218;
+    --success: #1d7a4a;
+    --success-hover: #22915a;
+    --neutral: #f0e4e4;
+    --neutral-hover: #e3d2d2;
+    --danger: #7a1910;
+    --danger-hover: #9a2014;
+    --amber: #8a5200;
+    --on-accent: #ffffff;
+    --on-success: #ffffff;
+    --on-danger: #ffffff;
+    --on-amber: #ffffff;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 12px;
+    --radius-sm: 8px;
     color-scheme: light;
+}
+
+/* Independence Day (Jun 28 - Jul 4): navy, red and white. */
+[data-theme="july4"] {
+    --bg-root: #0b1733;
+    --bg-panel: #13224a;
+    --bg-panel-alt: #1a2c5c;
+    --border: #2d4180;
+    --text-primary: #f4f6fb;
+    --text-secondary: #c9d1e8;
+    --text-muted: #9fabd0;
+    --accent: #f45a66;
+    --accent-hover: #f8808a;
+    --success: #6fd3a0;
+    --success-hover: #93e0b9;
+    --neutral: #24366e;
+    --neutral-hover: #2f4486;
+    --danger: #ffb3c1;
+    --danger-hover: #ffd0d9;
+    --amber: #ffd166;
+    --on-accent: #1f0508;
+    --on-success: #05210f;
+    --on-danger: #2a0a12;
+    --on-amber: #1f1400;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 10px;
+    --radius-sm: 6px;
+    color-scheme: dark;
 }
 
 /* ============================================================
@@ -109,6 +517,13 @@ body {
     font-family: "Segoe UI", system-ui, sans-serif;
     background: #0b1120;
     color: #e5e9f5;
+}
+
+/* Headings and the app name use the theme's display font. */
+.app-root h1,
+.app-root h2,
+.app-root h3 {
+    font-family: var(--font-display);
 }
 
 .app-root {
@@ -476,7 +891,7 @@ body {
     }
 
     .bay-btn:disabled {
-        opacity: 0.35;
+        opacity: 0.5;
         cursor: not-allowed;
     }
 

@@ -9,6 +9,18 @@ namespace ArchivSector_OD
     public class AppConfig
     {
         public string Theme { get; set; } = "midnight";
+
+        // v4.0: the last everyday (non-seasonal) theme picked. A seasonal
+        // theme (Halloween, Canada Day...) is only offered around its date;
+        // once that week is over, the app goes back to this one.
+        public string RegularTheme { get; set; } = "";
+
+        // v4.0: switch to a seasonal theme by itself when its week starts
+        // (on by default; a tick box in the 🎨 menu). Picking an everyday
+        // theme during that week means "not this one": it's remembered here
+        // as "<theme id>:<year>" so the app doesn't switch again until next year.
+        public bool AutoSeasonalTheme { get; set; } = true;
+        public List<string> SeasonalDeclined { get; set; } = new();
         public string OutputBaseFolder { get; set; } = "";
         public string MakeMkvPathOverride { get; set; } = "";
         public string RedumperPathOverride { get; set; } = "";

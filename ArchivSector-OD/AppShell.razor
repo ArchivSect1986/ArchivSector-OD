@@ -74,6 +74,26 @@
                 <div class="menu-backdrop" @onclick="() => themeMenuOpen = false"></div>
                 <div class="theme-menu" role="dialog" aria-label="Choose a theme">
                     <h3>Theme</h3>
+                    @if (SeasonalNow.Count > 0)
+                    {
+                        <div class="theme-grid" style="margin-bottom: 10px;">
+                            @foreach (var t in SeasonalNow)
+                            {
+                                <button class="theme-tile @(t.Id == currentTheme ? "active" : "")" @onclick="() => PickTheme(t.Id)" title="@SeasonalTitle">
+                                    <span class="theme-preview" style="background: @t.Background; border: 1px solid @t.Panel;">
+                                        <span style="width: 40%; background: @t.Accent;"></span>
+                                        <span style="width: 25%; background: @t.Panel;"></span>
+                                        <span style="width: 15%; background: @t.Text;"></span>
+                                    </span>
+                                    @t.Name
+                                </button>
+                            }
+                        </div>
+                        <label style="display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--text-secondary); margin: -2px 0 10px; cursor: pointer;">
+                            <input type="checkbox" checked="@config.AutoSeasonalTheme" @onchange="e => SetAutoSeasonal((bool)(e.Value ?? false))" />
+                            Switch to holiday themes automatically
+                        </label>
+                    }
                     <div class="theme-grid">
                         @foreach (var t in Themes)
                         {
@@ -164,10 +184,42 @@
     private sealed record ThemeInfo(string Id, string Name, string Background, string Panel, string Accent, string Text);
     private static readonly ThemeInfo[] Themes =
     {
-        new("midnight", "Midnight", "#0b1120", "#2a3550", "#22d3ee", "#e5e9f5"),
-        new("nova",     "Nova",     "#070d1a", "#243255", "#2dd4bf", "#eef2fb"),
-        new("daylight", "Daylight", "#d8dce6", "#b7c0d1", "#0891b2", "#141a2e"),
+        new("midnight", "Midnight",     "#0a1022", "#283456", "#38bdf8", "#e5e9f5"),
+        new("nova",     "Nova",         "#070d1a", "#243255", "#2dd4bf", "#eef2fb"),
+        new("console",  "Console",      "#0c0e11", "#2e333b", "#f5a524", "#ecedef"),
+        new("daylight", "Studio Light", "#f2f3ef", "#d3d7cf", "#1f43b8", "#16181c"),
+        new("rack",     "Rack",         "#18191b", "#3a3c40", "#7dff9b", "#e9eaec"),
+        new("library",  "Library",      "#161412", "#3d362f", "#e9b872", "#efe9e1"),
+        new("swiss",    "Swiss",        "#ffffff", "#111111", "#111111", "#d40000"),
+        new("table",    "Power Table",  "#f4f4f4", "#c6c6c6", "#0f62fe", "#161616"),
+        new("neon",     "Neon",         "#100820", "#3a2a6b", "#3df5ff", "#ff4fc3"),
+        new("catalog",  "Catalog",      "#dfe0d8", "#b9bbae", "#2f5d8a", "#23261f"),
+        new("kiosk",    "Big Tiles",    "#000000", "#3d3d3d", "#ffd60a", "#ffffff"),
     };
+    // v4.0: seasonal themes, offered in the 🎨 menu only from the first day
+    // to the last (month, day; a range may run over New Year). Each Id
+    // matches a [data-theme="…"] block in app.css. More can be added the
+    // same way (Valentine's Day, St. Patrick's Day...).
+    private sealed record SeasonalTheme(ThemeInfo Info, int FromMonth, int FromDay, int ToMonth, int ToDay)
+    {
+        public bool IsOn(DateTime d)
+        {
+            int today = d.Month * 100 + d.Day, from = FromMonth * 100 + FromDay, to = ToMonth * 100 + ToDay;
+            return from <= to ? today >= from && today <= to : today >= from || today <= to;
+        }
+    }
+    private static readonly SeasonalTheme[] Seasonal =
+    {
+        new(new("halloween",   "🎃 Halloween",        "#120a05", "#3d2a1c", "#ff7a1a", "#8bd450"), 10, 25, 11, 1),
+        new(new("remembrance", "Remembrance Day",     "#111111", "#383838", "#ef5058", "#f2f2f2"), 11, 5, 11, 11),
+        new(new("christmas",   "🎄 Christmas",        "#0d1f16", "#2c4d3b", "#f25757", "#f2c94c"), 12, 19, 12, 26),
+        new(new("canada",      "🍁 Canada Day",       "#fbf4f4", "#e3cfcf", "#d52b1e", "#1a1212"), 6, 25, 7, 1),
+        new(new("july4",       "Independence Day",    "#0b1733", "#2d4180", "#f45a66", "#f4f6fb"), 6, 28, 7, 4),
+    };
+    private static List<ThemeInfo> SeasonalNow => Seasonal.Where(x => x.IsOn(DateTime.Today)).Select(x => x.Info).ToList();
+    private const string SeasonalTitle = "A seasonal theme: it's only offered around this date. Afterwards the app goes back to your everyday theme.";
+    private static bool IsSeasonal(string id) => Seasonal.Any(x => x.Info.Id == id);
+
     private bool themeMenuOpen;
 
 
@@ -215,7 +267,8 @@
     protected override void OnInitialized()
     {
         config = ConfigService.Load();
-        currentTheme = config.Theme;
+        // A saved theme that no longer exists opens as Midnight.
+        currentTheme = PickStartTheme(config);
 
         var startFolder = TargetFillService.StartupFolder();
         if (startFolder is not null)
@@ -550,11 +603,56 @@
         catch { return "UNLABELED"; }
     }
 
+    // The theme to open with: the saved one, unless it's a seasonal theme
+    // whose week is over (then the everyday one) or one that no longer
+    // exists (then Midnight).
+    // With "switch by itself" on, a holiday week that just started brings
+    // its theme (unless it was turned down this year).
+    private static string PickStartTheme(AppConfig c)
+    {
+        string regular = Themes.Any(t => t.Id == c.RegularTheme) ? c.RegularTheme
+                       : Themes.Any(t => t.Id == c.Theme) ? c.Theme : "midnight";
+        if (IsSeasonal(c.Theme) && SeasonalNow.Any(t => t.Id == c.Theme)) return c.Theme;
+        if (c.AutoSeasonalTheme)
+        {
+            var holiday = SeasonalNow.FirstOrDefault(t => !c.SeasonalDeclined.Contains(DeclineKey(t.Id)));
+            if (holiday is not null) return holiday.Id;
+        }
+        if (IsSeasonal(c.Theme)) return regular;
+        return Themes.Any(t => t.Id == c.Theme) ? c.Theme : regular;
+    }
+
+    private static string DeclineKey(string id) => $"{id}:{DateTime.Today.Year}";
+
+    private void SetAutoSeasonal(bool on)
+    {
+        var fresh = ConfigService.Load();
+        fresh.AutoSeasonalTheme = on;
+        ConfigService.Save(fresh);
+        config = fresh;
+    }
+
     private void SetTheme(string theme)
     {
         currentTheme = theme;
         var fresh = ConfigService.Load();
         fresh.Theme = theme;
+        if (!IsSeasonal(theme))
+        {
+            fresh.RegularTheme = theme;   // what to go back to after a holiday week
+            // An everyday theme picked during a holiday week: don't switch
+            // to that holiday's theme again this year.
+            foreach (var h in SeasonalNow)
+            {
+                var key = DeclineKey(h.Id);
+                if (!fresh.SeasonalDeclined.Contains(key)) fresh.SeasonalDeclined.Add(key);
+            }
+            fresh.SeasonalDeclined.RemoveAll(k => !k.EndsWith(":" + DateTime.Today.Year) && !k.EndsWith(":" + (DateTime.Today.Year - 1)));
+        }
+        else
+        {
+            fresh.SeasonalDeclined.Remove(DeclineKey(theme));   // picked it after all
+        }
         ConfigService.Save(fresh);
         config = fresh;
     }
