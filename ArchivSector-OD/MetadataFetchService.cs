@@ -183,7 +183,22 @@ namespace ArchivSector_OD
                     ordered = ordered.ThenBy(r => int.TryParse(r.Year, out var y) ? Math.Abs(y - want) : 9999);
                 return ordered.ToList();
             }
-            return await SearchTmdbByTitle(title, year, apiKey, maxResults);
+            return ExactTitleFirst(await SearchTmdbByTitle(title, year, apiKey, maxResults), title, year);
+        }
+
+        // v4.0: a film whose title is exactly what was searched for goes to
+        // the top, ahead of sequels and spin-offs TMDB may rank higher
+        // ("Jumanji" picked "Jumanji: Open World" for the disc's artwork).
+        // Otherwise TMDB's order is kept; with a year, the closest year
+        // comes first among the exact matches.
+        private static List<MetadataResult> ExactTitleFirst(List<MetadataResult> results, string title, string? year)
+        {
+            string want = Simplify(title);
+            if (want.Length == 0) return results;
+            var ordered = results.OrderBy(r => Simplify(r.Title) == want ? 0 : 1);
+            if (year is not null && int.TryParse(year, out int y0))
+                ordered = ordered.ThenBy(r => int.TryParse(r.Year, out var y) ? Math.Abs(y - y0) : 9999);
+            return ordered.ToList();
         }
 
         // Whole numbers from 1 to 999 standing on their own in a title, in

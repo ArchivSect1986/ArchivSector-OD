@@ -203,7 +203,9 @@ namespace ArchivSector_OD.Burning
                     var cpc = (IConnectionPointContainer)eraseObj;
                     Guid iid = typeof(DDiscFormat2EraseEvents).GUID;
                     cpc.FindConnectionPoint(ref iid, out cp);
-                    cp.Advise(sink, out cookie);
+                    // Windows may hand back no connection point: then there's
+                    // just no progress percentage.
+                    if (cp is not null) cp.Advise(sink, out cookie);
                 }
                 catch { cp = null; }
 

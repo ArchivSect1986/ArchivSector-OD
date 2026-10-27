@@ -186,7 +186,7 @@ namespace ArchivSector_OD.Burning
                 }
                 if (!rep.Ok)
                 {
-                    r.Message = "The drive didn't confirm the last of the data was written: " + rep.Describe() + " " + afterFailure;
+                    r.Message = "The drive didn't confirm the last of the data was written: " + rep.Describe() + "." + DiscProblemHint(rep) + " " + afterFailure;
                     log?.Invoke("Direct write: " + r.Message);
                     return;
                 }
@@ -486,7 +486,7 @@ namespace ArchivSector_OD.Burning
         {
             progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
             var rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x01, 0, (byte)(track >> 8), (byte)track, 0, 0, 0, 0 }, 120), 120, 1000);
-            if (!rep.Ok) { r.Message = $"The drive wouldn't close the {discName}'s track: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            if (!rep.Ok) { r.Message = $"The drive wouldn't close the {discName}'s track: " + rep.Describe() + "." + DiscProblemHint(rep); log?.Invoke("Direct write: " + r.Message); return false; }
             WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(5));
 
             rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x06, 0, 0, 0, 0, 0, 0, 0 }, 300), 120, 1000);   // finalize disc
@@ -495,7 +495,7 @@ namespace ArchivSector_OD.Burning
                 log?.Invoke("Direct write: the drive didn't accept \"finalize\"; closing the session instead");
                 rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x02, 0, 0, 0, 0, 0, 0, 0 }, 300), 120, 1000);
             }
-            if (!rep.Ok) { r.Message = $"The drive wouldn't close the {discName}: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            if (!rep.Ok) { r.Message = $"The drive wouldn't close the {discName}: " + rep.Describe() + "." + DiscProblemHint(rep); log?.Invoke("Direct write: " + r.Message); return false; }
             if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(15)))
             {
                 r.Message = $"The drive didn't finish closing the {discName} in time.";
@@ -513,11 +513,11 @@ namespace ArchivSector_OD.Burning
         {
             progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
             var rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x01, 0, (byte)(track >> 8), (byte)track, 0, 0, 0, 0 }, 120), 120, 1000);
-            if (!rep.Ok) { r.Message = "The drive wouldn't close the CD's track: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            if (!rep.Ok) { r.Message = "The drive wouldn't close the CD's track: " + rep.Describe() + "." + DiscProblemHint(rep); log?.Invoke("Direct write: " + r.Message); return false; }
             WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(5));
 
             rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x5B, 0x01, 0x02, 0, 0, 0, 0, 0, 0, 0 }, 300), 120, 1000);
-            if (!rep.Ok) { r.Message = "The drive wouldn't close the CD: " + rep.Describe(); log?.Invoke("Direct write: " + r.Message); return false; }
+            if (!rep.Ok) { r.Message = "The drive wouldn't close the CD: " + rep.Describe() + "." + DiscProblemHint(rep); log?.Invoke("Direct write: " + r.Message); return false; }
             if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(10)))
             {
                 r.Message = "The drive didn't finish closing the CD in time.";
@@ -568,7 +568,7 @@ namespace ArchivSector_OD.Burning
                 var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
                 if (!rep.Ok)
                 {
-                    r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}. {afterFailure}";
+                    r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}.{DiscProblemHint(rep)} {afterFailure}";
                     log?.Invoke("Direct write: " + r.Message);
                     return -1;
                 }
@@ -595,6 +595,13 @@ namespace ArchivSector_OD.Burning
             }
             return Math.Min(done, isoSectors);
         }
+
+        // A "medium error" (sense key 3) is the disc itself failing, not our
+        // writer or the drive: say what to try next.
+        private static string DiscProblemHint(ScsiDrive.Reply rep) =>
+            rep.SenseKey == 3
+                ? " This usually means a faulty disc, or one this drive doesn't get along with: try another disc, a slower speed, or another drive."
+                : "";
 
         // Like RetryWhileBusy, but for a length of time rather than a count.
         private static ScsiDrive.Reply RetryWhileBusyFor(Func<ScsiDrive.Reply> send, TimeSpan limit, int waitMs)

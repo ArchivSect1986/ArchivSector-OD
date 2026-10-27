@@ -278,7 +278,7 @@ namespace ArchivSector_OD.Burning
                     {
                         string maker = Ascii(ds, 4 + 100, 6), media = Ascii(ds, 4 + 106, 3);
                         int rev = ds[4 + 111];
-                        if (maker.Length > 0) disc.Add("Maker code", $"{maker}-{media}-{rev:D3}");
+                        if (maker.Length > 0) AddMaker(disc, $"{maker}-{media}-{rev:D3}");
                     }
                     else rep.Notes.Add("BD maker code (READ DISC STRUCTURE): " + r.Describe());
                     break;
@@ -291,9 +291,26 @@ namespace ArchivSector_OD.Burning
                     {
                         string maker = Ascii(ds, 4 + 19, 8), media = Ascii(ds, 4 + 27, 3);
                         int rev = ds[4 + 30];
-                        if (maker.Length > 0) disc.Add("Maker code", $"{maker}-{media}-{rev:D3}");
+                        if (maker.Length > 0) AddMaker(disc, $"{maker}-{media}-{rev:D3}");
                     }
                     else rep.Notes.Add("DVD+ maker code (READ DISC STRUCTURE 11h): " + r.Describe());
+                    break;
+                }
+                case "DVD":
+                {
+                    // DVD-R / DVD-RW: the maker code is in the pre-recorded
+                    // ("pre-pit") information, in two 6-byte pieces.
+                    if (rep.CurrentProfile is 0x11 or 0x13 or 0x14 or 0x15 or 0x16)
+                    {
+                        var ds = new byte[4 + 40];
+                        r = drive.Read(new byte[] { 0xAD, 0x00, 0, 0, 0, 0, 0, 0x0E, (byte)(ds.Length >> 8), (byte)ds.Length, 0, 0 }, ds, 10);
+                        if (r.Ok)
+                        {
+                            string code = (Ascii(ds, 4 + 17, 6) + Ascii(ds, 4 + 25, 6)).Trim();
+                            if (code.Length > 0) AddMaker(disc, code);
+                        }
+                        else rep.Notes.Add("DVD- maker code (READ DISC STRUCTURE 0Eh): " + r.Describe());
+                    }
                     break;
                 }
                 case "CD":
@@ -306,6 +323,7 @@ namespace ArchivSector_OD.Burning
                         {
                             int m = atip[8], s = atip[9], f = atip[10];
                             disc.Add("Maker code (ATIP)", $"lead-in {m:D2}:{s:D2}:{f:D2}");
+                            disc.Add("Made by", DiscMakers.ForCd(m, s, f) ?? "not in ArchivSector-OD's list of makers");
                             int lm = atip[12], ls = atip[13], lf = atip[14];
                             long leadOut = (lm * 60L + ls) * 75 + lf - 150;
                             if (leadOut > 0)
@@ -354,6 +372,13 @@ namespace ArchivSector_OD.Burning
 
         public static bool IsWritable(int p) => p is 0x09 or 0x0A or 0x11 or 0x12 or 0x13 or 0x14 or 0x15 or 0x16
             or 0x1A or 0x1B or 0x2A or 0x2B or 0x41 or 0x42 or 0x43 or 0x51 or 0x52;
+
+        // "Maker code" plus, when it's a known factory, "Made by".
+        private static void AddMaker(Section disc, string code)
+        {
+            disc.Add("Maker code", code);
+            disc.Add("Made by", DiscMakers.ForDvdBd(code) ?? "not in ArchivSector-OD's list of makers");
+        }
 
         private static string Family(int p) => p switch
         {

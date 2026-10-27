@@ -22,9 +22,10 @@
                 Your disc recorders and the disc in each one.
             </p>
         </div>
-        <button class="shortcut-btn" @onclick="ScanAsync" disabled="@scanning">
-            @(scanning ? "⏳ Scanning drives…" : "🔄 Refresh drives")
-        </button>
+        @* A backup since tray watching (v4.0 week 6): for a drive plugged in
+           or removed, a disc changed without the tray moving, or a drive
+           that doesn't say whether its tray is open. *@
+        <button class="icon-btn" @onclick="ScanAsync" disabled="@scanning" title="@RefreshTitle" aria-label="Re-read all drives">@(scanning ? "⏳" : "🔄")</button>
     </div>
 
     @* Modes (v4.0 week 3): Write = the burn queue and the drives; Build =
@@ -135,11 +136,35 @@
                                         <span style="color: var(--text-muted);">Free</span>
                                         <span>@DiscHealthService.FormatBytes(drive.Media.State == MediaState.Blank || drive.Media.Type == DiscMediaType.BdRe ? drive.Media.FullDiscBytes : drive.Media.FreeBytes)</span>
                                     </div>
+                                    @if (discInfo.TryGetValue(Letter(drive), out var info))
+                                    {
+                                        @if (info.Code.Length > 0)
+                                        {
+                                            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                                                <span style="color: var(--text-muted);">Maker code</span>
+                                                <span>@info.Code</span>
+                                            </div>
+                                        }
+                                        @if (info.MadeBy.Length > 0)
+                                        {
+                                            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                                                <span style="color: var(--text-muted);">Made by</span>
+                                                <span style="text-align: right;">@info.MadeBy</span>
+                                            </div>
+                                        }
+                                        @if (info.Speeds.Length > 0)
+                                        {
+                                            <div style="display: flex; justify-content: space-between; gap: 10px;">
+                                                <span style="color: var(--text-muted);">Write speeds</span>
+                                                <span style="text-align: right;">@info.Speeds</span>
+                                            </div>
+                                        }
+                                    }
                                     @if (drive.Media.WindowsSpareBytes > 0)
                                     {
                                         <span class="bay-subtitle" style="margin: 4px 0 0;">
-                                            Windows' burning engine keeps @(DiscHealthService.FormatBytes(drive.Media.WindowsSpareBytes)) of this disc spare and can write
-                                            @(DiscHealthService.FormatBytes(drive.Media.TotalBytes)); ImgBurn uses the whole disc.
+                                            ArchivSector-OD's own writer and ImgBurn use the whole disc. Windows' burning engine keeps
+                                            @(DiscHealthService.FormatBytes(drive.Media.WindowsSpareBytes)) of it spare and can write @(DiscHealthService.FormatBytes(drive.Media.TotalBytes)).
                                         </span>
                                     }
                                 }
@@ -194,7 +219,40 @@
         var list = drives.Where(d => d.DriveLetter.Length > 0 && d.Error is null && (d.CanWrite || d.Busy)).ToList();
         if (list.Count > 0 || queueDrives.Count == 0) queueDrives = list;
     }
+    // v4.0 week 6: maker code, maker and write speeds for the disc in each
+    // drive, read after a scan (the same as Drive info, one drive at a
+    // time, skipping busy drives). Keyed by drive letter.
+    private sealed record DiscInfo(string Code, string MadeBy, string Speeds);
+    private readonly Dictionary<string, DiscInfo> discInfo = new(StringComparer.OrdinalIgnoreCase);
+
+    private async Task ReadDiscInfoAsync(IEnumerable<BurnerDrive> which)
+    {
+        foreach (var d in which.ToList())
+        {
+            var l = Letter(d);
+            discInfo.Remove(l);
+            if (l.Length == 0 || d.Busy || d.Error is not null || d.Media.State == MediaState.NoDisc) continue;
+            if (RipActivity.IsDriveBusy(l) || BurnService.IsBusy(l)) continue;
+            try
+            {
+                var rep = await DriveInspector.InspectAsync(l);
+                var disc = rep.Sections.FirstOrDefault(sec => sec.Title == "Disc in the drive");
+                if (disc is null) continue;
+                string Get(string label) => disc.Rows.FirstOrDefault(r => r.Label == label)?.Value ?? "";
+                var code = Get("Maker code");
+                if (code.Length == 0) code = Get("Maker code (ATIP)").Replace("lead-in ", "");
+                var madeBy = Get("Made by");
+                if (madeBy.StartsWith("not in", StringComparison.OrdinalIgnoreCase)) madeBy = "";
+                var info = new DiscInfo(code, madeBy, Get("Write speeds"));
+                if (info.Code.Length + info.MadeBy.Length + info.Speeds.Length > 0) discInfo[l] = info;
+            }
+            catch { }
+            if (!disposed) StateHasChanged();
+        }
+    }
+
     private bool scanning;
+    private string RefreshTitle => scanning ? "Reading the drives…" : "Re-read all drives (the cards update by themselves when a tray opens or shuts)";
     private bool scannedOnce;
     private string? error;
     private bool disposed;
@@ -306,6 +364,8 @@
                 drives = drives.Select(x => x.UniqueId == d.UniqueId ? fresh : x).ToList();
                 UpdateQueueDrives();
                 if (fresh.Media.State != MediaState.NoDisc) openTrays.Remove(Letter(fresh));
+                if (!disposed) StateHasChanged();
+                await ReadDiscInfoAsync(new[] { fresh });
             }
         }
         catch { }
@@ -319,14 +379,90 @@
         if (d is not null) await OnBurnFinished(d);
     }
 
-    // First time the tab is shown: scan. After that, only "Refresh drives".
+    // First time the tab is shown: scan, then keep watching the trays
+    // (v4.0 week 6), so "Refresh drives" is only needed now and then.
     protected override async Task OnParametersSetAsync()
     {
         if (Visible && !scannedOnce)
         {
             scannedOnce = true;
             await ScanAsync();
+            _ = WatchTraysAsync();
         }
+    }
+
+    // Tray watching: every couple of seconds while this tab is showing,
+    // each drive that isn't busy is asked whether its tray is open (a
+    // quick question that doesn't spin the disc). When a tray opens or
+    // shuts, by our button or the drive's own, the Eject/Close button
+    // follows and the drive is re-read by itself: straight away when it
+    // opens, and once the disc has had time to spin up when it shuts.
+    private readonly Dictionary<string, BurnEngine.TrayState> trayStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> rereading = new(StringComparer.OrdinalIgnoreCase);
+
+    private async Task WatchTraysAsync()
+    {
+        while (!disposed)
+        {
+            try { await Task.Delay(2000); } catch { }
+            if (disposed) break;
+            if (!Visible || scanning || drives is null) continue;
+            foreach (var d in drives.ToList())
+            {
+                var l = Letter(d);
+                if (l.Length == 0 || d.Error is not null) continue;
+                if (RipActivity.IsDriveBusy(l) || BurnService.IsBusy(l) || ejecting.Contains(l) || rereading.Contains(l)) continue;
+                BurnEngine.TrayState now;
+                try { now = await Task.Run(() => BurnEngine.QueryTray(l)); }
+                catch { continue; }
+                if (now == BurnEngine.TrayState.Unknown) continue;
+                bool known = trayStates.TryGetValue(l, out var before);
+                trayStates[l] = now;
+                if (now == BurnEngine.TrayState.Open) openTrays.Add(l); else openTrays.Remove(l);
+                if (!known)
+                {
+                    if (!disposed) await InvokeAsync(StateHasChanged);
+                    continue;
+                }
+                if (before == now) continue;
+                _ = RereadAfterTrayAsync(d, now);
+            }
+        }
+    }
+
+    private async Task RereadAfterTrayAsync(BurnerDrive d, BurnEngine.TrayState now)
+    {
+        var l = Letter(d);
+        if (!rereading.Add(l)) return;
+        try
+        {
+            discInfo.Remove(l);
+            ejectMessages.Remove(l);
+            if (!disposed) await InvokeAsync(StateHasChanged);
+            if (now == BurnEngine.TrayState.Open)
+            {
+                // A finished burn or erase screen goes once the disc is out,
+                // as with the Eject button. (A running burn or erase isn't
+                // watched at all: the drive is busy then.)
+                burnScreens.Remove(l);
+                eraseScreens.Remove(l);
+                await Task.Delay(500);
+                await InvokeAsync(() => OnBurnFinished(d));
+                return;
+            }
+            // Shut: the drive needs a few seconds to spin up and read the
+            // disc. If it still shows nothing, look once more a bit later.
+            await Task.Delay(5000);
+            await InvokeAsync(() => OnBurnFinished(d));
+            var fresh = drives?.FirstOrDefault(x => Letter(x).Equals(l, StringComparison.OrdinalIgnoreCase));
+            if (fresh is not null && fresh.Media.State == MediaState.NoDisc)
+            {
+                await Task.Delay(8000);
+                await InvokeAsync(() => OnBurnFinished(fresh));
+            }
+        }
+        catch { }
+        finally { rereading.Remove(l); }
     }
 
     private async Task ScanAsync()
@@ -350,6 +486,7 @@
             scanning = false;
         }
         if (!disposed) StateHasChanged();
+        if (drives is not null) await ReadDiscInfoAsync(drives);
     }
 
     public void Dispose() => disposed = true;
