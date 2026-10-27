@@ -1,8 +1,13 @@
-﻿🌟 [RELEASE] ArchivSector-OD v3.4 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 1 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v3.4**! Version 2.0 was a complete rewrite: the
+Welcome to **ArchivSector-OD v4.0 Beta 1**, a test version of v4.0! ⚠️ It's
+a pre-release: everything should work, but this is the version where you
+help find what doesn't. If you'd rather stay on a finished version, keep
+v3.4.
+
+Version 2.0 was a complete rewrite: the
 app is now a native Windows program built in C# (.NET 8), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
@@ -19,12 +24,54 @@ handful of improvements on top.
    aren't signed with a paid certificate, and you'll only see it once.
    (Full explanation under "How to Run" below.)
 3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
-   Redumper, ImgBurn), then insert a disc.
+   Redumper, and optionally ImgBurn), then insert a disc.
 
-Already on v2.3 or later? The app offers v3.4 by itself when it starts -- just
-click Yes. Updating from an older v2 version? Just replace your old folder with this one. Your
-settings, history, and cached artwork are kept — they're stored
-separately in your AppData folder.
+Coming from v3.x? The app's update check doesn't offer betas, so this one
+is a manual download: unzip it into a NEW folder (keep your v3.4 folder if
+you want to go back). Your settings, history, and cached artwork are kept
+-- they're stored separately in your AppData folder. When v4.0 itself is
+released, the beta offers it to you by itself.
+
+========================================================================
+🔥 NEW IN V4.0 BETA 1 — OUR OWN DISC WRITER, A BURN TAB & THEMES
+========================================================================
+
+• 🔥 A new Burn tab, with every disc recorder and five modes:
+  - Write: burn ISOs, one at a time or as a queue.
+  - Build ISO: make an ISO from a folder, padded to fill the disc.
+  - Read disc: copy a data disc to an ISO.
+  - Verify disc: compare a disc with its ISO, sector by sector.
+  - Drive info: what your drive can do and everything about the disc
+    in it, including who made it and its write speeds.
+• ArchivSector-OD's own writer: the app now talks to the drive itself
+  and uses the whole disc. It writes CD-R, CD-RW, DVD+R, DVD+R DL,
+  DVD+RW, DVD-R, DVD-RW, BD-R and BD-RE, and it's the default. For a
+  disc it can't burn, ImgBurn takes over automatically (or Windows,
+  without ImgBurn). You can still pick ImgBurn or Windows yourself.
+• Choose the write speed (or leave it on Fastest).
+• 📚 Burn queue: several ISOs one after another, each verified, with
+  an optional disc health check, then ejected for the next blank.
+• 🧽 Erase CD-RW and DVD-RW (quick or full).
+• Drive cards update by themselves when a tray opens or shuts, even
+  with the drive's own button, and show who made the disc.
+• TargetFill: "Use the blank disc in drive…" measures a blank disc's
+  exact size and fills to it.
+• 🎨 Eleven themes, plus holiday themes that come on by themselves for
+  their week (🎃 Halloween, Remembrance Day, 🎄 Christmas, 🍁 Canada
+  Day, Independence Day). Pick your usual theme during that week and
+  it stays.
+• Clearer messages when a disc fails, better movie artwork matches,
+  and the CD-R size is now exactly what a blank 80-minute CD-R holds.
+
+⚠ Known issues: CD-RWs written over several times may fail to verify
+  in some drives (use CD-R for anything important), and dual-layer
+  DVD-R DL and BD-R DL go to ImgBurn for now.
+
+🙏 Please report what you find, good or bad, on GitHub (Issues → Bug
+  report). Include Burn → Drive info → 📋 Copy report (your drive and
+  disc), the disc brand, and that day's log from
+  %AppData%\ArchivSector-OD\Logs. The own writer has been tested on an
+  ASUS BW-16D1HT, so other drives are what's needed most.
 
 ========================================================================
 🔗 NEW IN V3.4 — SHORTCUT CHECK & SMALL ADDITIONS
@@ -393,6 +440,9 @@ or copy the whole folder.
 • README.txt
   Complete documentation and feature overview for this release.
 
+• LICENSE
+  The license ArchivSector-OD is shared under.
+
 ========================================================================
 🚀 HOW TO RUN ARCHIVSECTOR-OD
 ========================================================================
@@ -440,6 +490,10 @@ APIs (tray eject, registry, system sounds), so it only runs on Windows.
   CDs come out as .bin + .cue, DVDs/Blu-rays as .iso.
 • Other data discs (PC software etc.) ---- (1:1 archival dump)
 • Music CDs ------------------------------ (1:1 .bin/.cue copy)
+
+Blank discs it burns (own writer, whole disc):
+• CD-R, CD-RW, DVD+R, DVD+R DL, DVD+RW, DVD-R, DVD-RW, BD-R, BD-RE
+  (anything else, e.g. DVD-R DL and BD-R DL, goes to ImgBurn)
 
 ========================================================================
 🔮 PLANNED — NOT YET BUILT
