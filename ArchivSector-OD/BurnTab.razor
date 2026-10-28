@@ -29,13 +29,15 @@
     </div>
 
     @* Modes (v4.0 week 3): Write = the burn queue and the drives; Build =
-       make an ISO from a folder; Read = copy a data disc to an ISO. All
+       make an ISO from a folder; Read = copy a data disc to an ISO; Copy
+       (beta 2) = read a disc and burn it to blanks, in one go. All
        stay loaded, so a build, read or queue keeps going while another
        mode is showing. *@
     <nav class="app-nav" aria-label="Burn modes" style="justify-self: start;">
         <button class="nav-btn @(mode == "write" ? "active" : "")" @onclick='() => mode = "write"'>🔥 Write</button>
         <button class="nav-btn @(mode == "build" ? "active" : "")" @onclick='() => mode = "build"'>📦 Build ISO</button>
         <button class="nav-btn @(mode == "read" ? "active" : "")" @onclick='() => mode = "read"'>📀 Read disc</button>
+        <button class="nav-btn @(mode == "copy" ? "active" : "")" @onclick='() => mode = "copy"'>🔁 Copy disc</button>
         <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'>✔ Verify disc</button>
         <button class="nav-btn @(mode == "info" ? "active" : "")" @onclick='() => mode = "info"'>🔎 Drive info</button>
     </nav>
@@ -46,6 +48,10 @@
 
     <div style="display: @(mode == "read" ? "block" : "none");">
         <ReadPanel AddToQueue="@OnAddToQueue" Visible="@(Visible && mode == "read")" />
+    </div>
+
+    <div style="display: @(mode == "copy" ? "block" : "none");">
+        <CopyPanel Visible="@(Visible && mode == "copy")" />
     </div>
 
     <div style="display: @(mode == "verify" ? "block" : "none");">

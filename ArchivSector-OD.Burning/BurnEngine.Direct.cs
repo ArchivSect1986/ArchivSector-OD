@@ -635,6 +635,7 @@ namespace ArchivSector_OD.Burning
             long lba = 0, mismatched = 0;
             var clock = Stopwatch.StartNew();
             var lastReport = TimeSpan.Zero;
+            var window = new Queue<(TimeSpan T, long Lba)>();
             using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
             while (lba < isoSectors)
             {
@@ -660,7 +661,14 @@ namespace ArchivSector_OD.Burning
                 if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || lba >= isoSectors)
                 {
                     lastReport = clock.Elapsed;
-                    double bps = lba * (double)Sector / Math.Max(0.001, clock.Elapsed.TotalSeconds);
+                    // The speed over the last 5 seconds (not the average since
+                    // the start), so it shows what the drive is doing now.
+                    var now = clock.Elapsed;
+                    window.Enqueue((now, lba));
+                    while (window.Count > 1 && now - window.Peek().T > TimeSpan.FromSeconds(5)) window.Dequeue();
+                    var first = window.Peek();
+                    double secs = (now - first.T).TotalSeconds;
+                    double bps = secs > 0.2 ? (lba - first.Lba) * (double)Sector / secs : lba * (double)Sector / Math.Max(0.001, now.TotalSeconds);
                     progress?.Report(new Progress
                     {
                         Phase = "Verifying",

@@ -1,0 +1,453 @@
+@using System.IO
+@using System.Windows
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Copy mode (v4.0 beta 2): duplicates a data disc, like ImgBurn's
+    "read, then write". The disc is read to a temporary ISO (DiscReader),
+    then burned to a blank (BurnService, with the usual program: our own
+    writer, else ImgBurn or Windows) and verified. One drive: the disc is
+    ejected after reading and a blank is asked for. Two drives: the blank
+    goes in the other one. Several copies: after each one the disc is
+    ejected and the next blank is asked for. The temporary ISO is deleted
+    afterwards unless "keep" is ticked.
+*@
+
+<div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+    <div>
+        <h2 style="margin: 0;">🔁 Copy a disc</h2>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Make an exact copy of a data disc: it's read to a temporary ISO, then burned to a blank and verified. Use one drive (swap the discs when asked) or two.</p>
+    </div>
+
+    @if (state == State.Idle)
+    {
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Copy from</strong>
+                <select value="@source" @onchange="OnSourceChanged" style="font-size: 13px;">
+                    @if (drives.Count == 0)
+                    {
+                        <option value="">No disc drives found</option>
+                    }
+                    @foreach (var d in drives)
+                    {
+                        <option value="@d">Drive @d:</option>
+                    }
+                </select>
+                <button class="shortcut-btn" @onclick="RefreshAsync">🔄 Check again</button>
+            </div>
+            <span style="font-size: 12px; color: @DiscColor; margin-left: 100px;">@DiscText</span>
+
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Burn to</strong>
+                <select value="@target" @onchange="e => target = e.Value?.ToString() ?? source" style="font-size: 13px;">
+                    @foreach (var d in drives)
+                    {
+                        <option value="@d">@TargetLabel(d)</option>
+                    }
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Copies</strong>
+                <select value="@copies" @onchange="OnCopiesChanged" style="font-size: 13px;">
+                    @for (int n = 1; n <= 10; n++)
+                    {
+                        <option value="@n">@n</option>
+                    }
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Temporary ISO</strong>
+                <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere;">@tempFolder</span>
+                <button class="shortcut-btn" @onclick="ChooseFolder">📂 Change…</button>
+            </div>
+            @if (SpaceProblem is not null)
+            {
+                <span style="font-size: 12px; color: var(--amber); margin-left: 100px;">⚠ @SpaceProblem</span>
+            }
+
+            <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;">
+                <input type="checkbox" checked="@verify" @onchange="e => verify = (bool)(e.Value ?? false)" />
+                Verify each copy (recommended)
+            </label>
+            <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;">
+                <input type="checkbox" checked="@keepIso" @onchange="e => keepIso = (bool)(e.Value ?? false)" />
+                Keep the ISO afterwards
+            </label>
+        </div>
+        <div>
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(!CanStart)">🔁 Copy</button>
+        </div>
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="font-size: 13px;"><strong>@StepTitle</strong></span>
+            @if (stepPercent >= 0)
+            {
+                <div class="progress-bar"><div class="progress-fill" style="width: @F(stepPercent)%;"></div></div>
+            }
+            <span style="font-size: 12px; color: var(--text-secondary);">@stepText</span>
+            @if (waitingForBlank)
+            {
+                <span style="font-size: 13px; color: var(--amber);">💿 @WaitText</span>
+            }
+            <button class="bay-btn cancel-btn" style="width: auto; align-self: flex-start; padding: 8px 18px;" @onclick="Cancel" disabled="@cancelRequested">
+                @(cancelRequested ? "Stopping…" : "✖ Stop")
+            </button>
+        </div>
+    }
+
+    @if (summary is not null && state == State.Idle)
+    {
+        <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px;">
+            <strong style="color: @SummaryColor;">@SummaryIcon @summary</strong>
+            @foreach (var line in copyLines)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">@line</span>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>True while Copy mode is showing: the drive list is checked then.</summary>
+    [Parameter] public bool Visible { get; set; }
+
+    private enum State { Idle, Running }
+    private State state = State.Idle;
+
+    private List<string> drives = new();
+    private string source = "", target = "";
+    private DiscReader.DiscInfo? disc;
+    private bool checking, wasVisible, disposed;
+    private int copies = 1;
+    private bool verify = true, keepIso;
+    private string tempFolder = DefaultTempFolder();
+
+    private CancellationTokenSource? cts;
+    private bool cancelRequested, waitingForBlank;
+    private string stepTitle = "", stepText = "";
+    private double stepPercent = -1;
+    private string waitLetter = "";
+    private int copyNumber;
+    private string? summary;
+    private bool summaryOk, summaryStopped;
+    private readonly List<string> copyLines = new();
+
+    private bool CanStart => !checking && disc is not null && disc.Ready && disc.Problem is null && target.Length > 0 && SpaceProblem is null;
+    private string StepTitle => stepTitle;
+    private string WaitText => waitLetter == source && target == source
+        ? $"Take the original out of {waitLetter}: and put in a blank disc."
+        : $"Put a blank disc in {waitLetter}:.";
+    private string DiscText =>
+        drives.Count == 0 ? "No disc drives on this PC."
+        : checking ? "Checking the disc…"
+        : disc is null ? ""
+        : disc.Problem is not null ? "⚠ " + disc.Problem
+        : $"{disc.Kind} · {disc.Label} · {disc.FileSystem} · {DiscHealthService.FormatBytes(disc.Bytes)}";
+    private string DiscColor => disc?.Problem is not null ? "var(--amber)" : "var(--text-secondary)";
+    private string TargetLabel(string d) => d == source ? $"Drive {d}: (the same drive: swap the discs when asked)" : $"Drive {d}:";
+
+    // Room for the temporary ISO?
+    private string? SpaceProblem
+    {
+        get
+        {
+            if (disc is null || !disc.Ready) return null;
+            try
+            {
+                var root = Path.GetPathRoot(Path.GetFullPath(tempFolder));
+                if (root is null) return null;
+                long free = new DriveInfo(root).AvailableFreeSpace;
+                return free < disc.Bytes + 100_000_000L
+                    ? $"Not enough space for the temporary ISO: it needs {DiscHealthService.FormatBytes(disc.Bytes)}, {root} has {DiscHealthService.FormatBytes(free)} free. Choose another folder."
+                    : null;
+            }
+            catch { return null; }
+        }
+    }
+
+    private string SummaryColor => summaryOk ? "var(--success)" : summaryStopped ? "var(--text-secondary)" : "var(--amber)";
+    private string SummaryIcon => summaryOk ? "✅" : summaryStopped ? "⏸" : "⚠";
+
+    private static string F(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h {t.Minutes}m" : t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes} min {t.Seconds}s" : $"{t.Seconds}s";
+
+    private static string DefaultTempFolder()
+    {
+        try
+        {
+            var cfg = ConfigService.Load();
+            if (!string.IsNullOrWhiteSpace(cfg.OutputBaseFolder) && Directory.Exists(cfg.OutputBaseFolder)) return cfg.OutputBaseFolder;
+        }
+        catch { }
+        return Path.GetTempPath();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && !wasVisible && state == State.Idle)
+        {
+            wasVisible = true;
+            ListDrives();
+            await CheckDiscAsync();
+        }
+        else if (!Visible) wasVisible = false;
+    }
+
+    private void ListDrives()
+    {
+        try
+        {
+            drives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.CDRom)
+                .Select(d => d.Name.TrimEnd('\\', ':')).OrderBy(l => l).ToList();
+        }
+        catch { drives = new(); }
+        if (!drives.Contains(source)) source = drives.FirstOrDefault() ?? "";
+        if (!drives.Contains(target)) target = source;
+    }
+
+    private async Task OnSourceChanged(ChangeEventArgs e)
+    {
+        bool sameAsBefore = target == source;
+        source = e.Value?.ToString() ?? "";
+        if (sameAsBefore || target.Length == 0) target = source;
+        await CheckDiscAsync();
+    }
+
+    private void OnCopiesChanged(ChangeEventArgs e) => copies = int.TryParse(e.Value?.ToString(), out var n) ? Math.Clamp(n, 1, 10) : 1;
+
+    private async Task RefreshAsync()
+    {
+        ListDrives();
+        await CheckDiscAsync();
+    }
+
+    private async Task CheckDiscAsync()
+    {
+        disc = null;
+        if (string.IsNullOrEmpty(source)) return;
+        var letter = source;
+        if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter))
+        {
+            disc = new DiscReader.DiscInfo { DriveLetter = letter, Problem = "This drive is busy (ripping, burning or checking). Pick another, or wait until it's done." };
+            return;
+        }
+        checking = true;
+        StateHasChanged();
+        var info = await Task.Run(() => DiscReader.DescribeDisc(letter));
+        checking = false;
+        if (letter != source) return;
+        disc = info;
+        if (!disposed) StateHasChanged();
+    }
+
+    private void ChooseFolder()
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Folder for the temporary ISO", InitialDirectory = tempFolder };
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) == true) tempFolder = dlg.FolderName;
+    }
+
+    private void Ui() { if (!disposed) InvokeAsync(StateHasChanged); }
+
+    private async Task Start()
+    {
+        if (!CanStart || disc is null) return;
+        string src = source, dst = target, label = disc.Label;
+        bool oneDrive = src == dst;
+        int count = copies;
+        bool doVerify = verify, keep = keepIso;
+        if (RipActivity.IsDriveBusy(src) || BurnService.IsBusy(src) || RipActivity.IsDriveBusy(dst) || BurnService.IsBusy(dst))
+        {
+            summary = "A drive is busy (ripping, burning or checking). Try again when it's done.";
+            summaryOk = summaryStopped = false;
+            return;
+        }
+
+        string iso = Path.Combine(tempFolder, $"ArchivSector-OD copy of {Safe(label)} {DateTime.Now:yyyyMMdd-HHmmss}.iso");
+        state = State.Running;
+        cancelRequested = false;
+        summary = null;
+        copyLines.Clear();
+        cts = new CancellationTokenSource();
+        var ct = cts.Token;
+        int ok = 0, failed = 0;
+        bool stopped = false, readOk = false, unchecked_ = false;
+        LogService.Write($"{src}:", $"Copy: {label} from {src}: to {dst}:, {count} cop{(count == 1 ? "y" : "ies")}, verify {(doVerify ? "on" : "off")}; temporary ISO {iso}");
+
+        try
+        {
+            // 1. Read the original.
+            stepTitle = $"Reading {label} in {src}:";
+            stepText = "Starting…";
+            stepPercent = 0;
+            Ui();
+            var reporter = new Progress<DiscReader.Progress>(p =>
+            {
+                stepPercent = p.Percent;
+                stepText = $"{p.Percent:0.0}% · {DiscHealthService.FormatSpeed(p.BytesPerSec, p.OneX)} · {Dur(p.Remaining)} left" + (p.BadSectors > 0 ? $" · ⚠ {p.BadSectors:N0} unreadable" : "");
+                Ui();
+            });
+            RipActivity.Set(src, "copy", true);
+            DiscReader.Result read;
+            try
+            {
+                read = await DiscReader.ReadAsync(new DiscReader.Options { DriveLetter = src, OutputPath = iso, Retries = 3, ContinueOnErrors = false },
+                    reporter, ct, line => LogService.Write($"{src}:", line));
+            }
+            finally { RipActivity.Set(src, "copy", false); }
+            if (!read.Ok)
+            {
+                stopped = read.Cancelled || ct.IsCancellationRequested;
+                summary = stopped ? "Stopped while reading the original. Nothing was burned." : "The original couldn't be read, so nothing was burned: " + read.Message;
+                return;
+            }
+            readOk = true;
+            long isoBytes = new FileInfo(iso).Length;
+
+            // One drive: out with the original, in with a blank. Reading
+            // leaves the disc's volume closed, and Windows' normal eject can
+            // then quietly do nothing, so the drive is asked directly if needed.
+            if (oneDrive) await EjectAsync(src);
+
+            // 2. Burn each copy.
+            for (copyNumber = 1; copyNumber <= count && !ct.IsCancellationRequested; copyNumber++)
+            {
+                string which = count > 1 ? $"copy {copyNumber} of {count}" : "the copy";
+                stepTitle = $"Waiting for a blank disc for {which}";
+                stepText = "";
+                stepPercent = -1;
+                waitLetter = dst;
+                waitingForBlank = true;
+                Ui();
+
+                BurnEngine.BlankInfo? blank = null;
+                string? sizeNote = null;
+                while (!ct.IsCancellationRequested)
+                {
+                    blank = await Task.Run(() => BurnService.QueryBlank(dst));
+                    if (blank is not null)
+                    {
+                        long room = BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes));
+                        if (isoBytes <= room) break;
+                        if (sizeNote is null)
+                        {
+                            sizeNote = $"The blank {blank.MediaType} is too small ({DiscHealthService.FormatBytes(room)} for {DiscHealthService.FormatBytes(isoBytes)}). Put in a bigger one.";
+                            stepText = sizeNote;
+                            Ui();
+                        }
+                        blank = null;
+                    }
+                    try { await Task.Delay(3000, ct); } catch (OperationCanceledException) { }
+                }
+                waitingForBlank = false;
+                if (blank is null) break;
+
+                // The usual program: our own writer when it can write this disc.
+                var want = BurnService.SavedWriter();
+                bool imgInstalled = BurnService.ImgBurnPath() is not null;
+                bool direct = want == BurnService.Writer.Own && BurnEngine.DirectWriteSupports(blank.MediaType);
+                bool imgBurn = !direct && (want == BurnService.Writer.ImgBurn || want == BurnService.Writer.Own) && imgInstalled;
+                if (!direct && !imgBurn && isoBytes > blank.FreeBytes && BurnEngine.DirectWriteSupports(blank.MediaType)) direct = true;
+
+                stepTitle = $"Burning {which} to the {blank.MediaType} in {dst}:";
+                stepText = imgBurn ? "Burning with ImgBurn (progress in its window)…" : "Preparing…";
+                stepPercent = -1;
+                Ui();
+                var burnProgress = new Progress<BurnEngine.Progress>(p =>
+                {
+                    stepPercent = p.Percent;
+                    stepText = p.Phase + (p.BytesPerSec > 0 ? $" · {p.BytesPerSec / 1_000_000:0.0} MB/s · {Dur(p.Remaining)} left" : "…");
+                    Ui();
+                });
+                var r = await BurnService.BurnAsync(dst, iso, doVerify, label, "", burnProgress, ct, imgBurn, false, direct);
+                LogService.Write($"{dst}:", $"Copy ({which}): {r.Message}");
+                bool good = r.Burned && r.Verified != false;
+                if (doVerify && r.Burned && r.Verified is null) unchecked_ = true;   // burned, but the check was stopped
+                copyLines.Add($"{(good ? "✅" : "⚠")} {Cap(which)}: {r.Message}");
+                if (good) ok++; else failed++;
+                if (!r.Burned && (r.Cancelled || ct.IsCancellationRequested)) { stopped = true; break; }
+
+                // Out it comes, ready for the next blank (and the last copy too).
+                if (r.Burned) await EjectAsync(dst);
+            }
+            stopped |= ct.IsCancellationRequested;
+            summary = stopped && ok + failed < count
+                ? $"Stopped. {ok} cop{(ok == 1 ? "y" : "ies")} made" + (failed > 0 ? $", {failed} with a problem." : ".")
+                : failed == 0 ? (count == 1 ? $"{label} was copied" + (doVerify ? " and verified." : ".") : $"All {count} copies of {label} were made" + (doVerify ? " and verified." : "."))
+                : $"{ok} of {count} copies made; {failed} had a problem.";
+        }
+        catch (Exception ex)
+        {
+            summary = "The copy stopped because of an error: " + ex.Message;
+            LogService.Write($"{src}:", "Copy: " + summary);
+        }
+        finally
+        {
+            waitingForBlank = false;
+            // The ISO is kept when asked, and also when a copy wasn't made or
+            // didn't verify, so that disc can be checked (Verify disc, maybe
+            // in another drive) or burned again without reading the original again.
+            bool unfinished = readOk && (failed > 0 || ok < count || unchecked_);
+            if (File.Exists(iso))
+            {
+                if (keep) copyLines.Add("The ISO was kept: " + iso);
+                else if (unfinished) copyLines.Add("The ISO was kept, so you can check the copy with Verify disc (another drive may read it better) or burn it again: " + iso);
+                else { try { File.Delete(iso); } catch { } }
+            }
+            cts.Dispose();
+            cts = null;
+            state = State.Idle;
+            stepPercent = -1;
+        }
+        summaryOk = !stopped && failed == 0 && ok == count;
+        summaryStopped = stopped && failed == 0;
+        LogService.Write($"{src}:", "Copy finished: " + summary);
+        try { if (ConfigService.Load().SoundAlerts) System.Media.SystemSounds.Exclamation.Play(); } catch { }
+        Ui();
+    }
+
+    // Straight to the drive first (Windows' normal eject can report success
+    // without the tray moving, e.g. just after the disc was read directly),
+    // then check the tray really opened, and if not, try Windows' eject.
+    private static async Task EjectAsync(string letter)
+    {
+        var r = await Task.Run(() => TrayControlService.EjectWithoutVolume(letter));
+        await Task.Delay(1500);
+        var tray = await Task.Run(() => BurnEngine.QueryTray(letter));
+        if (tray == BurnEngine.TrayState.Closed)
+        {
+            r = await Task.Run(() => TrayControlService.Eject(letter));
+            await Task.Delay(1500);
+            tray = await Task.Run(() => BurnEngine.QueryTray(letter));
+        }
+        LogService.Write($"{letter}:", "Copy: eject " + (tray == BurnEngine.TrayState.Open ? "OK" : tray == BurnEngine.TrayState.Closed ? "didn't open the tray (" + r.Detail + ")" : "sent (" + r.Detail + ")"));
+    }
+
+    private static string Cap(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    private static string Safe(string name)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+        return name.Trim().Length == 0 ? "disc" : name.Trim();
+    }
+
+    private void Cancel()
+    {
+        var owner = System.Windows.Application.Current?.MainWindow;
+        var msg = "Stop copying?\n\nIf a write-once disc is being burned, it can't be used again.";
+        var ans = owner is null
+            ? MessageBox.Show(msg, "Copy a disc", MessageBoxButton.YesNo, MessageBoxImage.Warning)
+            : MessageBox.Show(owner, msg, "Copy a disc", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (ans != MessageBoxResult.Yes) return;
+        cancelRequested = true;
+        cts?.Cancel();
+    }
+
+    // Leaving the tab doesn't stop a copy; it carries on.
+    public void Dispose() => disposed = true;
+}
