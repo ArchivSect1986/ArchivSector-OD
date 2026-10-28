@@ -3,8 +3,9 @@
 
 @*
     Erase (v4.0 week 3): shown on a Burn tab drive card that holds a
-    rewritable disc. Quick or full erase with Windows' burning engine
-    (BurnEngine.EraseAsync); the drive is marked busy while it runs and
+    rewritable disc. Quick or full erase (BurnEngine.EraseAsync): CD-RW
+    and DVD-RW with Windows' burning engine, DVD+RW and BD-RE by
+    ArchivSector-OD itself (beta 2; those can be stopped). The drive is marked busy while it runs and
     the card re-reads the drive afterwards, so the now blank disc gets the
     normal burn screen.
 *@
@@ -30,13 +31,13 @@ else if (state == State.Confirm && info is not null)
             <strong>🧽 Erase the @(info.MediaType.Length > 0 ? info.MediaType : "disc") in @DriveLetter:</strong>
             <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
                 <input type="radio" name="erase-@DriveLetter" checked="@(!full)" @onchange="() => full = false" style="margin-top: 3px;" />
-                <span><strong>Quick erase</strong> (recommended)<br /><span style="font-size: 12px; color: var(--text-secondary);">Clears the disc's contents list. About a minute.</span></span>
+                <span><strong>Quick erase</strong> (recommended)<br /><span style="font-size: 12px; color: var(--text-secondary);">@QuickText</span></span>
             </label>
             <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
                 <input type="radio" name="erase-@DriveLetter" checked="@full" @onchange="() => full = true" style="margin-top: 3px;" />
-                <span><strong>Full erase</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Writes over the whole disc. For a disc that misbehaves, or one you're giving away. CD-RW about 10 minutes, DVD-RW up to an hour.</span></span>
+                <span><strong>Full erase</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">@FullText</span></span>
             </label>
-            <span style="font-size: 12px; color: var(--amber);">Everything on the disc will be gone. An erase can't be stopped once it starts.</span>
+            <span style="font-size: 12px; color: var(--amber);">@WarningText</span>
             <div style="display: flex; gap: 6px;">
                 <button class="bay-btn dvd" style="flex: 2; text-align: center;" @onclick="Start">🧽 Erase</button>
                 <button class="bay-btn tray-btn" style="flex: 1;" @onclick="Reset">Cancel</button>
@@ -58,6 +59,12 @@ else if (state == State.Running)
             <div class="progress-fill" style="width: @PercentText%; @(Unknown ? "opacity: 0.5;" : "")"></div>
         </div>
         <span style="font-size: 12px; color: var(--text-secondary);">@ProgressLine</span>
+        @if (canStop)
+        {
+            <button class="bay-btn cancel-btn" style="width: auto; align-self: flex-start; padding: 6px 14px;" @onclick="Stop" disabled="@stopRequested">
+                @(stopRequested ? "Stopping…" : "✖ Stop erasing")
+            </button>
+        }
     </div>
 }
 else if (state == State.Done && result is not null)
@@ -83,6 +90,26 @@ else if (state == State.Done && result is not null)
     private BurnEngine.EraseResult? result;
     private bool full;
     private bool disposed;
+    // DVD+RW / BD-RE (erased by ArchivSector-OD itself): a full erase can be stopped safely.
+    private bool canStop, stopRequested;
+    private CancellationTokenSource? cts;
+
+    private bool Direct => info?.Direct == true;
+    private string QuickText => Direct
+        ? "Wipes the start and end of the disc, where its file list lives. A few seconds."
+        : "Clears the disc's contents list. About a minute.";
+    private string FullText => Direct
+        ? "Also writes zeros over every sector. For a disc you're giving away. BD-RE about 45 minutes, DVD+RW about 15. Can be stopped, and the disc is still blank."
+        : "Writes over the whole disc. For a disc that misbehaves, or one you're giving away. CD-RW about 10 minutes, DVD-RW up to an hour.";
+    private string WarningText => Direct
+        ? "Everything on the disc will be gone."
+        : "Everything on the disc will be gone. An erase can't be stopped once it starts.";
+
+    private void Stop()
+    {
+        stopRequested = true;
+        cts?.Cancel();
+    }
 
     private bool Unknown => progress is null || progress.Percent < 0;
     private string PercentText => Unknown ? "100" : progress!.Percent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
@@ -115,6 +142,9 @@ else if (state == State.Done && result is not null)
         }
         state = State.Running;
         progress = null;
+        canStop = Direct && full;
+        stopRequested = false;
+        cts = new CancellationTokenSource();
         await BusyChanged.InvokeAsync(true);
         StateHasChanged();
 
@@ -123,7 +153,7 @@ else if (state == State.Done && result is not null)
         BurnEngine.EraseResult r;
         try
         {
-            r = await BurnEngine.EraseAsync(letter, full, reporter, line => LogService.Write($"{letter}:", line));
+            r = await BurnEngine.EraseAsync(letter, full, reporter, line => LogService.Write($"{letter}:", line), cts.Token);
         }
         catch (Exception ex)
         {
@@ -132,6 +162,9 @@ else if (state == State.Done && result is not null)
         finally
         {
             RipActivity.Set(letter, "erase", false);
+            cts.Dispose();
+            cts = null;
+            canStop = false;
         }
         result = r;
         state = State.Done;

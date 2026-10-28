@@ -113,6 +113,11 @@
         </p>
     }
 
+    @if (!string.IsNullOrEmpty(BlankMediaType) && blankDiscLine is not null)
+    {
+        <p class="bay-meta" style="margin-top: -6px;">@blankDiscLine</p>
+    }
+
     @if (!string.IsNullOrEmpty(DriveModel))
     {
         <p class="bay-meta" style="margin-top: -6px; display: flex; align-items: center; gap: 10px;">
@@ -640,8 +645,79 @@
     private List<string> logLines = new();
     private bool showLog = false;
 
+    // v4.0 beta 2: the Drive Bays tab is showing (tray watching only runs then).
+    [Parameter] public bool TabVisible { get; set; } = true;
+
+    // Tray watching (v4.0 beta 2): every couple of seconds while the Drive
+    // Bays tab is showing and the drive isn't busy, the drive is asked
+    // whether its tray is open (a quick question that doesn't spin the
+    // disc), so Eject/Close Tray follows the real tray, even when it's
+    // opened or shut with the drive's own button. The disc itself is
+    // re-read by the app's normal drive polling, as before.
+    private bool watching;
+
+    private async Task WatchTrayAsync()
+    {
+        if (watching) return;
+        watching = true;
+        while (!bayDisposed)
+        {
+            try { await Task.Delay(2000); } catch { }
+            if (bayDisposed) break;
+            if (!TabVisible || isTrayBusy || burnRunning) continue;
+            var l = DriveLetter;
+            if (RipActivity.IsDriveBusy(l) || BurnService.IsBusy(l) || BurnService.IsPaused(l)) continue;
+            ArchivSector_OD.Burning.BurnEngine.TrayState now;
+            try { now = await Task.Run(() => ArchivSector_OD.Burning.BurnEngine.QueryTray(l)); }
+            catch { continue; }
+            if (now == ArchivSector_OD.Burning.BurnEngine.TrayState.Unknown) continue;
+            bool open = now == ArchivSector_OD.Burning.BurnEngine.TrayState.Open;
+            if (open != trayIsOpen)
+            {
+                trayIsOpen = open;
+                trayMessage = null;
+                if (!bayDisposed) await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    // A blank disc's maker and write speeds (v4.0 beta 2), read once when it
+    // shows up, the same as the Burn tab's Drive info. Only blank discs: a
+    // disc with data may be about to be ripped, and that's left alone.
+    private string? blankDiscLine;
+    private bool bayDisposed;
+
+    private async Task ReadBlankDiscAsync()
+    {
+        blankDiscLine = null;
+        var l = DriveLetter;
+        await Task.Delay(1500);   // let the drive settle after the disc was detected
+        if (bayDisposed || string.IsNullOrEmpty(BlankMediaType)) return;
+        if (RipActivity.IsDriveBusy(l) || BurnService.IsBusy(l)) return;
+        try
+        {
+            var rep = await ArchivSector_OD.Burning.DriveInspector.InspectAsync(l);
+            var disc = rep.Sections.FirstOrDefault(sec => sec.Title == "Disc in the drive");
+            if (disc is null) return;
+            string Get(string label) => disc.Rows.FirstOrDefault(r => r.Label == label)?.Value ?? "";
+            var code = Get("Maker code");
+            if (code.Length == 0) code = Get("Maker code (ATIP)").Replace("lead-in ", "");
+            var madeBy = Get("Made by");
+            if (madeBy.StartsWith("not in", StringComparison.OrdinalIgnoreCase)) madeBy = "";
+            var speeds = Get("Write speeds");
+            var parts = new List<string>();
+            if (madeBy.Length > 0) parts.Add("Made by " + madeBy + (code.Length > 0 ? $" ({code})" : ""));
+            else if (code.Length > 0) parts.Add("Maker code " + code);
+            if (speeds.Length > 0) parts.Add("Write speeds " + speeds);
+            blankDiscLine = parts.Count > 0 ? string.Join(" • ", parts) : null;
+        }
+        catch { blankDiscLine = null; }
+        if (!bayDisposed) await InvokeAsync(StateHasChanged);
+    }
+
     protected override void OnInitialized()
     {
+        _ = WatchTrayAsync();
         var config = ConfigService.Load();
         if (config.BayLabels.TryGetValue(DriveLetter, out var savedLabel))
             customLabel = savedLabel;
@@ -2372,7 +2448,8 @@
         // never counts as "media present", so the check below misses it,
         // and the button kept saying "Close Tray").
         bool blank = !string.IsNullOrEmpty(BlankMediaType);
-        if (blank && !previousBlank) trayIsOpen = false;
+        if (blank && !previousBlank) { trayIsOpen = false; _ = ReadBlankDiscAsync(); }
+        if (!blank) blankDiscLine = null;
         previousBlank = blank;
 
         if (previousMediaPresent && !MediaPresent)
@@ -2421,6 +2498,7 @@
 
     public void Dispose()
     {
+        bayDisposed = true;
         StopProgressTimer();
         BatchSyncService.StateChanged -= OnBatchSyncStateChanged;
         RipActivity.ClearDrive(DriveLetter);
