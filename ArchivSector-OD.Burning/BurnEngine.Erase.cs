@@ -11,15 +11,22 @@ namespace ArchivSector_OD.Burning
     //   * Full erase: writes over the whole disc. Slower (CD-RW about
     //     10 minutes, DVD-RW up to an hour), for a disc that misbehaves
     //     or that's being passed on.
-    // Windows' engine can't erase every kind: DVD+RW and BD-RE usually
-    // aren't supported (they can be written over without erasing). The
-    // direct drive connection in week 4 adds that. QueryErase says which.
-    // An erase can't be stopped once it starts.
+    // Windows' engine can't erase DVD+RW or BD-RE (they're written over in
+    // place), so those are erased by ArchivSector-OD itself (v4.0 beta 2,
+    // EraseOverwritable below):
+    //   * Quick erase: zeros over the start and the end of the disc, where
+    //     its file system lives (ISO 9660 and UDF), so the disc reads as
+    //     blank. A few seconds.
+    //   * Full erase: the same, then zeros over every sector. BD-RE about
+    //     45 minutes at 2x, DVD+RW about 15 minutes at 4x. It can be stopped
+    //     safely: the disc is already blank after the first step.
+    // A CD-RW/DVD-RW erase (Windows' engine) can't be stopped once it starts.
     public static partial class BurnEngine
     {
         public sealed class EraseInfo
         {
             public bool CanErase;
+            public bool Direct;              // erased by ArchivSector-OD itself (DVD+RW, BD-RE): can be stopped
             public string MediaType = "";
             public string? Problem;          // why it can't be erased here
         }
@@ -96,6 +103,9 @@ namespace ArchivSector_OD.Burning
                         }
                         info.MediaType = WritableLabel(type) ?? "";
 
+                        // DVD+RW and BD-RE: erased by ArchivSector-OD itself.
+                        if (type is 7 or 19) { info.CanErase = true; info.Direct = true; return; }
+
                         eraseObj = Activator.CreateInstance(Type.GetTypeFromProgID("IMAPI2.MsftDiscFormat2Erase")!)!;
                         dynamic erase = eraseObj;
                         bool recorderOk = false, mediaOk = false;
@@ -105,7 +115,7 @@ namespace ArchivSector_OD.Burning
                         if (mediaOk) { info.CanErase = true; return; }
                         info.Problem = type switch
                         {
-                            7 or 13 or 19 => $"Windows' burning engine can't erase a {info.MediaType}. This kind of disc can be written over without erasing; that comes with the direct drive connection.",
+                            13 => $"A {info.MediaType} can't be erased here yet. It can be written over without erasing.",
                             2 or 6 or 8 or 9 or 11 or 18 => $"A {info.MediaType} is write-once, so it can't be erased.",
                             0 => "There's no disc in the drive (or the drive can't read it).",
                             _ => "This disc can't be erased with Windows' burning engine.",
@@ -128,7 +138,8 @@ namespace ArchivSector_OD.Burning
         /// drive busy so nothing else asks it anything meanwhile. Can't be
         /// cancelled once it starts.
         /// </summary>
-        public static Task<EraseResult> EraseAsync(string driveLetter, bool full, IProgress<EraseProgress>? progress, Action<string>? log = null)
+        public static Task<EraseResult> EraseAsync(string driveLetter, bool full, IProgress<EraseProgress>? progress, Action<string>? log = null,
+            CancellationToken ct = default)
         {
             var letter = Norm(driveLetter);
             if (!Busy.TryAdd(letter, true))
@@ -141,7 +152,8 @@ namespace ArchivSector_OD.Burning
                 try
                 {
                     log?.Invoke($"Erase: {(full ? "full" : "quick")} erase of the disc in {letter}: started");
-                    RunSta(() => Erase(letter, full, progress, clock, r));
+                    if (!EraseOverwritable(letter, full, progress, clock, ct, r, log))
+                        RunSta(() => Erase(letter, full, progress, clock, r));
                 }
                 catch (Exception ex)
                 {
@@ -161,6 +173,131 @@ namespace ArchivSector_OD.Burning
                 log?.Invoke($"Erase: {r.Message} ({r.Time:hh\\:mm\\:ss})");
                 return r;
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        }
+
+        // ---- DVD+RW and BD-RE: erased by ArchivSector-OD itself ----
+        // Returns false when the disc isn't one of these (Windows' engine then
+        // erases it); true when it handled the disc (r says how it went).
+        private const int QuickEraseSectors = 1024;   // 2 MB at each end: every ISO 9660 / UDF structure that says "files are here"
+
+        private static bool EraseOverwritable(string letter, bool full, IProgress<EraseProgress>? progress, Stopwatch clock, CancellationToken ct, EraseResult r, Action<string>? log)
+        {
+            using var drive = ScsiDrive.Open(letter, out _);
+            if (drive is null) return false;
+            if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromSeconds(30))) return false;
+            var cfg = new byte[8];
+            var rep = drive.Read(new byte[] { 0x46, 0x02, 0, 0, 0, 0, 0, 0, 8, 0 }, cfg, 10);
+            int profile = rep.Ok ? (cfg[6] << 8) | cfg[7] : 0;
+            if (profile is not (ProfileBdRe or ProfileDvdPlusRw)) return false;
+            string name = profile == ProfileBdRe ? "BD-RE" : "DVD+RW";
+
+            // Never formatted: nothing has ever been written, so it's blank already.
+            bool stopBackgroundFormat = false;
+            if (profile == ProfileBdRe)
+            {
+                var fc = new byte[12];
+                rep = drive.Read(new byte[] { 0x23, 0, 0, 0, 0, 0, 0, 0, 12, 0 }, fc, 10);
+                if (rep.Ok && (fc[8] & 3) != 2)
+                {
+                    r.Ok = true;
+                    r.Message = "This BD-RE isn't formatted yet, so it's already blank and ready to burn.";
+                    return true;
+                }
+            }
+            else
+            {
+                var di = new byte[34];
+                rep = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
+                int bg = rep.Ok ? di[7] & 3 : 3;
+                if (bg == 0)
+                {
+                    r.Ok = true;
+                    r.Message = "This DVD+RW has never been written, so it's already blank and ready to burn.";
+                    return true;
+                }
+                stopBackgroundFormat = bg is 1 or 2;
+            }
+
+            var cap = new byte[8];
+            rep = drive.Read(new byte[] { 0x25, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, cap, 10);
+            long sectors = rep.Ok ? BE32(cap, 0) + 1 : 0;
+            if (sectors < QuickEraseSectors * 2) { r.Message = $"The drive didn't say how big the {name} is" + (rep.Ok ? "." : ": " + rep.Describe()); return true; }
+            log?.Invoke($"Erase: {name}, {sectors:N0} sectors; {(full ? "zeros over the whole disc" : "zeros over the first and last 2 MB")}");
+
+            drive.LockAndDismount();
+            drive.Command(new byte[] { 0x1E, 0, 0, 0, 1, 0 }, 10);                                   // keep the tray shut
+            drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);       // fastest speed
+            try
+            {
+                // 1. The start and the end: after this the disc reads as blank.
+                long total = full ? sectors + QuickEraseSectors * 2 : QuickEraseSectors * 2;
+                long done = 0;
+                if (!ZeroSectors(drive, 0, QuickEraseSectors, ref done, total, progress, clock, CancellationToken.None, r, name)) return true;
+                if (!ZeroSectors(drive, sectors - QuickEraseSectors, QuickEraseSectors, ref done, total, progress, clock, CancellationToken.None, r, name)) return true;
+
+                // 2. Full erase: every sector. Stopping here is harmless.
+                bool stopped = false;
+                if (full && !ZeroSectors(drive, 0, sectors, ref done, total, progress, clock, ct, r, name))
+                {
+                    if (!ct.IsCancellationRequested) return true;   // a write failed: r says where
+                    stopped = true;
+                }
+
+                drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600);                  // SYNCHRONIZE CACHE
+                if (stopBackgroundFormat) StopDvdPlusRwFormat(drive, null, log);
+                WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(5));
+                r.Ok = true;
+                r.Message = stopped
+                    ? $"Full erase stopped at {100.0 * done / total:0}%. The {name} is blank and ready to burn (its file list was wiped first)."
+                    : full ? $"Full erase finished: every sector of the {name} was overwritten. It's blank and ready to burn."
+                    : $"Quick erase finished. The {name} is blank and ready to burn.";
+                return true;
+            }
+            finally
+            {
+                drive.Command(new byte[] { 0x1E, 0, 0, 0, 0, 0 }, 10);
+                drive.Unlock();
+            }
+        }
+
+        // Zeros over count sectors from lba, 64 KB at a time. False if a write
+        // failed (r.Message says where) or ct asked to stop.
+        private static bool ZeroSectors(ScsiDrive drive, long lba, long count, ref long done, long total, IProgress<EraseProgress>? progress,
+            Stopwatch clock, CancellationToken ct, EraseResult r, string name)
+        {
+            var zeros = new byte[DirectChunkSectors * Sector];
+            var lastReport = TimeSpan.Zero;
+            var start = clock.Elapsed;
+            long startDone = done;
+            for (long at = lba, end = lba + count; at < end;)
+            {
+                if (ct.IsCancellationRequested) return false;
+                int n = (int)Math.Min(DirectChunkSectors, end - at);
+                var data = n == DirectChunkSectors ? zeros : new byte[n * Sector];
+                long a = at;
+                var cdb = new byte[] { 0x2A, 0, (byte)(a >> 24), (byte)(a >> 16), (byte)(a >> 8), (byte)a, 0, (byte)(n >> 8), (byte)n, 0 };
+                var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
+                if (!rep.Ok)
+                {
+                    r.Message = $"The erase failed at sector {a:N0}: {rep.Describe()}. The {name} can be erased again.";
+                    return false;
+                }
+                at += n;
+                done += n;
+                if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(500))
+                {
+                    lastReport = clock.Elapsed;
+                    double secs = (clock.Elapsed - start).TotalSeconds;
+                    double rate = secs > 1 ? (done - startDone) / secs : 0;            // sectors per second
+                    progress?.Report(new EraseProgress
+                    {
+                        Elapsed = clock.Elapsed,
+                        Percent = Math.Min(99, 100.0 * done / total),
+                        Remaining = rate > 0 ? TimeSpan.FromSeconds((total - done) / rate) : TimeSpan.Zero,
+                    });
+                }
+            }
+            return true;
         }
 
         private static void Erase(string letter, bool full, IProgress<EraseProgress>? progress, Stopwatch clock, EraseResult r)

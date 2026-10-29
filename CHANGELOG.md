@@ -4,6 +4,36 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v4.0.0-beta2 - 2026-10-28 (pre-release)
+
+The second test version of v4.0. Everything below is new since Beta 1.
+
+### ✨ Added
+* **💿 Burn BIN/CUE CD images with ArchivSector-OD's own writer.** Pick a **.cue** on the burn screen (or add it to the burn queue) with a blank CD-R or CD-RW in the drive. It's burned "session at once", the way ImgBurn burns BIN/CUE: data tracks, music tracks, one .bin per track (as Redumper writes them) or one for the whole disc, and track gaps. Music can also come from **.wav** files (CD-quality, 44.1 kHz 16-bit stereo). The verify compares every data sector exactly, and lines up the music first (every drive shifts it by a few samples) so a shift alone isn't counted as a fault. A .cue with FLAC or MP3 files explains how to convert them, or ImgBurn takes over.
+* **🔁 Copy disc**, a new Burn mode: make an exact copy of a disc, verified. **Data discs** (as an ISO), **music CDs**, and **CDs with data and music tracks** (many games), which are read to a temporary .bin + .cue with their track gaps. Use **one drive** (it ejects the original and asks for a blank) or **two**, and make **up to 10 copies**. The temporary image is deleted afterwards, or kept if a copy didn't verify, so you can check it or burn it again without re-reading the original.
+* **🧽 Erase for BD-RE and DVD+RW**, done by ArchivSector-OD itself: a quick erase wipes the start and end of the disc in seconds; a full erase also writes zeros over every sector, and can be stopped safely.
+* **Drive Bays tab:** the ⏏ Eject / Close Tray button follows the real tray (even with the drive's own button), and a blank disc shows **who made it and its write speeds**.
+
+### 🔧 Changed
+* **The burn queue takes BIN/CUE images** as well as ISOs (they need a blank CD).
+* **The verify shows the live speed** (over the last few seconds), so you see straight away if a drive slows down.
+
+### 🐛 Fixed
+* **The verify after a slower burn crawled along at the burn speed.** The drive is now set back to full speed once writing is done, and Verify disc sets it to full speed when it starts.
+
+### ✅ Resolved from Beta 1
+* The **CD-RW verify failures** listed as a known issue in Beta 1 were traced to a damaged image file, not to the drive or the discs: the same drive and CD-RWs burn and verify a full disc perfectly with a good image.
+
+### ⚠ Known issues
+* **Dual-layer DVD-R DL and BD-R DL** aren't written by the own writer yet: ImgBurn takes over for those.
+* **A DVD-RW in "overwrite" mode** needs a full erase before the own writer can burn it.
+* **Copy disc** doesn't copy CDs with more than one session (CD-Extra / Enhanced CD) or with a hidden track before track 1 yet.
+
+### Reporting a problem
+Same as Beta 1: open an issue on GitHub with **Burn → Drive info → 📋 Copy report**, the disc type and brand, and that day's log from `%AppData%\ArchivSector-OD\Logs`.
+
+---
+
 ## v4.0.0-beta1 - 2026-10-27 (pre-release)
 
 A test version of v4.0. Everything below is new since v3.4. Please report anything odd (see **Reporting a problem** at the end).

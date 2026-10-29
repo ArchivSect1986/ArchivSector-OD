@@ -19,7 +19,7 @@
         {
             <span class="bay-subtitle" style="margin: 0;">Windows' burning engine keeps @(DiscHealthService.FormatBytes(DiscBytes - BlankFreeBytes)) of it spare and can write @DiscHealthService.FormatBytes(BlankFreeBytes); ArchivSector-OD's own writer and ImgBurn use the whole disc.</span>
         }
-        <button class="bay-btn game" @onclick="ChooseIso" disabled="@Disabled">🔥 Burn an ISO to this disc…</button>
+        <button class="bay-btn game" @onclick="ChooseIso" disabled="@Disabled">@BurnButtonText</button>
     </div>
 }
 else if (state == State.Confirm && isoPath is not null)
@@ -27,6 +27,14 @@ else if (state == State.Confirm && isoPath is not null)
     <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px; margin-top: 6px;">
         <strong>🔥 Burn to @BlankMediaType</strong>
         <span style="overflow-wrap: anywhere;">@Path.GetFileName(isoPath)</span>
+        @if (cue is not null)
+        {
+            <span class="bay-subtitle" style="margin: 0;">@CueLine</span>
+        }
+        @if (CueProblem is not null)
+        {
+            <span style="color: var(--amber); font-size: 12px;">⚠ @CueProblem</span>
+        }
         <span class="bay-subtitle" style="margin: 0;">
             @DiscHealthService.FormatBytes(isoBytes) of @DiscHealthService.FormatBytes(Limit)
             (@(Limit > 0 ? (100.0 * isoBytes / Limit).ToString("0.0") : "?")% of what @EngineName can write)
@@ -41,7 +49,7 @@ else if (state == State.Confirm && isoPath is not null)
         }
         else if (TooBigForDisc)
         {
-            <span style="color: var(--danger); font-size: 12px;">⚠ This ISO is bigger than the disc. Pick a smaller ISO or a bigger disc.</span>
+            <span style="color: var(--danger); font-size: 12px;">⚠ This image is bigger than the disc. Pick a smaller one or a bigger disc.</span>
         }
         <div style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
             <span>Burn with:</span>
@@ -55,9 +63,9 @@ else if (state == State.Confirm && isoPath is not null)
                 <input type="radio" name="engine-@DriveLetter" checked="@(useImgBurn && !useDirect)" disabled="@(imgBurnPath is null)" @onchange="() => Pick(BurnService.Writer.ImgBurn)" />
                 ImgBurn @(imgBurnPath is null ? "(not installed)" : "(opens its own window with its progress)")
             </label>
-            <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;">
-                <input type="radio" name="engine-@DriveLetter" checked="@(!useImgBurn && !useDirect)" @onchange="() => Pick(BurnService.Writer.Windows)" />
-                Windows (built in, progress shown here)
+            <label style="display: flex; gap: 8px; align-items: center; cursor: @(IsCue ? "default" : "pointer"); opacity: @(IsCue ? "0.5" : "1");">
+                <input type="radio" name="engine-@DriveLetter" checked="@(!useImgBurn && !useDirect)" disabled="@IsCue" @onchange="() => Pick(BurnService.Writer.Windows)" />
+                Windows @WindowsLabel
             </label>
             @if (engineNote is not null)
             {
@@ -104,7 +112,7 @@ else if (state == State.Confirm && isoPath is not null)
         </label>
         <label style="display: flex; gap: 8px; align-items: center; cursor: @(verify ? "pointer" : "default"); font-size: 13px; opacity: @(verify ? "1" : "0.5");"
                title="Only after the disc was verified and every byte matched. You can restore it from the Recycle Bin.">
-            <input type="checkbox" checked="@(deleteIso && verify)" disabled="@(!verify)" @onchange="e => SetDeleteIso((bool)(e.Value ?? false))" />
+            <input type="checkbox" checked="@(deleteIso && verify && !IsCue)" disabled="@(!verify || IsCue)" @onchange="e => SetDeleteIso((bool)(e.Value ?? false))" />
             Move the ISO to the Recycle Bin once the disc is burned and verified
         </label>
         <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;"
@@ -215,7 +223,10 @@ else if (state == State.Done && result is not null)
     private bool useDirect;           // v4.0: ArchivSector-OD's own writer (the default)
     private BurnService.Writer preferred = BurnService.Writer.Own;   // what the user picked last (saved)
     private string? engineNote;       // why the preferred program isn't the one picked for this disc
-    private string DirectLabel => DirectAvailable ? "(recommended: whole disc, progress shown here)" : "(doesn't write " + BlankMediaType + " discs yet)";
+    private string DirectLabel => DirectAvailable ? "(recommended: whole disc, progress shown here)"
+        : IsCue && BlankMediaType is "CD-R" or "CD-RW" ? "(can't burn this image, see above)"
+        : IsCue ? "(BIN/CUE images go on CD-R or CD-RW)"
+        : "(doesn't write " + BlankMediaType + " discs yet)";
     private string WholeDiscWriterName => DirectAvailable ? "ArchivSector-OD's own writer" : "ImgBurn";
     private string SwitchingNote => "ArchivSector-OD's own writer couldn't start, so another program is taking over";
     private string FallbackNote => "If the own writer can't start on this drive, " + BurnService.FallbackName() + " takes over automatically.";
@@ -250,7 +261,20 @@ else if (state == State.Done && result is not null)
     }
 
     private bool Switching => progress is not null && progress.Phase.StartsWith("Switching to");
-    private bool DirectAvailable => BurnEngine.DirectWriteSupports(BlankMediaType);
+    private bool DirectAvailable => IsCue
+        ? BlankMediaType is "CD-R" or "CD-RW" && cue?.Problem is null
+        : BurnEngine.DirectWriteSupports(BlankMediaType);
+
+    // BIN/CUE CD images (beta 2): our own writer (CD-R/RW) or ImgBurn; Windows can't.
+    private CueImage? cue;
+    private bool IsCue => isoPath is not null && isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+    private string CueLine => cue is null ? "" : cue.Problem is null ? "BIN/CUE CD image: " + cue.Summary : "";
+    private string? CueProblem => !IsCue ? null
+        : BlankMediaType is not ("CD-R" or "CD-RW") ? "A BIN/CUE image is a CD image: it needs a blank CD-R or CD-RW, not a " + BlankMediaType + "."
+        : cue?.Problem is not null ? cue.Problem + (imgBurnPath is not null ? " ImgBurn is picked for it." : "")
+        : null;
+    private string BurnButtonText => BlankMediaType is "CD-R" or "CD-RW" ? "🔥 Burn an ISO or BIN/CUE to this disc…" : "🔥 Burn an ISO to this disc…";
+    private string WindowsLabel => IsCue ? "(can't burn BIN/CUE images)" : "(built in, progress shown here)";
     private string EngineName => useDirect ? "ArchivSector-OD's own writer" : useImgBurn ? "ImgBurn" : "Windows";
     private bool runningDirect;       // the burn running now uses our own writer on a disc where stopping is harmless (BD-RE, DVD+RW)
     private static bool healthCheck;  // health check after burning (remembered for this session)
@@ -271,7 +295,9 @@ else if (state == State.Done && result is not null)
     private long Limit => useImgBurn || useDirect ? DiscBytes : BlankFreeBytes;
     private bool TooBigForWindows => isoBytes > BlankFreeBytes;
     private bool TooBigForDisc => isoBytes > DiscBytes;
-    private bool CantStart => useImgBurn || useDirect ? TooBigForDisc : TooBigForWindows;
+    private bool CantStart => IsCue
+        ? (BlankMediaType is not ("CD-R" or "CD-RW")) || (!useDirect && !useImgBurn) || (useDirect && TooBigForDisc)
+        : useImgBurn || useDirect ? TooBigForDisc : TooBigForWindows;
 
     private string ImgBurnNote => verify
         ? "follow the progress in the ImgBurn window; ImgBurn verifies the disc after writing it"
@@ -295,14 +321,17 @@ else if (state == State.Done && result is not null)
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = $"Choose the ISO to burn to the {BlankMediaType}",
-            Filter = "Disc images (*.iso)|*.iso|All files (*.*)|*.*",
+            Title = BlankMediaType is "CD-R" or "CD-RW" ? $"Choose the ISO or BIN/CUE image to burn to the {BlankMediaType}" : $"Choose the ISO to burn to the {BlankMediaType}",
+            Filter = "Disc images (*.iso, *.cue)|*.iso;*.cue|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|All files (*.*)|*.*",
         };
         if (lastIsoFolder is not null && Directory.Exists(lastIsoFolder)) dlg.InitialDirectory = lastIsoFolder;
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
         isoPath = dlg.FileName;
         lastIsoFolder = Path.GetDirectoryName(isoPath);
         try { isoBytes = new FileInfo(isoPath).Length; } catch { isoBytes = 0; }
+        // A BIN/CUE CD image (beta 2): its size is the sectors it fills.
+        cue = IsCue ? CueImage.Load(isoPath) : null;
+        if (cue is not null && cue.Problem is null) isoBytes = (cue.LeadOutLba + 150) * 2048L;
         if (!engineLoaded)
         {
             imgBurnPath = BurnService.ImgBurnPath();
@@ -325,12 +354,14 @@ else if (state == State.Done && result is not null)
         useImgBurn = false;
         var want = preferred;
         if (want == BurnService.Writer.ImgBurn && imgBurnPath is null) want = BurnService.Writer.Own;
+        if (IsCue && want == BurnService.Writer.Windows) want = DirectAvailable ? BurnService.Writer.Own : BurnService.Writer.ImgBurn;
         if (want == BurnService.Writer.Own && !DirectAvailable)
         {
             want = imgBurnPath is not null ? BurnService.Writer.ImgBurn : BurnService.Writer.Windows;
             var instead = imgBurnPath is not null ? "ImgBurn" : "Windows";
-            engineNote = "ArchivSector-OD's own writer doesn't write " + BlankMediaType + " discs yet, so " + instead + " is picked.";
+            if (!IsCue) engineNote = "ArchivSector-OD's own writer doesn't write " + BlankMediaType + " discs yet, so " + instead + " is picked.";
         }
+        if (IsCue && want == BurnService.Writer.Windows) { useDirect = false; useImgBurn = false; return; }   // nothing can burn it here
         useDirect = want == BurnService.Writer.Own;
         useImgBurn = want == BurnService.Writer.ImgBurn;
         // An ISO that only fits on the whole disc (Windows keeps part of a
@@ -347,6 +378,7 @@ else if (state == State.Done && result is not null)
     // A program picked on this screen is remembered for next time.
     private void Pick(BurnService.Writer w)
     {
+        if (IsCue && w == BurnService.Writer.Windows) return;
         engineNote = null;
         useDirect = w == BurnService.Writer.Own && DirectAvailable;
         useImgBurn = w == BurnService.Writer.ImgBurn && imgBurnPath is not null;
@@ -382,7 +414,7 @@ else if (state == State.Done && result is not null)
         bool direct = useDirect && DirectAvailable;
         runningDirect = direct && BurnEngine.DirectStopIsSafe(BlankMediaType);
         bool imgBurn = useImgBurn && !direct;
-        bool delete = deleteIso && verify;
+        bool delete = deleteIso && verify && !IsCue;
         string engineName = direct ? "ArchivSector-OD's own writer" : imgBurn ? "ImgBurn" : "Windows";
         double speed = speedX;
         LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {engineName} (speed: {SpeedLog}, verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");

@@ -1,0 +1,459 @@
+using System.Diagnostics;
+
+namespace ArchivSector_OD.Burning
+{
+    // BIN/CUE burning (v4.0 beta 2): a CD image made of .bin file(s) and a
+    // .cue, burned by ArchivSector-OD's own writer "session at once" (the
+    // way ImgBurn and cdrdao burn them):
+    //   1. the drive gets the whole layout first (SEND CUE SHEET): every
+    //      track, its type, its gaps and where the lead-out goes;
+    //   2. every sector is then sent in order from LBA -150 (the gap before
+    //      track 1): music as 2352-byte sectors, data as the part the disc
+    //      really stores (2048 bytes for mode 1, 2336 for mode 2), and the
+    //      drive adds the sync, headers and error correction itself;
+    //   3. the drive writes the lead-in and lead-out and closes the CD.
+    // Verify reads every sector back: data must match exactly; music is
+    // compared after finding how far the drive's read/write offset shifts it
+    // (a few samples, normal for every drive), so a shift alone isn't a fault.
+    public static partial class BurnEngine
+    {
+        public static Task<Result> BurnCueAsync(string driveLetter, string cuePath, bool verify, IProgress<Progress>? progress, CancellationToken ct,
+            Action<string>? log = null, double speedX = 0)
+        {
+            var letter = Norm(driveLetter);
+            if (!Busy.TryAdd(letter, true))
+                return Task.FromResult(new Result { Message = "This drive is already burning." });
+            return Task.Factory.StartNew(() =>
+            {
+                SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
+                var r = new Result();
+                try { DirectBurnCue(letter, cuePath, verify, progress, ct, r, log, speedX); }
+                catch (Exception ex)
+                {
+                    r.Message = (r.Burned ? "Burned, but checking the disc failed: " : "The burn failed: ") + ex.Message;
+                    log?.Invoke("BIN/CUE: " + r.Message);
+                }
+                finally
+                {
+                    Busy.TryRemove(letter, out _);
+                    SetThreadExecutionState(ES_CONTINUOUS);
+                    PausePolling(letter, TimeSpan.FromSeconds(5));
+                }
+                return r;
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        }
+
+        private static void DirectBurnCue(string letter, string cuePath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, double speedX)
+        {
+            r.DiscUntouched = true;
+            progress?.Report(new Progress { Phase = "Preparing", Percent = -1 });
+            var img = CueImage.Load(cuePath);
+            if (img.Problem is not null) { r.Message = img.Problem; log?.Invoke("BIN/CUE: " + r.Message); return; }
+            log?.Invoke($"BIN/CUE: {Path.GetFileName(cuePath)}: {img.Summary}");
+
+            using var drive = ScsiDrive.Open(letter, out var problem);
+            if (drive is null) { r.Message = problem ?? "The drive couldn't be opened."; return; }
+            if (!WaitReady(drive, ct, TimeSpan.FromSeconds(30))) { r.Message = "The drive didn't get ready (is a blank CD in it?)."; return; }
+
+            var cfg = new byte[8];
+            var rep = drive.Read(new byte[] { 0x46, 0x02, 0, 0, 0, 0, 0, 0, 8, 0 }, cfg, 10);
+            int profile = rep.Ok ? (cfg[6] << 8) | cfg[7] : 0;
+            if (profile is not (ProfileCdR or ProfileCdRw)) { r.Message = "A BIN/CUE image is a CD image: put a blank CD-R or CD-RW in the drive."; return; }
+            string discName = profile == ProfileCdR ? "CD-R" : "CD-RW";
+
+            var di = new byte[34];
+            rep = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
+            if (!rep.Ok) { r.Message = "The drive didn't say what's on the CD: " + rep.Describe(); return; }
+            if ((di[2] & 3) != 0) { r.Message = $"The {discName} isn't blank." + (profile == ProfileCdRw ? " Erase it first (🧽 Erase this disc…)." : ""); return; }
+
+            // Room? The disc's lead-out start (ATIP) is the most it can hold.
+            long capacity = 0;
+            var atip = new byte[28];
+            rep = drive.Read(new byte[] { 0x43, 0x02, 0x04, 0, 0, 0, 0, 0, 28, 0 }, atip, 10);
+            if (rep.Ok && ((atip[0] << 8) | atip[1]) >= 22) capacity = (atip[12] * 60L + atip[13]) * 75 + atip[14] - 150;
+            if (capacity <= 0)
+            {
+                var ti = new byte[48];
+                rep = drive.Read(new byte[] { 0x52, 0x01, 0, 0, 0, 1, 0, 0, 48, 0 }, ti, 10);
+                if (rep.Ok) capacity = BE32(ti, 16);
+            }
+            if (capacity > 0 && img.LeadOutLba > capacity)
+            {
+                r.Message = $"The image needs {img.LeadOutLba:N0} sectors but this {discName} holds {capacity:N0}.";
+                return;
+            }
+            log?.Invoke($"BIN/CUE: blank {discName}, room for {capacity:N0} sectors; image {img.LeadOutLba + 150:N0} sectors incl. the 2-second gap; session at once" +
+                        (img.HasMode2 ? " (CD-ROM XA)" : ""));
+
+            drive.LockAndDismount();
+            drive.Command(new byte[] { 0x1E, 0, 0, 0, 1, 0 }, 10);
+            try
+            {
+                // Write parameters: session at once, buffer-underrun protection,
+                // the disc closed at the end, CD-ROM or CD-ROM XA.
+                var mode = new byte[256];
+                rep = drive.Read(new byte[] { 0x5A, 0x08, 0x05, 0, 0, 0, 0, 0x01, 0x00, 0 }, mode, 10);
+                if (!rep.Ok) { r.Message = "The drive didn't share its write settings: " + rep.Describe(); return; }
+                int p = 8 + ((mode[6] << 8) | mode[7]);
+                if ((mode[p] & 0x3F) != 0x05) { r.Message = "The drive's write settings page wasn't where expected."; return; }
+                int pageLen = mode[p + 1] + 2;
+                var param = new byte[8 + pageLen];
+                Array.Copy(mode, p, param, 8, pageLen);
+                param[8] &= 0x3F;
+                param[8 + 2] = 0x40 | 0x02;            // buffer-underrun protection on, write type 2 = session at once
+                param[8 + 3] = 0x00;                   // no next session (the disc is closed)
+                param[8 + 4] = 0x00;                   // data block type: raw (not used for session at once)
+                param[8 + 8] = img.HasMode2 ? (byte)0x20 : (byte)0x00;   // session format: CD-ROM XA or CD-DA/CD-ROM
+                rep = drive.Write(new byte[] { 0x55, 0x10, 0, 0, 0, 0, 0, (byte)(param.Length >> 8), (byte)param.Length, 0 }, param, 10);
+                if (!rep.Ok) { r.Message = "The drive didn't accept session-at-once writing: " + rep.Describe(); return; }
+
+                drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
+                SetDirectWriteSpeed(drive, profile, speedX, img.LeadOutLba, log);
+
+                // 1. The layout.
+                var sheet = img.BuildCueSheet();
+                log?.Invoke("BIN/CUE: cue sheet " + string.Join(" | ", Enumerable.Range(0, sheet.Length / 8)
+                    .Select(i => string.Join(" ", sheet.Skip(i * 8).Take(8).Select(b => b.ToString("X2"))))));
+                rep = drive.Write(new byte[] { 0x5D, 0, 0, 0, 0, 0, (byte)(sheet.Length >> 16), (byte)(sheet.Length >> 8), (byte)sheet.Length, 0 }, sheet, 60);
+                if (!rep.Ok) { r.Message = "The drive didn't accept the disc layout (cue sheet): " + rep.Describe(); log?.Invoke("BIN/CUE: " + r.Message); return; }
+
+                // 2. Every sector, from LBA -150.
+                r.DiscUntouched = false;
+                string afterFailure = profile == ProfileCdRw ? "The CD-RW can be erased and used again." : "A CD-R written part-way can't be used again.";
+                var clock = Stopwatch.StartNew();
+                if (!WriteCuePieces(drive, img, progress, ct, r, log, afterFailure)) return;
+
+                // 3. Lead-out and close.
+                progress?.Report(new Progress { Phase = "Finalizing", Percent = -1 });
+                rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600), 300, 1000);
+                if (r.Cancelled)
+                {
+                    r.BurnTime = clock.Elapsed;
+                    r.Message = "Cancelled. " + afterFailure;
+                    log?.Invoke("BIN/CUE: " + r.Message);
+                    return;
+                }
+                if (!rep.Ok) { r.Message = "The drive didn't confirm the last of the data was written: " + rep.Describe() + "." + DiscProblemHint(rep) + " " + afterFailure; log?.Invoke("BIN/CUE: " + r.Message); return; }
+                progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
+                if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(15)))
+                {
+                    r.Message = $"The drive didn't finish closing the {discName} in time.";
+                    log?.Invoke("BIN/CUE: " + r.Message);
+                    return;
+                }
+                r.BurnTime = clock.Elapsed;
+                r.Burned = true;
+                RestoreDriveSpeed(drive, profile, speedX);
+                log?.Invoke($"BIN/CUE: {img.BurnSectors:N0} sectors written and the {discName} closed in {r.BurnTime:hh\\:mm\\:ss}");
+
+                string audioNote = "";
+                if (verify && !ct.IsCancellationRequested)
+                {
+                    var vclock = Stopwatch.StartNew();
+                    audioNote = VerifyCue(drive, img, progress, ct, r, log);
+                    r.VerifyTime = vclock.Elapsed;
+                }
+                r.Message = r.Verified == true ? $"Burned the BIN/CUE with ArchivSector-OD's own writer and verified it{audioNote}."
+                    : r.Verified == false ? (r.Message.Length > 0 ? r.Message : $"Burned, but {r.MismatchedSectors:N0} sector(s) on the disc don't match the image. Don't rely on this disc.")
+                    : r.Cancelled ? "Burned the BIN/CUE with ArchivSector-OD's own writer. The check was stopped, so the disc wasn't fully verified."
+                    : "Burned the BIN/CUE with ArchivSector-OD's own writer (not verified).";
+            }
+            finally
+            {
+                RestoreDriveSpeed(drive, profile, speedX);
+                drive.Command(new byte[] { 0x1E, 0, 0, 0, 0, 0 }, 10);
+                drive.Unlock();
+            }
+        }
+
+        // The sectors as the drive wants them, piece by piece, in disc order.
+        private static bool WriteCuePieces(ScsiDrive drive, CueImage img, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, string afterFailure)
+        {
+            long total = img.BurnSectors, done = 0;
+            double speed = 0;
+            var speedClock = Stopwatch.StartNew();
+            long speedFrom = 0;
+            var lastReport = TimeSpan.Zero;
+            var clock = Stopwatch.StartNew();
+            var readBuf = new byte[64 * 2352];
+
+            foreach (var piece in img.Pieces)
+            {
+                int block = CueImage.BlockSize(piece.Mode);
+                int perWrite = 65536 / block;
+                var outBuf = new byte[perWrite * block];
+                FileStream? fs = null;
+                try
+                {
+                    if (piece.File is not null)
+                    {
+                        fs = new FileStream(piece.File, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+                        fs.Position = piece.FileOffset;
+                    }
+                    for (long i = 0; i < piece.Count;)
+                    {
+                        if (ct.IsCancellationRequested) { r.Cancelled = true; return true; }
+                        int n = (int)Math.Min(perWrite, piece.Count - i);
+                        int outLen = n * block;
+                        if (fs is null) Array.Clear(outBuf, 0, outLen);
+                        else
+                        {
+                            int inLen = n * piece.FileSectorSize;
+                            ReadPadded(fs, readBuf, inLen, piece.FileDataEnd);
+                            for (int s = 0; s < n; s++)
+                            {
+                                int src = s * piece.FileSectorSize, dst = s * block;
+                                switch (piece.Mode)
+                                {
+                                    case CueImage.TrackMode.Audio:
+                                        Buffer.BlockCopy(readBuf, src, outBuf, dst, 2352);
+                                        if (piece.SwapAudio)
+                                            for (int b = dst; b < dst + 2352; b += 2) (outBuf[b], outBuf[b + 1]) = (outBuf[b + 1], outBuf[b]);
+                                        break;
+                                    case CueImage.TrackMode.Mode1Raw:  Buffer.BlockCopy(readBuf, src + 16, outBuf, dst, 2048); break;   // user data
+                                    case CueImage.TrackMode.Mode2Raw:  Buffer.BlockCopy(readBuf, src + 16, outBuf, dst, 2336); break;   // sub-header onwards
+                                    default:                           Buffer.BlockCopy(readBuf, src, outBuf, dst, block); break;       // already 2048 / 2336
+                                }
+                            }
+                        }
+                        long lba = piece.StartLba + i;
+                        var data = outLen == outBuf.Length ? outBuf : outBuf.AsSpan(0, outLen).ToArray();
+                        var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
+                        var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
+                        if (!rep.Ok)
+                        {
+                            r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}.{DiscProblemHint(rep)} {afterFailure}";
+                            log?.Invoke("BIN/CUE: " + r.Message);
+                            return false;
+                        }
+                        i += n;
+                        done += n;
+
+                        if (speedClock.Elapsed.TotalSeconds >= 1)
+                        {
+                            double now = (done - speedFrom) * 2352.0 / speedClock.Elapsed.TotalSeconds;
+                            speed = speed <= 0 ? now : speed * 0.7 + now * 0.3;
+                            speedFrom = done;
+                            speedClock.Restart();
+                        }
+                        if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= total)
+                        {
+                            lastReport = clock.Elapsed;
+                            progress?.Report(new Progress
+                            {
+                                Phase = "Writing",
+                                Percent = 100.0 * done / total,
+                                BytesPerSec = speed,
+                                Remaining = speed > 0 ? TimeSpan.FromSeconds((total - done) * 2352.0 / speed) : TimeSpan.Zero,
+                            });
+                        }
+                    }
+                }
+                finally { fs?.Dispose(); }
+            }
+            return true;
+        }
+
+        // Like ReadFully, but past "end" (the end of a .wav's audio) gives silence.
+        private static void ReadPadded(FileStream fs, byte[] buf, int count, long end)
+        {
+            long left = Math.Max(0, end - fs.Position);
+            int real = (int)Math.Min(count, left);
+            if (real > 0) ReadFully(fs, buf, real);
+            if (real < count) { Array.Clear(buf, real, count - real); fs.Position += count - real; }
+        }
+
+        // Reads every sector back. Returns a note about the music tracks for
+        // the result message ("" when there are none).
+        private static string VerifyCue(ScsiDrive drive, CueImage img, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log)
+        {
+            long total = img.Pieces.Where(x => x.File is not null).Sum(x => x.Count), done = 0, bad = 0;
+            var clock = Stopwatch.StartNew();
+            var lastReport = TimeSpan.Zero;
+            var window = new Queue<(TimeSpan T, long Done)>();
+            void Report()
+            {
+                var now = clock.Elapsed;
+                if (now - lastReport < TimeSpan.FromMilliseconds(250) && done < total) return;
+                lastReport = now;
+                window.Enqueue((now, done));
+                while (window.Count > 1 && now - window.Peek().T > TimeSpan.FromSeconds(5)) window.Dequeue();
+                var first = window.Peek();
+                double secs = (now - first.T).TotalSeconds;
+                double bps = secs > 0.2 ? (done - first.Done) * 2352.0 / secs : 0;
+                progress?.Report(new Progress
+                {
+                    Phase = "Verifying",
+                    Percent = total > 0 ? 100.0 * done / total : 100,
+                    BytesPerSec = bps,
+                    Remaining = bps > 0 ? TimeSpan.FromSeconds((total - done) * 2352.0 / bps) : TimeSpan.Zero,
+                });
+            }
+
+            // ---- data tracks: exact ----
+            const int N = 26;
+            var disc = new byte[N * 2352];
+            var file = new byte[N * 2352];
+            foreach (var piece in img.Pieces.Where(x => x.File is not null && x.Mode != CueImage.TrackMode.Audio))
+            {
+                using var fs = new FileStream(piece.File!, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+                fs.Position = piece.FileOffset;
+                for (long i = 0; i < piece.Count;)
+                {
+                    if (ct.IsCancellationRequested) { r.Cancelled = true; r.Verified = null; return ""; }
+                    int n = (int)Math.Min(N, piece.Count - i);
+                    long lba = piece.StartLba + i;
+                    ReadFully(fs, file, n * piece.FileSectorSize);
+                    var cdb = new byte[] { 0xBE, 0x00, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0xF8, 0, 0 };
+                    var target = n == N ? disc : new byte[n * 2352];
+                    var rep = RetryWhileBusy(() => drive.Read(cdb, target, 60), 100, 50);
+                    for (int s = 0; s < n; s++)
+                    {
+                        if (!rep.Ok) { bad++; continue; }
+                        int d = s * 2352, f = s * piece.FileSectorSize;
+                        int fileData = piece.Mode is CueImage.TrackMode.Mode1Raw or CueImage.TrackMode.Mode2Raw ? f + 16 : f;   // where the stored part starts in the file
+                        int len = piece.Mode switch
+                        {
+                            CueImage.TrackMode.Mode1Raw or CueImage.TrackMode.Mode1Cooked => 2048,
+                            _ => (file[fileData + 2] & 0x20) != 0 ? 2332 : 2056,    // mode 2: form 2 (sub-header + 2324) or form 1 (sub-header + 2048)
+                        };
+                        if (!target.AsSpan(d + 16, len).SequenceEqual(file.AsSpan(fileData, len))) bad++;
+                    }
+                    i += n;
+                    done += n;
+                    Report();
+                }
+            }
+
+            // ---- music tracks: find the offset, then compare ----
+            string audioNote = "";
+            var audio = img.Pieces.Where(x => x.File is not null && x.Mode == CueImage.TrackMode.Audio).ToList();
+            if (audio.Count > 0)
+            {
+                long? shift = FindAudioShift(drive, img, audio, log);
+                if (shift is null)
+                {
+                    audioNote = "; the music tracks couldn't be lined up for checking (too quiet), so only the data was compared";
+                    done += audio.Sum(x => x.Count);
+                    Report();
+                }
+                else
+                {
+                    long samples = shift.Value / 4;
+                    log?.Invoke($"BIN/CUE: music reads back shifted by {samples:+0;-0;0} samples (the drive's offset)");
+                    var expected = new byte[2352];
+                    var open = new Dictionary<string, FileStream>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                    foreach (var piece in audio)
+                    {
+                        // The first and last sector of each stretch are skipped:
+                        // with the shift, part of them comes from outside it.
+                        for (long i = 0; i < piece.Count;)
+                        {
+                            if (ct.IsCancellationRequested) { r.Cancelled = true; r.Verified = null; return ""; }
+                            int n = (int)Math.Min(N, piece.Count - i);
+                            long lba = piece.StartLba + i;
+                            var cdb = new byte[] { 0xBE, 0x04, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0x10, 0, 0 };
+                            var target = n == N ? disc : new byte[n * 2352];
+                            var rep = RetryWhileBusy(() => drive.Read(cdb, target, 60), 100, 50);
+                            for (int s = 0; s < n; s++)
+                            {
+                                long at = lba + s;
+                                if (at <= piece.StartLba || at >= piece.StartLba + piece.Count - 1) continue;
+                                if (!rep.Ok) { bad++; continue; }
+                                if (!ExpectedAudio(img, at * 2352 - shift.Value, expected, open)) continue;
+                                if (!target.AsSpan(s * 2352, 2352).SequenceEqual(expected)) bad++;
+                            }
+                            i += n;
+                            done += n;
+                            Report();
+                        }
+                    }
+                    }
+                    finally { foreach (var f in open.Values) f.Dispose(); }
+                    audioNote = samples == 0 ? "; music tracks match exactly" : $"; music tracks match (read back {Math.Abs(samples)} samples {(samples > 0 ? "later" : "earlier")}, the drive's normal offset)";
+                }
+            }
+
+            r.MismatchedSectors = bad;
+            r.Verified = bad == 0;
+            log?.Invoke(bad == 0 ? $"BIN/CUE: verified ({clock.Elapsed:hh\\:mm\\:ss}){audioNote}" : $"BIN/CUE: VERIFY FAILED, {bad:N0} sector(s) differ or couldn't be read");
+            return audioNote;
+        }
+
+        // How many bytes the disc's music is shifted by compared with the
+        // .bin: a non-silent sector from the middle of a music track is looked
+        // for in the disc around the same place, ±6 sectors.
+        private static long? FindAudioShift(ScsiDrive drive, CueImage img, List<CueImage.Piece> audio, Action<string>? log)
+        {
+            const int Around = 6;
+            var sector = new byte[2352];
+            foreach (var piece in audio.Where(x => x.Count > Around * 4 + 50))
+            {
+                using var fs = new FileStream(piece.File!, FileMode.Open, FileAccess.Read, FileShare.Read);
+                for (long tryAt = piece.Count / 2; tryAt < piece.Count - Around * 2; tryAt += 75)   // a second apart
+                {
+                    fs.Position = piece.FileOffset + tryAt * piece.FileSectorSize;
+                    ReadFully(fs, sector, 2352);
+                    if (piece.SwapAudio) for (int b = 0; b < 2352; b += 2) (sector[b], sector[b + 1]) = (sector[b + 1], sector[b]);
+                    // Needs real sound, not silence, to line up on.
+                    int loud = 0;
+                    for (int b = 0; b < 2352; b += 2) if (Math.Abs((short)(sector[b] | (sector[b + 1] << 8))) > 64) loud++;
+                    if (loud < 200) continue;
+
+                    long lba = piece.StartLba + tryAt;
+                    int n = Around * 2 + 1;
+                    var around = new byte[n * 2352];
+                    long from = lba - Around;
+                    var cdb = new byte[] { 0xBE, 0x04, (byte)(from >> 24), (byte)(from >> 16), (byte)(from >> 8), (byte)from, 0, 0, (byte)n, 0x10, 0, 0 };
+                    var rep = RetryWhileBusy(() => drive.Read(cdb, around, 60), 100, 50);
+                    if (!rep.Ok) continue;
+                    for (int k = 0; k + 2352 <= around.Length; k += 4)
+                        if (around.AsSpan(k, 2352).SequenceEqual(sector))
+                            return k - Around * 2352;   // disc byte = file byte + shift
+                    log?.Invoke($"BIN/CUE: couldn't line up the music at sector {lba:N0}");
+                    return null;
+                }
+            }
+            return null;
+        }
+
+        // The bytes the .bin has at a disc byte address (LBA × 2352), across
+        // pieces. False if any of it isn't from a music file (gaps, data).
+        // Files stay open in "open" while checking.
+        private static bool ExpectedAudio(CueImage img, long address, byte[] dst, Dictionary<string, FileStream> open)
+        {
+            int got = 0;
+            while (got < dst.Length)
+            {
+                long a = address + got;
+                long lba = (long)Math.Floor(a / 2352.0);
+                int within = (int)(a - lba * 2352);
+                var piece = img.Pieces.FirstOrDefault(x => lba >= x.StartLba && lba < x.StartLba + x.Count);
+                if (piece is null || piece.File is null || piece.Mode != CueImage.TrackMode.Audio) return false;
+                int take = Math.Min(dst.Length - got, 2352 - within);
+                if (!open.TryGetValue(piece.File, out var fs))
+                {
+                    fs = new FileStream(piece.File, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16);
+                    open[piece.File] = fs;
+                }
+                fs.Position = piece.FileOffset + (lba - piece.StartLba) * 2352 + within;
+                int real = (int)Math.Max(0, Math.Min(take, piece.FileDataEnd - fs.Position));
+                int read = 0;
+                while (read < real)
+                {
+                    int k = fs.Read(dst, got + read, real - read);
+                    if (k <= 0) return false;
+                    read += k;
+                }
+                if (real < take) Array.Clear(dst, got + real, take - real);   // the silence after a .wav's audio
+                // The shift is whole samples, so "within" is even: swap byte pairs.
+                if (piece.SwapAudio)
+                    for (int b = got; b + 1 < got + take; b += 2) (dst[b], dst[b + 1]) = (dst[b + 1], dst[b]);
+                got += take;
+            }
+            return true;
+        }
+    }
+}

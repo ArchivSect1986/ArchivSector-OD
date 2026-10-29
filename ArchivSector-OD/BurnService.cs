@@ -78,8 +78,15 @@ namespace ArchivSector_OD
             BurnEngine.Result r;
             try
             {
-                // v4.0: ArchivSector-OD's own writer.
-                r = direct
+                // v4.0: ArchivSector-OD's own writer. A .cue (beta 2) is a BIN/CUE
+                // CD image: our writer burns it session at once, ImgBurn can too,
+                // Windows' engine can't.
+                bool cue = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+                if (cue && !direct && imgBurn is null)
+                    return new BurnEngine.Result { Message = "Windows' burning engine can't burn BIN/CUE images. Use ArchivSector-OD's own writer or ImgBurn.", DiscUntouched = true };
+                r = direct && cue
+                    ? await BurnEngine.BurnCueAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line), speedX)
+                    : direct
                     ? await BurnEngine.BurnDirectAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line), speedX)
                     : await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, imgBurn,
                         line => LogService.Write($"{letter}:", line), speedX);
@@ -92,6 +99,12 @@ namespace ArchivSector_OD
                     var why = r.Message.TrimEnd('.', ' ');
                     var fallback = ImgBurnPath();
                     string name = fallback is not null ? "ImgBurn" : "Windows";
+                    if (cue && fallback is null)
+                    {
+                        r.Message = $"ArchivSector-OD's own writer couldn't burn this BIN/CUE image ({why}), and Windows' burning engine can't burn BIN/CUE. Install ImgBurn to burn it.";
+                        RecordHistory(r, letter, isoPath, discTitle, driveModel, direct);
+                        return r;
+                    }
                     LogService.Write($"{letter}:", $"Burn: ArchivSector-OD's own writer couldn't start ({why}); burning with {name} instead");
                     progress?.Report(new BurnEngine.Progress { Phase = "Switching to " + name, Percent = -1 });
                     r = await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, fallback,
@@ -190,9 +203,11 @@ namespace ArchivSector_OD
                     DriveLetter = letter,
                     DriveModel = driveModel,
                     Title = string.IsNullOrWhiteSpace(discTitle) ? Path.GetFileNameWithoutExtension(isoPath) : discTitle,
-                    System = direct ? "Disc burn (own writer)" : "Disc burn",
+                    System = (direct ? "Disc burn (own writer)" : "Disc burn") + (isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) ? ", BIN/CUE" : ""),
                     OutputPath = isoPath,
-                    Capacity = File.Exists(isoPath) ? DiscHealthService.FormatBytes(new FileInfo(isoPath).Length) : "",
+                    Capacity = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase)
+                        ? (CueImage.Load(isoPath) is { Problem: null } c ? c.Summary : "BIN/CUE")
+                        : File.Exists(isoPath) ? DiscHealthService.FormatBytes(new FileInfo(isoPath).Length) : "",
                     RedumpMatch = !r.Burned ? (r.Cancelled ? "Cancelled" : "Failed")
                         : r.Verified == true ? "Burned + verified"
                         : r.Verified == false ? "Burned, VERIFY FAILED"
