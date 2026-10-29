@@ -25,7 +25,7 @@
             }
         </div>
     </div>
-    <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs one after another. After each disc it's ejected, and the next one starts when you put in a blank.</p>
+    <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs (or BIN/CUE CD images) one after another. After each disc it's ejected, and the next one starts when you put in a blank.</p>
 
     @if (items.Count == 0)
     {
@@ -164,6 +164,25 @@
         public long Bytes;
         public ItemState State = ItemState.Waiting;
         public string? Detail;
+        // BIN/CUE CD image (beta 2): its layout, read when it's added.
+        public CueImage? Cue;
+        public bool IsCue => Path.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // A queue item from a file: an ISO, or a BIN/CUE CD image (its size is the sectors it fills).
+    private static QueueItem MakeItem(string full)
+    {
+        var it = new QueueItem { Path = full };
+        if (it.IsCue)
+        {
+            it.Cue = CueImage.Load(full);
+            if (it.Cue.Problem is null) it.Bytes = (it.Cue.LeadOutLba + 150) * 2048L;
+        }
+        else
+        {
+            try { it.Bytes = new FileInfo(full).Length; } catch { }
+        }
+        return it;
     }
 
     private readonly List<QueueItem> items = new();
@@ -219,7 +238,10 @@
         ItemState.Skipped => "⏭",
         _ => "•",
     };
-    private static string Line(QueueItem it) => it.Detail ?? $"{DiscHealthService.FormatBytes(it.Bytes)} ({it.Bytes:N0} bytes)";
+    private static string Line(QueueItem it) => it.Detail
+        ?? (it.Cue is not null
+            ? (it.Cue.Problem is null ? "BIN/CUE CD image: " + it.Cue.Summary : "BIN/CUE: " + it.Cue.Problem)
+            : $"{DiscHealthService.FormatBytes(it.Bytes)} ({it.Bytes:N0} bytes)");
 
     protected override void OnParametersSet()
     {
@@ -250,8 +272,8 @@
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Choose the ISOs to burn",
-            Filter = "Disc images (*.iso)|*.iso|All files (*.*)|*.*",
+            Title = "Choose the ISOs (or BIN/CUE CD images) to burn",
+            Filter = "Disc images (*.iso, *.cue)|*.iso;*.cue|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|All files (*.*)|*.*",
             Multiselect = true,
         };
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
@@ -259,9 +281,7 @@
         {
             var full = Path.GetFullPath(f);
             if (items.Any(i => string.Equals(i.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
-            long bytes = 0;
-            try { bytes = new FileInfo(full).Length; } catch { }
-            items.Add(new QueueItem { Path = full, Bytes = bytes });
+            items.Add(MakeItem(full));
         }
         summary = null;
     }
@@ -271,9 +291,7 @@
     {
         var full = Path.GetFullPath(path);
         if (items.Any(i => string.Equals(i.Path, full, StringComparison.OrdinalIgnoreCase))) return;
-        long bytes = 0;
-        try { bytes = new FileInfo(full).Length; } catch { }
-        items.Add(new QueueItem { Path = full, Bytes = bytes });
+        items.Add(MakeItem(full));
         summary = null;
         Ui();
     }
@@ -364,6 +382,26 @@
                 if (wantDirect && !direct)
                     LogService.Write($"{letter}:", $"Burn queue: ArchivSector-OD's own writer doesn't write {blank.MediaType} discs yet; burning this one with {(imgBurn ? "ImgBurn" : "Windows")}");
 
+                // A BIN/CUE CD image needs a CD, and our own writer or ImgBurn (Windows can't).
+                if (it.IsCue)
+                {
+                    string? cueSkip = null;
+                    bool cd = blank.MediaType is "CD-R" or "CD-RW";
+                    bool ownCan = cd && it.Cue?.Problem is null;
+                    if (!cd) cueSkip = $"Skipped: a BIN/CUE image is a CD image, and the blank disc in the drive is a {blank.MediaType}.";
+                    else if (wantDirect || !imgBurn) { direct = ownCan; imgBurn = !ownCan && imgBurnPath is not null; }
+                    if (cueSkip is null && !direct && !imgBurn)
+                        cueSkip = "Skipped: " + (it.Cue?.Problem ?? "ArchivSector-OD's own writer can't burn this image") + " Windows can't burn BIN/CUE, and ImgBurn isn't installed.";
+                    if (cueSkip is not null)
+                    {
+                        it.State = ItemState.Skipped;
+                        it.Detail = cueSkip;
+                        skipped++;
+                        LogService.Write($"{letter}:", "Burn queue: skipped " + it.Path + " — " + it.Detail);
+                        continue;   // the blank disc stays in for the next one
+                    }
+                }
+
                 bool wholeDisc = imgBurn || direct;
                 long limit = wholeDisc ? BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes)) : blank.FreeBytes;
                 if (it.Bytes > limit)
@@ -393,7 +431,7 @@
                     stepPercent = p.Percent;
                     Ui();
                 });
-                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete, direct, speedX);
+                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete && !it.IsCue, direct, speedX);
                 stepPercent = -1;
                 LogService.Write($"{letter}:", "Burn queue: " + it.Path + " — " + r.Message);
 

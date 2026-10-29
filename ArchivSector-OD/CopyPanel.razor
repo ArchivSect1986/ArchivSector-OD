@@ -4,7 +4,7 @@
 @implements IDisposable
 
 @*
-    Copy mode (v4.0 beta 2): duplicates a data disc, like ImgBurn's
+    Copy mode (v4.0 beta 2): duplicates a disc, like ImgBurn's
     "read, then write". The disc is read to a temporary ISO (DiscReader),
     then burned to a blank (BurnService, with the usual program: our own
     writer, else ImgBurn or Windows) and verified. One drive: the disc is
@@ -12,12 +12,15 @@
     goes in the other one. Several copies: after each one the disc is
     ejected and the next blank is asked for. The temporary ISO is deleted
     afterwards unless "keep" is ticked.
+    Music CDs, and CDs with data and music tracks (many games), can't go in
+    an ISO: those are read to a temporary .bin + .cue (CdImageReader), with
+    their track gaps, and burned with the BIN/CUE writer.
 *@
 
 <div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
     <div>
         <h2 style="margin: 0;">🔁 Copy a disc</h2>
-        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Make an exact copy of a data disc: it's read to a temporary ISO, then burned to a blank and verified. Use one drive (swap the discs when asked) or two.</p>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Make an exact copy of a disc: data discs, music CDs, and CDs with data and music (many games). It's read to a temporary image, then burned to a blank and verified. Use one drive (swap the discs when asked) or two.</p>
     </div>
 
     @if (state == State.Idle)
@@ -60,7 +63,7 @@
             </div>
 
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <strong style="min-width: 90px;">Temporary ISO</strong>
+                <strong style="min-width: 90px;">Temporary image</strong>
                 <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere;">@tempFolder</span>
                 <button class="shortcut-btn" @onclick="ChooseFolder">📂 Change…</button>
             </div>
@@ -75,7 +78,7 @@
             </label>
             <label style="display: flex; gap: 8px; align-items: center; cursor: pointer;">
                 <input type="checkbox" checked="@keepIso" @onchange="e => keepIso = (bool)(e.Value ?? false)" />
-                Keep the ISO afterwards
+                Keep the image afterwards
             </label>
         </div>
         <div>
@@ -138,7 +141,12 @@
     private bool summaryOk, summaryStopped;
     private readonly List<string> copyLines = new();
 
-    private bool CanStart => !checking && disc is not null && disc.Ready && disc.Problem is null && target.Length > 0 && SpaceProblem is null;
+    private bool CanStart => !checking && disc is not null && (disc.Ready || cdCopy) && disc.Problem is null && target.Length > 0 && SpaceProblem is null;
+
+    // A CD with music tracks (beta 2): copied as .bin + .cue instead of an ISO.
+    private CdImageReader.Toc? toc;
+    private bool cdCopy;
+    private long ImageBytes => cdCopy && toc is not null ? toc.LeadOutLba * 2352L : disc?.Bytes ?? 0;
     private string StepTitle => stepTitle;
     private string WaitText => waitLetter == source && target == source
         ? $"Take the original out of {waitLetter}: and put in a blank disc."
@@ -148,6 +156,7 @@
         : checking ? "Checking the disc…"
         : disc is null ? ""
         : disc.Problem is not null ? "⚠ " + disc.Problem
+        : cdCopy && toc is not null ? toc.Summary + (disc.Label.Length > 0 ? " · " + disc.Label : "") + " (copied with its music tracks)"
         : $"{disc.Kind} · {disc.Label} · {disc.FileSystem} · {DiscHealthService.FormatBytes(disc.Bytes)}";
     private string DiscColor => disc?.Problem is not null ? "var(--amber)" : "var(--text-secondary)";
     private string TargetLabel(string d) => d == source ? $"Drive {d}: (the same drive: swap the discs when asked)" : $"Drive {d}:";
@@ -157,14 +166,14 @@
     {
         get
         {
-            if (disc is null || !disc.Ready) return null;
+            if (disc is null || (!disc.Ready && !cdCopy)) return null;
             try
             {
                 var root = Path.GetPathRoot(Path.GetFullPath(tempFolder));
                 if (root is null) return null;
                 long free = new DriveInfo(root).AvailableFreeSpace;
-                return free < disc.Bytes + 100_000_000L
-                    ? $"Not enough space for the temporary ISO: it needs {DiscHealthService.FormatBytes(disc.Bytes)}, {root} has {DiscHealthService.FormatBytes(free)} free. Choose another folder."
+                return free < ImageBytes + 100_000_000L
+                    ? $"Not enough space for the temporary image: it needs {DiscHealthService.FormatBytes(ImageBytes)}, {root} has {DiscHealthService.FormatBytes(free)} free. Choose another folder."
                     : null;
             }
             catch { return null; }
@@ -240,6 +249,22 @@
         checking = true;
         StateHasChanged();
         var info = await Task.Run(() => DiscReader.DescribeDisc(letter));
+        // A CD: does it have music tracks? Then it's copied as .bin + .cue.
+        toc = null;
+        cdCopy = false;
+        if (info.IsAudioCd || info.Kind == "CD" || !info.Ready)
+        {
+            string? tocProblem = null;
+            var t = await Task.Run(() => CdImageReader.ReadToc(letter, out tocProblem));
+            if (t is not null && t.HasAudio)
+            {
+                toc = t;
+                cdCopy = true;
+                info.Problem = t.Sessions > 1 ? "This CD has more than one session (CD-Extra / Enhanced CD), which Copy disc can't copy yet. ImgBurn or Redumper can."
+                    : t.Tracks[0].StartLba != 0 ? "This CD's first track doesn't start in the usual place (a hidden track?), which Copy disc can't copy yet."
+                    : null;
+            }
+        }
         checking = false;
         if (letter != source) return;
         disc = info;
@@ -248,7 +273,7 @@
 
     private void ChooseFolder()
     {
-        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Folder for the temporary ISO", InitialDirectory = tempFolder };
+        var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Folder for the temporary image", InitialDirectory = tempFolder };
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) == true) tempFolder = dlg.FolderName;
     }
 
@@ -257,7 +282,9 @@
     private async Task Start()
     {
         if (!CanStart || disc is null) return;
-        string src = source, dst = target, label = disc.Label;
+        string src = source, dst = target, label = disc.Label.Length > 0 ? disc.Label : cdCopy ? "Music CD" : "disc";
+        bool asCue = cdCopy && toc is not null;
+        long cdSectors = toc?.LeadOutLba ?? 0;
         bool oneDrive = src == dst;
         int count = copies;
         bool doVerify = verify, keep = keepIso;
@@ -268,7 +295,9 @@
             return;
         }
 
-        string iso = Path.Combine(tempFolder, $"ArchivSector-OD copy of {Safe(label)} {DateTime.Now:yyyyMMdd-HHmmss}.iso");
+        string baseName = $"ArchivSector-OD copy of {Safe(label)} {DateTime.Now:yyyyMMdd-HHmmss}";
+        string iso = Path.Combine(tempFolder, baseName + (asCue ? ".cue" : ".iso"));   // what gets burned
+        var tempFiles = asCue ? new List<string> { iso, Path.Combine(tempFolder, baseName + ".bin") } : new List<string> { iso };
         state = State.Running;
         cancelRequested = false;
         summary = null;
@@ -277,7 +306,7 @@
         var ct = cts.Token;
         int ok = 0, failed = 0;
         bool stopped = false, readOk = false, unchecked_ = false;
-        LogService.Write($"{src}:", $"Copy: {label} from {src}: to {dst}:, {count} cop{(count == 1 ? "y" : "ies")}, verify {(doVerify ? "on" : "off")}; temporary ISO {iso}");
+        LogService.Write($"{src}:", $"Copy: {label} from {src}: to {dst}:, {count} cop{(count == 1 ? "y" : "ies")}, verify {(doVerify ? "on" : "off")}; temporary image {iso}");
 
         try
         {
@@ -293,21 +322,44 @@
                 Ui();
             });
             RipActivity.Set(src, "copy", true);
-            DiscReader.Result read;
+            bool readGood;
+            string readMessage;
+            bool readCancelled;
             try
             {
-                read = await DiscReader.ReadAsync(new DiscReader.Options { DriveLetter = src, OutputPath = iso, Retries = 3, ContinueOnErrors = false },
-                    reporter, ct, line => LogService.Write($"{src}:", line));
+                if (asCue)
+                {
+                    // Music tracks: the whole CD, raw, into .bin + .cue.
+                    var cdReporter = new Progress<CdImageReader.Progress>(p =>
+                    {
+                        stepPercent = p.Percent;
+                        stepText = $"{p.Percent:0.0}% · {DiscHealthService.FormatSpeed(p.BytesPerSec, 176_400)} · {Dur(p.Remaining)} left" + (p.BadSectors > 0 ? $" · ⚠ {p.BadSectors:N0} unreadable" : "");
+                        Ui();
+                    });
+                    var cr = await CdImageReader.ReadToBinCueAsync(src, tempFolder, baseName, cdReporter, ct, line => LogService.Write($"{src}:", line));
+                    readGood = cr.Ok && cr.BadSectors == 0;
+                    readCancelled = cr.Cancelled;
+                    readMessage = cr.Ok ? $"{cr.BadSectors:N0} sector(s) couldn't be read." : cr.Message;
+                }
+                else
+                {
+                    var read = await DiscReader.ReadAsync(new DiscReader.Options { DriveLetter = src, OutputPath = iso, Retries = 3, ContinueOnErrors = false },
+                        reporter, ct, line => LogService.Write($"{src}:", line));
+                    readGood = read.Ok;
+                    readCancelled = read.Cancelled;
+                    readMessage = read.Message;
+                }
             }
             finally { RipActivity.Set(src, "copy", false); }
-            if (!read.Ok)
+            if (!readGood)
             {
-                stopped = read.Cancelled || ct.IsCancellationRequested;
-                summary = stopped ? "Stopped while reading the original. Nothing was burned." : "The original couldn't be read, so nothing was burned: " + read.Message;
+                stopped = readCancelled || ct.IsCancellationRequested;
+                summary = stopped ? "Stopped while reading the original. Nothing was burned." : "The original couldn't be read, so nothing was burned: " + readMessage;
                 return;
             }
             readOk = true;
-            long isoBytes = new FileInfo(iso).Length;
+            // Compared with the blank's size in 2048-byte sectors (a music sector still takes one).
+            long isoBytes = asCue ? cdSectors * 2048L : new FileInfo(iso).Length;
 
             // One drive: out with the original, in with a blank. Reading
             // leaves the disc's volume closed, and Windows' normal eject can
@@ -330,6 +382,17 @@
                 while (!ct.IsCancellationRequested)
                 {
                     blank = await Task.Run(() => BurnService.QueryBlank(dst));
+                    if (blank is not null && asCue && blank.MediaType is not ("CD-R" or "CD-RW"))
+                    {
+                        // A CD copy needs a CD.
+                        if (sizeNote is null)
+                        {
+                            sizeNote = $"That's a blank {blank.MediaType}: a copy of a CD needs a blank CD-R or CD-RW.";
+                            stepText = sizeNote;
+                            Ui();
+                        }
+                        blank = null;
+                    }
                     if (blank is not null)
                     {
                         long room = BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes));
@@ -353,6 +416,8 @@
                 bool direct = want == BurnService.Writer.Own && BurnEngine.DirectWriteSupports(blank.MediaType);
                 bool imgBurn = !direct && (want == BurnService.Writer.ImgBurn || want == BurnService.Writer.Own) && imgInstalled;
                 if (!direct && !imgBurn && isoBytes > blank.FreeBytes && BurnEngine.DirectWriteSupports(blank.MediaType)) direct = true;
+                // A .bin + .cue: our own writer, or ImgBurn (Windows can't burn BIN/CUE).
+                if (asCue) { direct = want != BurnService.Writer.ImgBurn || !imgInstalled; imgBurn = !direct; }
 
                 stepTitle = $"Burning {which} to the {blank.MediaType} in {dst}:";
                 stepText = imgBurn ? "Burning with ImgBurn (progress in its window)…" : "Preparing…";
@@ -393,12 +458,14 @@
             // didn't verify, so that disc can be checked (Verify disc, maybe
             // in another drive) or burned again without reading the original again.
             bool unfinished = readOk && (failed > 0 || ok < count || unchecked_);
+            string what = asCue ? "image (.bin + .cue)" : "ISO";
             if (File.Exists(iso))
             {
-                if (keep) copyLines.Add("The ISO was kept: " + iso);
-                else if (unfinished) copyLines.Add("The ISO was kept, so you can check the copy with Verify disc (another drive may read it better) or burn it again: " + iso);
-                else { try { File.Delete(iso); } catch { } }
+                if (keep) copyLines.Add($"The {what} was kept: " + iso);
+                else if (unfinished) copyLines.Add($"The {what} was kept, so you can check the copy" + (asCue ? "" : " with Verify disc (another drive may read it better)") + " or burn it again: " + iso);
+                else foreach (var f in tempFiles) { try { File.Delete(f); } catch { } }
             }
+            else if (!keep && !unfinished) foreach (var f in tempFiles) { try { if (File.Exists(f)) File.Delete(f); } catch { } }
             cts.Dispose();
             cts = null;
             state = State.Idle;
