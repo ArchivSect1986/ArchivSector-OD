@@ -10,7 +10,7 @@
 		<ApplicationIcon>AppIcon.ico</ApplicationIcon>
 
 		<!-- Version shown in the .exe's Properties → Details tab -->
-		<Version>3.9.91</Version>
+		<Version>3.9.92</Version>
 
 		<!-- Only include English resource files, which drops the cs, de,
 		     fr, ja, etc. language folders from the build/publish output -->

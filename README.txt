@@ -1,8 +1,8 @@
-﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 1 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 2 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v4.0 Beta 1**, a test version of v4.0! ⚠️ It's
+Welcome to **ArchivSector-OD v4.0 Beta 2**, a test version of v4.0! ⚠️ It's
 a pre-release: everything should work, but this is the version where you
 help find what doesn't. If you'd rather stay on a finished version, keep
 v3.4.
@@ -31,6 +31,26 @@ is a manual download: unzip it into a NEW folder (keep your v3.4 folder if
 you want to go back). Your settings, history, and cached artwork are kept
 -- they're stored separately in your AppData folder. When v4.0 itself is
 released, the beta offers it to you by itself.
+
+Already on Beta 1? Replace your Beta 1 folder with this one.
+
+========================================================================
+💿 NEW IN V4.0 BETA 2 — BIN/CUE BURNING & COPY DISC
+========================================================================
+
+• 💿 Burn BIN/CUE CD images with the own writer: pick a .cue on the burn
+  screen (or add it to the burn queue) with a blank CD-R or CD-RW in.
+  Data tracks, music tracks, one .bin per track (Redumper) or one for
+  the whole disc, track gaps, and music from .wav files. The verify
+  checks data exactly and lines up the music first.
+• 🔁 Copy disc (new Burn mode): an exact, verified copy of a data disc,
+  a music CD, or a CD with data and music (many games). One drive
+  (swap the discs when asked) or two, up to 10 copies.
+• 🧽 Erase BD-RE and DVD+RW: quick (seconds) or full (can be stopped).
+• Drive Bays: Eject/Close Tray follows the real tray, and a blank disc
+  shows who made it and its write speeds.
+• The verify shows the live speed, and runs at full speed after a
+  slower burn.
 
 ========================================================================
 🔥 NEW IN V4.0 BETA 1 — OUR OWN DISC WRITER, A BURN TAB & THEMES
@@ -63,9 +83,9 @@ released, the beta offers it to you by itself.
 • Clearer messages when a disc fails, better movie artwork matches,
   and the CD-R size is now exactly what a blank 80-minute CD-R holds.
 
-⚠ Known issues: CD-RWs written over several times may fail to verify
-  in some drives (use CD-R for anything important), and dual-layer
-  DVD-R DL and BD-R DL go to ImgBurn for now.
+⚠ Known issues: dual-layer DVD-R DL and BD-R DL go to ImgBurn for now.
+  (The CD-RW issue listed in Beta 1 turned out to be a damaged image
+  file, not the drive or the discs.)
 
 🙏 Please report what you find, good or bad, on GitHub (Issues → Bug
   report). Include Burn → Drive info → 📋 Copy report (your drive and
@@ -494,6 +514,8 @@ APIs (tray eject, registry, system sounds), so it only runs on Windows.
 Blank discs it burns (own writer, whole disc):
 • CD-R, CD-RW, DVD+R, DVD+R DL, DVD+RW, DVD-R, DVD-RW, BD-R, BD-RE
   (anything else, e.g. DVD-R DL and BD-R DL, goes to ImgBurn)
+• ISO images on any of those, and BIN/CUE images (.bin or .wav) on
+  CD-R/CD-RW
 
 ========================================================================
 🔮 PLANNED — NOT YET BUILT
