@@ -197,7 +197,10 @@ namespace ArchivSector_OD.Burning
             log?.Invoke($"Read CD: {letter}: {toc.Summary}; " + string.Join(", ", toc.Tracks.Select(t =>
                 $"T{t.Number} {(t.IsData ? "MODE" + t.Mode : "AUDIO")} @{t.StartLba}" + (t.PregapLba < t.StartLba ? $" (gap {t.StartLba - t.PregapLba})" : ""))));
 
-            drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);   // read at full speed
+            // Full speed: the drive's own defaults back first (a slower write
+            // speed set earlier by a burn, ours or another program's, can
+            // stay in force), then "as fast as you can".
+            BurnEngine.FullDriveSpeed(drive);
             Directory.CreateDirectory(folder);
             string bin = Path.Combine(folder, name + ".bin"), cue = Path.Combine(folder, name + ".cue");
             long total = toc.LeadOutLba;
@@ -207,6 +210,15 @@ namespace ArchivSector_OD.Burning
             var lastReport = TimeSpan.Zero;
             var clock = Stopwatch.StartNew();
             var window = new Queue<(TimeSpan T, long Done)>();
+            // For the log: the reading speed every 10%, and for the data and
+            // music parts, so a slow part shows (1x = 75 sectors a second).
+            int lastTenth = 0;
+            var tenthClock = Stopwatch.StartNew();
+            long tenthFrom = 0;
+            long firstAudio = toc.Tracks.Where(t => !t.IsData).Select(t => (long)t.PregapLba).DefaultIfEmpty(total).Min();
+            var partClock = Stopwatch.StartNew();
+            bool inAudio = firstAudio == 0;
+            static string X(long sectors, TimeSpan t) => t.TotalSeconds > 0.5 ? $"{sectors / 75.0 / t.TotalSeconds:0.0}x" : "?";
             using (var fs = new FileStream(bin, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
             {
                 for (long lba = 0; lba < total;)
@@ -231,6 +243,19 @@ namespace ArchivSector_OD.Burning
                         }
                     }
                     lba += n;
+                    if ((int)(lba * 10 / Math.Max(1, total)) > lastTenth && lba < total)
+                    {
+                        lastTenth = (int)(lba * 10 / total);
+                        log?.Invoke($"Read CD: {lastTenth * 10}% after {clock.Elapsed:mm\\:ss}, last 10% at {X(lba - tenthFrom, tenthClock.Elapsed)} ({(lba > firstAudio ? "music" : "data")})");
+                        tenthFrom = lba;
+                        tenthClock.Restart();
+                    }
+                    if (!inAudio && lba >= firstAudio && firstAudio > 0)
+                    {
+                        inAudio = true;
+                        log?.Invoke($"Read CD: data part ({firstAudio:N0} sectors) read at {X(firstAudio, partClock.Elapsed)} on average");
+                        partClock.Restart();
+                    }
                     var now = clock.Elapsed;
                     if (now - lastReport > TimeSpan.FromMilliseconds(250) || lba >= total)
                     {
@@ -248,6 +273,9 @@ namespace ArchivSector_OD.Burning
                     }
                 }
             }
+
+            if (inAudio && total > firstAudio)
+                log?.Invoke($"Read CD: music part ({total - firstAudio:N0} sectors) read at {X(total - firstAudio, partClock.Elapsed)} on average");
 
             // The .cue: one .bin; times are sectors from the start of the .bin (LBA 0).
             static string Msf(long s) => $"{s / 75 / 60:D2}:{s / 75 % 60:D2}:{s % 75:D2}";
