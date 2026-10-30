@@ -4,8 +4,9 @@
 @*
     Erase (v4.0 week 3): shown on a Burn tab drive card that holds a
     rewritable disc. Quick or full erase (BurnEngine.EraseAsync): CD-RW
-    and DVD-RW with Windows' burning engine, DVD+RW and BD-RE by
-    ArchivSector-OD itself (beta 2; those can be stopped). The drive is marked busy while it runs and
+    with Windows' burning engine, DVD+RW and BD-RE by ArchivSector-OD
+    itself (beta 2; those can be stopped), DVD-RW with the drive's own
+    BLANK command (beta 3; real progress, can't be stopped). The drive is marked busy while it runs and
     the card re-reads the drive afterwards, so the now blank disc gets the
     normal burn screen.
 *@
@@ -95,14 +96,18 @@ else if (state == State.Done && result is not null)
     private CancellationTokenSource? cts;
 
     private bool Direct => info?.Direct == true;
+    private bool DvdRw => info?.DvdRw == true;
     private string QuickText => Direct
         ? "Wipes the start and end of the disc, where its file list lives. A few seconds."
+        : DvdRw ? "Clears the disc so it can be burned again. About a minute, and enough for ArchivSector-OD's own writer."
         : "Clears the disc's contents list. About a minute.";
     private string FullText => Direct
         ? "Also writes zeros over every sector. For a disc you're giving away. BD-RE about 45 minutes, DVD+RW about 15. Can be stopped, and the disc is still blank."
-        : "Writes over the whole disc. For a disc that misbehaves, or one you're giving away. CD-RW about 10 minutes, DVD-RW up to an hour.";
+        : DvdRw ? "Blanks every sector. For a disc that misbehaves, or one you're giving away. About 15 minutes."
+        : "Writes over the whole disc. For a disc that misbehaves, or one you're giving away. CD-RW about 10 minutes.";
     private string WarningText => Direct
         ? "Everything on the disc will be gone."
+        : DvdRw ? "Everything on the disc will be gone. An erase can't be stopped once it starts. While it erases, don't open Explorer or a file window (like choosing an ISO for another drive): Windows checking the drive can stop the erase part-way."
         : "Everything on the disc will be gone. An erase can't be stopped once it starts.";
 
     private void Stop()

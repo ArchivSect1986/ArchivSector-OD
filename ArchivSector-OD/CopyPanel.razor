@@ -430,7 +430,7 @@
                     Ui();
                 });
                 var r = await BurnService.BurnAsync(dst, iso, doVerify, label, "", burnProgress, ct, imgBurn, false, direct);
-                LogService.Write($"{dst}:", $"Copy ({which}): {r.Message}");
+                LogService.Write($"{dst}:", (count > 1 ? $"Copy {copyNumber} of {count}: " : "Copy: ") + r.Message);
                 bool good = r.Burned && r.Verified != false;
                 if (doVerify && r.Burned && r.Verified is null) unchecked_ = true;   // burned, but the check was stopped
                 copyLines.Add($"{(good ? "✅" : "⚠")} {Cap(which)}: {r.Message}");
