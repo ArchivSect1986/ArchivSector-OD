@@ -300,7 +300,7 @@ namespace ArchivSector_OD.Burning
                 log?.Invoke($"Erase: DVD-RW ({mode}), {(full ? "full blank (every sector)" : "minimal blank")} with the drive's BLANK command");
                 progress?.Report(new EraseProgress { Elapsed = clock.Elapsed });
 
-                // Wait, with the drive's own progress (REQUEST SENSE). Up to 90 minutes.
+                // Wait, with the drive's own progress (in TEST UNIT READY's answer). Up to 90 minutes.
                 // The log gets a line every 10%, and one if the drive stops
                 // answering for a while, so a stalled erase shows where.
                 var start = clock.Elapsed;
@@ -325,8 +325,7 @@ namespace ArchivSector_OD.Burning
                         log?.Invoke($"Erase: the drive says it's done after {clock.Elapsed - start:mm\\:ss} (last progress {Math.Max(0, lastPct):0}%); the disc reads as {(!dr.Ok ? "unknown (" + dr.Describe() + ")" : blank ? "blank" : "NOT blank")}");
                         if (dr.Ok && !blank)
                         {
-                            r.Message = "The drive stopped before the DVD-RW was blank, so the old contents are still on it. Erase it again,"
-                                      + " and don't open Explorer or a file window (like choosing an ISO) while it erases: Windows checking the drive can stop the erase.";
+                            r.Message = "The drive stopped before the DVD-RW was blank, so the old contents are still on it. Erase it again.";
                             return true;
                         }
                         r.Ok = true;
@@ -339,12 +338,14 @@ namespace ArchivSector_OD.Burning
                         r.Message = "The erase failed: " + tur.Describe() + ". Try a full erase, or another drive.";
                         return true;
                     }
-                    var sense = new byte[18];
-                    var rs = drive.Read(new byte[] { 0x03, 0, 0, 0, 18, 0 }, sense, 10);
+                    // The progress comes with TEST UNIT READY's own answer, the way
+                    // ImgBurn reads it. A separate REQUEST SENSE each second (as
+                    // before) could stall the drive for minutes once another
+                    // drive was used, and the drive then broke off the erase.
                     var elapsed = clock.Elapsed - start;
-                    if (rs.Ok && (sense[15] & 0x80) != 0)                            // progress is valid
+                    if (tur.Progress >= 0)
                     {
-                        double pct = ((sense[16] << 8) | sense[17]) * 100.0 / 65536;
+                        double pct = tur.Progress;
                         lastPct = pct;
                         if ((int)(pct / 10) > lastTenth)
                         {

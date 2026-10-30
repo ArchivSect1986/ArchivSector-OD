@@ -107,7 +107,6 @@ else if (state == State.Done && result is not null)
         : "Writes over the whole disc. For a disc that misbehaves, or one you're giving away. CD-RW about 10 minutes.";
     private string WarningText => Direct
         ? "Everything on the disc will be gone."
-        : DvdRw ? "Everything on the disc will be gone. An erase can't be stopped once it starts. While it erases, don't open Explorer or a file window (like choosing an ISO for another drive): Windows checking the drive can stop the erase part-way."
         : "Everything on the disc will be gone. An erase can't be stopped once it starts.";
 
     private void Stop()

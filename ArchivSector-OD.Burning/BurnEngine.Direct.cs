@@ -904,12 +904,10 @@ namespace ArchivSector_OD.Burning
                 Thread.Sleep(1000);
                 var tur = drive.Command(new byte[] { 0x00, 0, 0, 0, 0, 0 }, 10);
                 if (tur.Ok) return true;
-                var sense = new byte[18];
-                var rs = drive.Read(new byte[] { 0x03, 0, 0, 0, 18, 0 }, sense, 10);
-                double pct = -1;
-                if (rs.Ok && (sense[15] & 0x80) != 0)                            // progress is valid
-                    pct = ((sense[16] << 8) | sense[17]) * 100.0 / 65536;
-                progress?.Report(new Progress { Phase = "Formatting", Percent = pct });
+                // The progress comes with TEST UNIT READY's own answer (as
+                // ImgBurn reads it). A separate REQUEST SENSE here could stall
+                // the drive for minutes and break off a DVD-RW erase (beta 3).
+                progress?.Report(new Progress { Phase = "Formatting", Percent = tur.Progress });
                 // A format can't be stopped once started; a cancel just stops
                 // waiting for it at the end.
                 if (!tur.IsTryAgain && tur.SenseKey != 6) return false;
