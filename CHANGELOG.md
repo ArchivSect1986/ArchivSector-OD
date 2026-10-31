@@ -4,6 +4,34 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v4.0.0-beta3 - 2026-10-30 (pre-release)
+
+The third test version of v4.0. Everything below is new since Beta 2.
+
+### ✨ Added
+* **💿 Enhanced CDs / CD-Extra** (music, then a data session with videos or extras, common on music CDs from about 1996 to 2005). **🔁 Copy disc** reads both sessions, and **ArchivSector-OD's own writer burns a two-session BIN/CUE**: the music session is left open, the data session is added exactly where it belongs, and the disc is closed. The verify checks both. A copy's .cue marks the sessions the same way ImgBurn does, so ImgBurn can burn it too.
+* **🧽 DVD-RW erasing by ArchivSector-OD itself**, with the drive's own erase command: a **quick erase takes about a minute** (it used to need a full erase of up to an hour before the own writer could burn the disc), and a **full erase about 15 minutes**, now with a real progress bar. After an erase the disc is checked: if the drive stopped early, you're told the old contents are still there instead of "blank".
+
+### 🔧 Changed
+* **The own writer burns a quick-erased DVD-RW** ("disc at once", the way ImgBurn does), so a used DVD-RW only needs the one-minute quick erase.
+* **🔁 Copy disc reads CDs about 7 times faster.** A slower speed left over from an earlier burn could stay in force; the drive's full speed is now restored before reading (a 66-minute game CD: 14 minutes 37 seconds before, 2 minutes 5 seconds now). The log shows the reading speed as it goes.
+* **A DVD-RW in "overwrite" mode** (formatted that way by another program) is now written over directly by the own writer, like a DVD+RW, with no erase needed. This hasn't been tested on a real disc yet.
+
+### 🐛 Fixed
+* **An erase could freeze and stop part-way** when another drive was used at the same time (choosing an ISO for it, or burning in it): the progress stood still for minutes and the disc wasn't erased. Progress is now read the way ImgBurn reads it, and two drives can erase and burn side by side.
+* **When ImgBurn took over a BIN/CUE burn, it refused the .cue** ("isn't a disc image made of whole 2 KB sectors"). ImgBurn now gets BIN/CUE images, and its result says "image" instead of "ISO".
+* **The verify could misjudge where the music sits on a disc** when a track repeats exactly (a test tone), and report sectors that don't match. It now looks for the smallest shift first.
+* Small log fixes: a single copy is logged as "Copy:" (not "Copy (the copy):"), and a BIN/CUE's real file size is logged.
+
+### ⚠ Known issues
+* **Dual-layer DVD-R DL and BD-R DL** aren't written by the own writer yet: ImgBurn takes over for those.
+* **Copy disc** doesn't copy a CD with a hidden track before track 1, or the album and track names stored on some CDs (CD-Text), yet.
+
+### Reporting a problem
+Same as before: open an issue on GitHub with **Burn → Drive info → 📋 Copy report**, the disc type and brand, and that day's log from `%AppData%\ArchivSector-OD\Logs`.
+
+---
+
 ## v4.0.0-beta2 - 2026-10-28 (pre-release)
 
 The second test version of v4.0. Everything below is new since Beta 1.
