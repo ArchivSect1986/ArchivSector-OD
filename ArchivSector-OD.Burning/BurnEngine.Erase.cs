@@ -20,13 +20,20 @@ namespace ArchivSector_OD.Burning
     //   * Full erase: the same, then zeros over every sector. BD-RE about
     //     45 minutes at 2x, DVD+RW about 15 minutes at 4x. It can be stopped
     //     safely: the disc is already blank after the first step.
-    // A CD-RW/DVD-RW erase (Windows' engine) can't be stopped once it starts.
+    // DVD-RW (v4.0 beta 3) is erased by ArchivSector-OD too (EraseDvdRw),
+    // with the drive's own BLANK command, so it shows real progress:
+    //   * Quick erase: "minimal blank", about a minute. The own writer
+    //     writes a quick-erased DVD-RW incrementally, so that's enough.
+    //   * Full erase: blanks every sector, about 15 minutes at 4x.
+    //   A DVD-RW in "overwrite" mode comes back in the normal (sequential) mode.
+    // A CD-RW (Windows' engine) or DVD-RW erase can't be stopped once it starts.
     public static partial class BurnEngine
     {
         public sealed class EraseInfo
         {
             public bool CanErase;
             public bool Direct;              // erased by ArchivSector-OD itself (DVD+RW, BD-RE): can be stopped
+            public bool DvdRw;               // a DVD-RW, blanked by ArchivSector-OD with the drive's BLANK command (can't be stopped)
             public string MediaType = "";
             public string? Problem;          // why it can't be erased here
         }
@@ -105,6 +112,8 @@ namespace ArchivSector_OD.Burning
 
                         // DVD+RW and BD-RE: erased by ArchivSector-OD itself.
                         if (type is 7 or 19) { info.CanErase = true; info.Direct = true; return; }
+                        // DVD-RW: blanked by ArchivSector-OD (Windows' engine is the fallback).
+                        if (type == 10) { info.CanErase = true; info.DvdRw = true; return; }
 
                         eraseObj = Activator.CreateInstance(Type.GetTypeFromProgID("IMAPI2.MsftDiscFormat2Erase")!)!;
                         dynamic erase = eraseObj;
@@ -152,7 +161,7 @@ namespace ArchivSector_OD.Burning
                 try
                 {
                     log?.Invoke($"Erase: {(full ? "full" : "quick")} erase of the disc in {letter}: started");
-                    if (!EraseOverwritable(letter, full, progress, clock, ct, r, log))
+                    if (!EraseOverwritable(letter, full, progress, clock, ct, r, log) && !EraseDvdRw(letter, full, progress, clock, r, log))
                         RunSta(() => Erase(letter, full, progress, clock, r));
                 }
                 catch (Exception ex)
@@ -251,6 +260,108 @@ namespace ArchivSector_OD.Burning
                     ? $"Full erase stopped at {100.0 * done / total:0}%. The {name} is blank and ready to burn (its file list was wiped first)."
                     : full ? $"Full erase finished: every sector of the {name} was overwritten. It's blank and ready to burn."
                     : $"Quick erase finished. The {name} is blank and ready to burn.";
+                return true;
+            }
+            finally
+            {
+                drive.Command(new byte[] { 0x1E, 0, 0, 0, 0, 0 }, 10);
+                drive.Unlock();
+            }
+        }
+
+        // ---- DVD-RW: the drive's BLANK command ----
+        // Returns false when the disc isn't a DVD-RW, or the drive refused
+        // BLANK before starting (Windows' engine then erases it); true when it
+        // handled the disc (r says how it went).
+        private static bool EraseDvdRw(string letter, bool full, IProgress<EraseProgress>? progress, Stopwatch clock, EraseResult r, Action<string>? log)
+        {
+            using var drive = ScsiDrive.Open(letter, out _);
+            if (drive is null) return false;
+            if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromSeconds(30))) return false;
+            var cfg = new byte[8];
+            var rep = drive.Read(new byte[] { 0x46, 0x02, 0, 0, 0, 0, 0, 0, 8, 0 }, cfg, 10);
+            int profile = rep.Ok ? (cfg[6] << 8) | cfg[7] : 0;
+            if (profile is not (ProfileDvdRwSequential or ProfileDvdRwOverwrite)) return false;
+            string mode = profile == ProfileDvdRwOverwrite ? "overwrite mode" : "sequential mode";
+
+            drive.LockAndDismount();
+            drive.Command(new byte[] { 0x1E, 0, 0, 0, 1, 0 }, 10);                                   // keep the tray shut
+            drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);       // fastest speed
+            try
+            {
+                // BLANK, answering at once (IMMED); type 0 = the whole disc, 1 = minimal.
+                byte type = (byte)(full ? 0x00 : 0x01);
+                rep = drive.Command(new byte[] { 0xA1, (byte)(0x10 | type), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 120);
+                if (!rep.Ok && !rep.IsTryAgain)
+                {
+                    log?.Invoke($"Erase: the drive refused BLANK on the DVD-RW ({mode}): {rep.Describe()}; trying Windows' engine");
+                    return false;
+                }
+                log?.Invoke($"Erase: DVD-RW ({mode}), {(full ? "full blank (every sector)" : "minimal blank")} with the drive's BLANK command");
+                progress?.Report(new EraseProgress { Elapsed = clock.Elapsed });
+
+                // Wait, with the drive's own progress (in TEST UNIT READY's answer). Up to 90 minutes.
+                // The log gets a line every 10%, and one if the drive stops
+                // answering for a while, so a stalled erase shows where.
+                var start = clock.Elapsed;
+                double lastPct = -1;
+                int lastTenth = -1;
+                while (clock.Elapsed - start < TimeSpan.FromMinutes(90))
+                {
+                    Thread.Sleep(1000);
+                    var asked = clock.Elapsed;
+                    var tur = drive.Command(new byte[] { 0x00, 0, 0, 0, 0, 0 }, 10);
+                    var took = clock.Elapsed - asked;
+                    if (took > TimeSpan.FromSeconds(5))
+                        log?.Invoke($"Erase: the drive took {took.TotalSeconds:0} s to answer (at {Math.Max(0, lastPct):0}%, {clock.Elapsed - start:mm\\:ss} in)");
+                    if (tur.Ok)
+                    {
+                        // The drive says it's done: check the disc really is blank
+                        // now. An erase the drive gave up on part-way (interrupted)
+                        // can also end like this, with the old contents still there.
+                        var di = new byte[34];
+                        var dr = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10);
+                        bool blank = dr.Ok && (di[2] & 3) == 0;
+                        log?.Invoke($"Erase: the drive says it's done after {clock.Elapsed - start:mm\\:ss} (last progress {Math.Max(0, lastPct):0}%); the disc reads as {(!dr.Ok ? "unknown (" + dr.Describe() + ")" : blank ? "blank" : "NOT blank")}");
+                        if (dr.Ok && !blank)
+                        {
+                            r.Message = "The drive stopped before the DVD-RW was blank, so the old contents are still on it. Erase it again.";
+                            return true;
+                        }
+                        r.Ok = true;
+                        r.Message = full ? "Full erase finished: every sector of the DVD-RW was blanked. It's blank and ready to burn."
+                                         : "Quick erase finished. The DVD-RW is blank and ready to burn.";
+                        return true;
+                    }
+                    if (!tur.IsTryAgain && tur.SenseKey != 6)
+                    {
+                        r.Message = "The erase failed: " + tur.Describe() + ". Try a full erase, or another drive.";
+                        return true;
+                    }
+                    // The progress comes with TEST UNIT READY's own answer, the way
+                    // ImgBurn reads it. A separate REQUEST SENSE each second (as
+                    // before) could stall the drive for minutes once another
+                    // drive was used, and the drive then broke off the erase.
+                    var elapsed = clock.Elapsed - start;
+                    if (tur.Progress >= 0)
+                    {
+                        double pct = tur.Progress;
+                        lastPct = pct;
+                        if ((int)(pct / 10) > lastTenth)
+                        {
+                            lastTenth = (int)(pct / 10);
+                            if (lastTenth > 0) log?.Invoke($"Erase: {lastTenth * 10}% after {clock.Elapsed - start:mm\\:ss}");
+                        }
+                        progress?.Report(new EraseProgress
+                        {
+                            Elapsed = clock.Elapsed,
+                            Percent = Math.Min(99, pct),
+                            Remaining = pct > 0.5 ? TimeSpan.FromSeconds(elapsed.TotalSeconds * (100 - pct) / pct) : TimeSpan.Zero,
+                        });
+                    }
+                    else progress?.Report(new EraseProgress { Elapsed = clock.Elapsed });
+                }
+                r.Message = "The erase didn't finish within 90 minutes.";
                 return true;
             }
             finally

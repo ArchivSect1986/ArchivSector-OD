@@ -1,8 +1,8 @@
-﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 2 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 3 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v4.0 Beta 2**, a test version of v4.0! ⚠️ It's
+Welcome to **ArchivSector-OD v4.0 Beta 3**, a test version of v4.0! ⚠️ It's
 a pre-release: everything should work, but this is the version where you
 help find what doesn't. If you'd rather stay on a finished version, keep
 v3.4.
@@ -32,7 +32,23 @@ you want to go back). Your settings, history, and cached artwork are kept
 -- they're stored separately in your AppData folder. When v4.0 itself is
 released, the beta offers it to you by itself.
 
-Already on Beta 1? Replace your Beta 1 folder with this one.
+Already on Beta 1 or Beta 2? Replace that folder with this one.
+
+========================================================================
+📀 NEW IN V4.0 BETA 3 — DVD-RW, ENHANCED CDs & FASTER CD COPYING
+========================================================================
+
+• 💿 Enhanced CDs / CD-Extra (music plus a data session): Copy disc
+  reads both sessions, and the own writer burns them in two sessions,
+  verified.
+• 🧽 DVD-RW: quick erase in about a minute, full erase in about 15
+  minutes with a progress bar, done by ArchivSector-OD itself. The own
+  writer burns a quick-erased DVD-RW, so no more hour-long erases.
+• 🔁 Copy disc reads CDs about 7 times faster (a 66-minute game CD in
+  2 minutes instead of 14).
+• Fixed: an erase could freeze and stop part-way while another drive
+  was in use. Two drives can now erase and burn side by side.
+• Fixed: ImgBurn now accepts BIN/CUE images when it takes over.
 
 ========================================================================
 💿 NEW IN V4.0 BETA 2 — BIN/CUE BURNING & COPY DISC
@@ -84,8 +100,8 @@ Already on Beta 1? Replace your Beta 1 folder with this one.
   and the CD-R size is now exactly what a blank 80-minute CD-R holds.
 
 ⚠ Known issues: dual-layer DVD-R DL and BD-R DL go to ImgBurn for now.
-  (The CD-RW issue listed in Beta 1 turned out to be a damaged image
-  file, not the drive or the discs.)
+  Copy disc doesn't copy a hidden track before track 1, or CD-Text
+  (album and track names), yet.
 
 🙏 Please report what you find, good or bad, on GitHub (Issues → Bug
   report). Include Burn → Drive info → 📋 Copy report (your drive and

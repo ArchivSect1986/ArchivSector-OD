@@ -342,7 +342,23 @@ else if (state == State.Done && result is not null)
         ApplyPreferred();
         state = State.Confirm;
         _ = LoadSpeeds();
-        LogService.Write($"{DriveLetter}:", $"Burn: chose {isoPath} ({isoBytes:N0} bytes). Blank {BlankMediaType}: disc {DiscBytes:N0} bytes, Windows engine free {BlankFreeBytes:N0} bytes");
+        LogService.Write($"{DriveLetter}:", $"Burn: chose {isoPath} ({ChosenSize}). Blank {BlankMediaType}: disc {DiscBytes:N0} bytes, Windows engine free {BlankFreeBytes:N0} bytes");
+    }
+
+    // For the log: an ISO's size, or for a BIN/CUE the real size of its
+    // files plus the room it takes on the disc (counted in 2048-byte
+    // sectors like the blank, which is why it's smaller than the files).
+    private string ChosenSize
+    {
+        get
+        {
+            if (cue is null || cue.Problem is not null) return $"{isoBytes:N0} bytes";
+            var files = cue.Pieces.Where(p => p.File is not null).Select(p => p.File!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            long fileBytes = 0;
+            foreach (var f in files) { try { fileBytes += new FileInfo(f).Length; } catch { } }
+            string n = files.Count == 1 ? "1 file" : files.Count + " files";
+            return "BIN/CUE, " + n + " " + fileBytes.ToString("N0") + " bytes, fills " + (isoBytes / 2048).ToString("N0") + " sectors";
+        }
     }
 
     // The program the user prefers, if it can burn this disc; otherwise the

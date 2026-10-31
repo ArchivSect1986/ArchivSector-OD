@@ -260,7 +260,8 @@
             {
                 toc = t;
                 cdCopy = true;
-                info.Problem = t.Sessions > 1 ? "This CD has more than one session (CD-Extra / Enhanced CD), which Copy disc can't copy yet. ImgBurn or Redumper can."
+                // An Enhanced CD (beta 3): read here, burned in two sessions.
+                info.Problem = t.Sessions > 1 && !t.SessionLayoutKnown ? "This CD has more than one session, but the drive didn't give where each one starts and ends, so Copy disc can't copy it. ImgBurn or Redumper can."
                     : t.Tracks[0].StartLba != 0 ? "This CD's first track doesn't start in the usual place (a hidden track?), which Copy disc can't copy yet."
                     : null;
             }
@@ -430,7 +431,7 @@
                     Ui();
                 });
                 var r = await BurnService.BurnAsync(dst, iso, doVerify, label, "", burnProgress, ct, imgBurn, false, direct);
-                LogService.Write($"{dst}:", $"Copy ({which}): {r.Message}");
+                LogService.Write($"{dst}:", (count > 1 ? $"Copy {copyNumber} of {count}: " : "Copy: ") + r.Message);
                 bool good = r.Burned && r.Verified != false;
                 if (doVerify && r.Burned && r.Verified is null) unchecked_ = true;   // burned, but the check was stopped
                 copyLines.Add($"{(good ? "✅" : "⚠")} {Cap(which)}: {r.Message}");

@@ -135,7 +135,7 @@ namespace ArchivSector_OD.Burning
         // speed set earlier (by us or another program) can stay in force
         // until the disc is taken out. Drives that don't know a command
         // just ignore it.
-        private static void FullDriveSpeed(ScsiDrive drive)
+        internal static void FullDriveSpeed(ScsiDrive drive)
         {
             var d = new byte[28];
             d[0] = 0x04;                          // SET STREAMING, RDD: restore drive defaults

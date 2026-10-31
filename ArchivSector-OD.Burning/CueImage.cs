@@ -29,6 +29,7 @@ namespace ArchivSector_OD.Burning
             public long Index1Lba;                       // where the track starts
             public List<long> MoreIndexLbas = new();     // index 02, 03...
             public long EndLba;                          // first sector after the track
+            public int Session = 1;                      // Enhanced CD / CD-Extra: 2 for the data session
             public bool IsAudio => Mode == TrackMode.Audio;
             public long Sectors => EndLba - Index1Lba;
         }
@@ -50,12 +51,23 @@ namespace ArchivSector_OD.Burning
         public List<Track> Tracks = new();
         public List<Piece> Pieces = new();
         public string? Problem;                          // why it can't be burned with the own writer
+        public int Sessions = 1;                         // "REM SESSION nn" lines (an Enhanced CD / CD-Extra has 2)
+        /// <summary>The tracks of one session (1, 2...).</summary>
+        public List<Track> SessionTracks(int session) => Tracks.Where(t => t.Session == session).ToList();
+        /// <summary>The pieces written in one session (a session's lead-out and the next lead-in aren't written by us).</summary>
+        public List<Piece> SessionPieces(int session)
+        {
+            var ts = SessionTracks(session);
+            if (ts.Count == 0) return new();
+            long from = ts[0].PregapLba, to = ts[^1].EndLba;
+            return Pieces.Where(p => p.StartLba >= from && p.StartLba < to).ToList();
+        }
         public long FirstLba => Pieces.Count > 0 ? Pieces[0].StartLba : -150;
         public long LeadOutLba => Tracks.Count > 0 ? Tracks[^1].EndLba : 0;
         public bool HasData => Tracks.Any(t => !t.IsAudio);
         public bool HasAudio => Tracks.Any(t => t.IsAudio);
         public bool HasMode2 => Tracks.Any(t => t.Mode is TrackMode.Mode2Raw or TrackMode.Mode2Cooked);
-        public long BurnSectors => LeadOutLba - FirstLba;   // every sector written, gaps included
+        public long BurnSectors => Pieces.Sum(p => p.Count);   // every sector written, gaps included (not the space between sessions)
 
         /// <summary>The size of a sector as the writer sends it (the drive adds the rest).</summary>
         public static int BlockSize(TrackMode m) => m switch
@@ -74,7 +86,7 @@ namespace ArchivSector_OD.Burning
                 if (data > 0) parts.Add($"{data} data track{(data == 1 ? "" : "s")}");
                 if (audio > 0) parts.Add($"{audio} music track{(audio == 1 ? "" : "s")}");
                 long minutes = (LeadOutLba + 150) / 75 / 60, seconds = (LeadOutLba + 150) / 75 % 60;
-                return $"{string.Join(", ", parts)} · {minutes}:{seconds:D2} long ({LeadOutLba + 150:N0} sectors)";
+                return $"{string.Join(", ", parts)}{(Sessions > 1 ? $" in {Sessions} sessions (Enhanced CD)" : "")} · {minutes}:{seconds:D2} long ({LeadOutLba + 150:N0} sectors)";
             }
         }
 
@@ -117,6 +129,8 @@ namespace ArchivSector_OD.Burning
             public int FileIndex;
             public long Pregap, Postgap;                 // generated sectors (PREGAP / POSTGAP)
             public SortedDictionary<int, long> Indexes = new();   // index → sector in its file
+            public int Session = 1;
+            public long SessionGap;                      // first track of a later session: the previous lead-out + this lead-in (not written by us)
         }
 
         /// <summary>Reads a .cue and works out every sector's position. Problem says what's wrong, if anything.</summary>
@@ -126,6 +140,7 @@ namespace ArchivSector_OD.Burning
             try { Parse(img, cuePath); }
             catch (Exception ex) { img.Problem = ex is FormatException or FileNotFoundException or IOException ? ex.Message : "The .cue couldn't be read: " + ex.Message; }
             if (img.Problem is null && img.Tracks.Count == 0) img.Problem = "The .cue doesn't list any tracks.";
+
             return img;
         }
 
@@ -136,6 +151,11 @@ namespace ArchivSector_OD.Burning
             var tracks = new List<RawTrack>();
             RawTrack? cur = null;
             int lineNo = 0;
+            // Sessions, ImgBurn style: REM SESSION nn, then before the next
+            // session's first track REM LEAD-OUT (of the one before), REM
+            // LEAD-IN and REM PREGAP. Standard lengths if they're left out.
+            int session = 1;
+            long? remLeadOut = null, remLeadIn = null, remPregap = null;
 
             foreach (var raw in File.ReadAllLines(cuePath, Encoding.UTF8))
             {
@@ -189,7 +209,13 @@ namespace ArchivSector_OD.Burning
                         };
                         if (files[^1].Type == "WAVE" && mode != TrackMode.Audio)
                             throw new FormatException($"Track {no} is a data track in a .wav file; a .wav can only hold music.");
-                        cur = new RawTrack { Number = no, Mode = mode, SectorSize = size, FileIndex = files.Count - 1 };
+                        cur = new RawTrack { Number = no, Mode = mode, SectorSize = size, FileIndex = files.Count - 1, Session = session };
+                        if (session > 1 && tracks.Count > 0 && tracks[^1].Session != session)
+                        {
+                            cur.SessionGap = (remLeadOut ?? (tracks[^1].Session == 1 ? 6750 : 2250)) + (remLeadIn ?? 4500);
+                            cur.Pregap += remPregap ?? 150;
+                            remLeadOut = remLeadIn = remPregap = null;
+                        }
                         tracks.Add(cur);
                         break;
                     }
@@ -218,7 +244,25 @@ namespace ArchivSector_OD.Burning
                             cur.Dcp = f.Contains("DCP");
                         }
                         break;
-                    // Information only, nothing to write: REM, CATALOG, TITLE, PERFORMER, SONGWRITER, ISRC, CDTEXTFILE.
+                    // "REM SESSION 02" (ImgBurn's way of marking a disc's sessions).
+                    case "REM":
+                    {
+                        var bits = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (bits.Length < 2) break;
+                        switch (bits[0].ToUpperInvariant())
+                        {
+                            case "SESSION" when int.TryParse(bits[1], out int sNo) && sNo >= 1:
+                                if (sNo != session && sNo != session + 1) throw new FormatException($"Line {lineNo}: session {sNo} comes after session {session}.");
+                                session = sNo;
+                                img.Sessions = Math.Max(img.Sessions, session);
+                                break;
+                            case "LEAD-OUT": remLeadOut = ParseMsf(bits[1]); break;
+                            case "LEAD-IN": remLeadIn = ParseMsf(bits[1]); break;
+                            case "PREGAP": remPregap = ParseMsf(bits[1]); break;
+                        }
+                        break;
+                    }
+                    // Information only, nothing to write: CATALOG, TITLE, PERFORMER, SONGWRITER, ISRC, CDTEXTFILE.
                     default:
                         break;
                 }
@@ -272,7 +316,10 @@ namespace ArchivSector_OD.Burning
                 bool swap = file.Type == "MOTOROLA" && t.Mode == TrackMode.Audio;
                 dataEnd = file.Offset + file.Length;
 
-                var track = new Track { Number = t.Number, Mode = t.Mode, PreEmphasis = t.Pre, CopyPermitted = t.Dcp };
+                // A later session: past the previous lead-out and this lead-in,
+                // which the drive writes itself.
+                if (i > 0 && t.Session != tracks[i - 1].Session) lba += t.SessionGap;
+                var track = new Track { Number = t.Number, Mode = t.Mode, PreEmphasis = t.Pre, CopyPermitted = t.Dcp, Session = t.Session };
                 long pregapInFile = idx1 - first;
                 long generated = t.Pregap;
                 // The first track always has at least the standard 150-sector gap.
@@ -339,8 +386,9 @@ namespace ArchivSector_OD.Burning
         /// are minutes/seconds/frames counted from the start of the disc
         /// (LBA + 150).
         /// </summary>
-        public byte[] BuildCueSheet()
+        public byte[] BuildCueSheet(int session = 1)
         {
+            var tracks = SessionTracks(session);
             var e = new List<byte[]>();
             static byte DataForm(TrackMode m) => m switch
             {
@@ -362,16 +410,19 @@ namespace ArchivSector_OD.Burning
             }
 
             static byte LeadCtl(Track t) => (byte)(t.IsAudio ? 0x01 : 0x41);   // lead-in/out: only "data or music"
-            var first = Tracks[0];
-            e.Add(Entry(LeadCtl(first), 0, 0, LeadForm(first.Mode), -150));      // lead-in
-            foreach (var t in Tracks)
+            // The lead-in, at the start of the session's first gap (LBA -150 on
+            // a one-session disc; a later session starts after the earlier
+            // ones). Then each track, then the lead-out.
+            var first = tracks[0];
+            e.Add(Entry(LeadCtl(first), 0, 0, LeadForm(first.Mode), first.PregapLba));
+            foreach (var t in tracks)
             {
                 byte ca = (byte)(Ctl(t) | 0x01), tno = (byte)t.Number, form = DataForm(t.Mode);
                 if (t.PregapLba < t.Index1Lba) e.Add(Entry(ca, tno, 0, form, t.PregapLba));
                 e.Add(Entry(ca, tno, 1, form, t.Index1Lba));
                 for (int i = 0; i < t.MoreIndexLbas.Count; i++) e.Add(Entry(ca, tno, (byte)(i + 2), form, t.MoreIndexLbas[i]));
             }
-            var last = Tracks[^1];
+            var last = tracks[^1];
             e.Add(Entry(LeadCtl(last), 0xAA, 1, LeadForm(last.Mode), last.EndLba));   // lead-out
             return e.SelectMany(b => b).ToArray();
         }

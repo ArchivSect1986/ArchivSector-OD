@@ -22,6 +22,8 @@ namespace ArchivSector_OD.Burning
             public byte ScsiStatus;         // 0 GOOD, 2 CHECK CONDITION, 8 BUSY
             public byte SenseKey;           // why it said no: 2 not ready, 3 medium error, 5 illegal request, 6 unit attention
             public byte Asc, Ascq;          // the detailed reason code
+            /// <summary>A long operation's progress (0-100) that came with a "not ready, in progress" answer, or -1 (v4.0 beta 3).</summary>
+            public double Progress = -1;
             public int BytesReturned;
             /// <summary>The drive is only busy (getting ready, buffer full, still writing): try again shortly.</summary>
             public bool IsTryAgain => !Ok && Win32Error == 0 &&
@@ -145,6 +147,9 @@ namespace ArchivSector_OD.Burning
                     reply.SenseKey = (byte)(back.Sense[2] & 0x0F);
                     reply.Asc = back.Sense[12];
                     reply.Ascq = back.Sense[13];
+                    // Bytes 15-17: progress of a format/erase, when byte 15's top bit says it's valid.
+                    if (back.Sense.Length >= 18 && (back.Sense[15] & 0x80) != 0)
+                        reply.Progress = ((back.Sense[16] << 8) | back.Sense[17]) * 100.0 / 65536;
                 }
                 return reply;
             }
