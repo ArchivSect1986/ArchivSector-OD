@@ -32,6 +32,7 @@ namespace ArchivSector_OD.Burning
             public long LeadOutLba;
             public int Sessions = 1;
             public List<long> SessionLeadOuts = new();   // where each session ends (full TOC), in order
+            public CdText? CdText;                       // album and track names, if the CD has them (beta 4)
             /// <summary>Several sessions, and the drive gave where each one starts and ends.</summary>
             public bool SessionLayoutKnown => Sessions == 1 || (SessionLeadOuts.Count == Sessions
                 && Enumerable.Range(1, Sessions).All(s => Tracks.Any(t => t.Session == s))
@@ -150,6 +151,9 @@ namespace ArchivSector_OD.Burning
                 }
             }
 
+            // CD-Text: album and track names (beta 4), kept in the copy's .cue.
+            try { toc.CdText = CdText.Read(drive); } catch { toc.CdText = null; }
+
             // Data tracks: mode 1 or mode 2, from the sector header.
             var raw = new byte[2352];
             foreach (var t in toc.Tracks.Where(t => t.IsData))
@@ -242,7 +246,8 @@ namespace ArchivSector_OD.Burning
             log?.Invoke($"Read CD: {letter}: {toc.Summary}; " + string.Join(", ", toc.Tracks.Select(t =>
                 (toc.Sessions > 1 ? $"S{t.Session} " : "") +
                 $"T{t.Number} {(t.IsData ? "MODE" + t.Mode : "AUDIO")} @{t.StartLba}" + (t.PregapLba < t.StartLba ? $" (gap {t.StartLba - t.PregapLba})" : "")))
-                + (toc.Sessions > 1 ? "; sessions end at " + string.Join(", ", toc.SessionLeadOuts) : ""));
+                + (toc.Sessions > 1 ? "; sessions end at " + string.Join(", ", toc.SessionLeadOuts) : "")
+                + (toc.CdText is not null ? "; CD-Text: " + string.Join(" | ", toc.CdText.Lines().Select(l => $"{l.Label}: {l.Value}")) : ""));
 
             // Full speed: the drive's own defaults back first (a slower write
             // speed set earlier by a burn, ours or another program's, can
@@ -346,6 +351,27 @@ namespace ArchivSector_OD.Burning
             }
             var sb = new StringBuilder();
             sb.AppendLine($"REM Copied by ArchivSector-OD");
+            // CD-Text, the .cue way (TITLE / PERFORMER / SONGWRITER, the album's
+            // before the first FILE, each track's under its TRACK line).
+            static string Q(string s) => "\"" + s.Replace('"', '\'') + "\"";
+            var text = toc.CdText;
+            void TextLines(int track, string indent)
+            {
+                if (text is null) return;
+                foreach (var field in new[] { "TITLE", "PERFORMER", "SONGWRITER" })
+                {
+                    var v = text.Get(field, track);
+                    if (v.Length > 0) sb.AppendLine($"{indent}{field} {Q(v)}");
+                }
+                foreach (var field in new[] { "COMPOSER", "ARRANGER", "MESSAGE" })
+                {
+                    var v = text.Get(field, track);
+                    if (v.Length > 0) sb.AppendLine($"{indent}REM {field} {Q(v)}");
+                }
+            }
+            if (text is not null && text.Codes.TryGetValue(0, out var upc) && upc.All(char.IsDigit) && upc.Length is 12 or 13)
+                sb.AppendLine($"CATALOG {upc.PadLeft(13, '0')}");
+            TextLines(0, "");
             if (toc.Sessions > 1) sb.AppendLine("REM SESSION 01");
             sb.AppendLine($"FILE \"{Path.GetFileName(bin)}\" BINARY");
             for (int i = 0; i < toc.Tracks.Count; i++)
@@ -367,6 +393,8 @@ namespace ArchivSector_OD.Burning
                     if (pregap > 0) sb.AppendLine($"REM PREGAP {Msf(pregap)}");
                 }
                 sb.AppendLine($"  TRACK {t.Number:D2} {(t.IsData ? $"MODE{t.Mode}/2352" : "AUDIO")}");
+                TextLines(t.Number, "    ");
+                if (text is not null && text.Codes.TryGetValue(t.Number, out var isrc) && isrc.Length == 12) sb.AppendLine($"    ISRC {isrc}");
                 if (t.Number > 1 && t.PregapLba < t.StartLba) sb.AppendLine($"    INDEX 00 {Msf(InBin(t.PregapLba))}");
                 sb.AppendLine($"    INDEX 01 {Msf(InBin(t.StartLba))}");
             }

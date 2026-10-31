@@ -156,9 +156,20 @@
         : checking ? "Checking the disc…"
         : disc is null ? ""
         : disc.Problem is not null ? "⚠ " + disc.Problem
-        : cdCopy && toc is not null ? toc.Summary + (disc.Label.Length > 0 ? " · " + disc.Label : "") + " (copied with its music tracks)"
+        : cdCopy && toc is not null ? toc.Summary + (disc.Label.Length > 0 ? " · " + disc.Label : "") + CdTextLine + " (copied with its music tracks" + (toc.CdText is not null ? " and CD-Text" : "") + ")"
         : $"{disc.Kind} · {disc.Label} · {disc.FileSystem} · {DiscHealthService.FormatBytes(disc.Bytes)}";
     private string DiscColor => disc?.Problem is not null ? "var(--amber)" : "var(--text-secondary)";
+    // CD-Text (beta 4): the album and artist, when the CD carries them.
+    private string CdTextAlbum => toc?.CdText is null ? "" : toc.CdText.Get("TITLE", 0);
+    private string CdTextLine
+    {
+        get
+        {
+            if (toc?.CdText is null) return "";
+            string title = toc.CdText.Get("TITLE", 0), who = toc.CdText.Get("PERFORMER", 0);
+            return title.Length == 0 ? "" : " · " + title + (who.Length > 0 ? " by " + who : "");
+        }
+    }
     private string TargetLabel(string d) => d == source ? $"Drive {d}: (the same drive: swap the discs when asked)" : $"Drive {d}:";
 
     // Room for the temporary ISO?
@@ -283,7 +294,8 @@
     private async Task Start()
     {
         if (!CanStart || disc is null) return;
-        string src = source, dst = target, label = disc.Label.Length > 0 ? disc.Label : cdCopy ? "Music CD" : "disc";
+        // A music CD's CD-Text album title beats Windows' generic "Audio CD" label.
+        string src = source, dst = target, label = CdTextAlbum.Length > 0 ? CdTextAlbum : disc.Label.Length > 0 ? disc.Label : cdCopy ? "Music CD" : "disc";
         bool asCue = cdCopy && toc is not null;
         long cdSectors = toc?.LeadOutLba ?? 0;
         bool oneDrive = src == dst;

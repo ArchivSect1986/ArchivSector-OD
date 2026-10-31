@@ -61,6 +61,8 @@ namespace ArchivSector_OD.Burning
             public bool DiscUntouched;
             public TimeSpan BurnTime;
             public TimeSpan VerifyTime;
+            public bool CdTextWritten;       // BIN/CUE: the album and track names went into the lead-in (beta 4)
+            public string CdTextNote = "";   // BIN/CUE: why there's no CD-Text, or that it reads back differently
         }
 
         // Drives currently burning or verifying (the bay polling leaves them alone).

@@ -71,6 +71,14 @@ namespace ArchivSector_OD.Burning
             var atip = new byte[28];
             rep = drive.Read(new byte[] { 0x43, 0x02, 0x04, 0, 0, 0, 0, 0, 28, 0 }, atip, 10);
             if (rep.Ok && ((atip[0] << 8) | atip[1]) >= 22) capacity = (atip[12] * 60L + atip[13]) * 75 + atip[14] - 150;
+            // Where the lead-in starts (ATIP), for CD-Text: a time from 90:00:00 on
+            // is before the disc's zero point (97:34:23 → about -11,800).
+            long leadInLba = 0;
+            if (rep.Ok && ((atip[0] << 8) | atip[1]) >= 22)
+            {
+                long msf = (atip[8] * 60L + atip[9]) * 75 + atip[10];
+                leadInLba = atip[8] >= 90 ? msf - 450150 : msf - 150;
+            }
             if (capacity <= 0)
             {
                 var ti = new byte[48];
@@ -156,12 +164,55 @@ namespace ArchivSector_OD.Burning
                         return;
                     }
 
+                    // CD-Text (beta 4): album and track names, in the first session's lead-in.
+                    List<byte[]>? textPacks = null;
+                    if (session == 1 && img.CdText is { HasAny: true } && leadInLba < -150)
+                    {
+                        textPacks = img.CdText.ToPacks(img.Tracks.Where(t => t.Session == 1).Max(t => t.Number));
+                        if (textPacks.Count == 0) textPacks = null;
+                    }
+
                     // 1. The layout.
-                    var sheet = img.BuildCueSheet(session);
-                    log?.Invoke($"BIN/CUE: {which}cue sheet " + string.Join(" | ", Enumerable.Range(0, sheet.Length / 8)
-                        .Select(i => string.Join(" ", sheet.Skip(i * 8).Take(8).Select(b => b.ToString("X2"))))));
-                    rep = drive.Write(new byte[] { 0x5D, 0, 0, 0, 0, 0, (byte)(sheet.Length >> 16), (byte)(sheet.Length >> 8), (byte)sheet.Length, 0 }, sheet, 60);
-                    if (!rep.Ok) { r.Message = $"The drive didn't accept the {which}disc layout (cue sheet): " + rep.Describe() + (session > 1 ? " " + afterFailure : ""); log?.Invoke("BIN/CUE: " + r.Message); return; }
+                    bool SendSheet(bool withText)
+                    {
+                        var sheet = img.BuildCueSheet(session, withText);
+                        log?.Invoke($"BIN/CUE: {which}cue sheet " + string.Join(" | ", Enumerable.Range(0, sheet.Length / 8)
+                            .Select(i => string.Join(" ", sheet.Skip(i * 8).Take(8).Select(b => b.ToString("X2"))))));
+                        rep = drive.Write(new byte[] { 0x5D, 0, 0, 0, 0, 0, (byte)(sheet.Length >> 16), (byte)(sheet.Length >> 8), (byte)sheet.Length, 0 }, sheet, 60);
+                        return rep.Ok;
+                    }
+                    bool sheetOk = SendSheet(textPacks is not null);
+                    if (!sheetOk && textPacks is not null)
+                    {
+                        log?.Invoke($"BIN/CUE: the drive didn't take the layout with CD-Text ({rep.Describe()}); burning without CD-Text");
+                        textPacks = null;
+                        r.CdTextNote = " The drive wouldn't write CD-Text, so the disc has no album or track names.";
+                        sheetOk = SendSheet(false);
+                    }
+                    if (!sheetOk) { r.Message = $"The drive didn't accept the {which}disc layout (cue sheet): " + rep.Describe() + (session > 1 ? " " + afterFailure : ""); log?.Invoke("BIN/CUE: " + r.Message); return; }
+
+                    // 1b. CD-Text: the lead-in, written by us from its start up to
+                    // LBA -150, carrying the packs over and over. If the drive
+                    // refuses the very first block, nothing is written yet: the
+                    // layout goes again without CD-Text.
+                    if (textPacks is not null)
+                    {
+                        var lw = WriteCdTextLeadIn(drive, textPacks, leadInLba, progress, ct, log);
+                        if (lw == LeadInResult.RefusedAtStart)
+                        {
+                            log?.Invoke("BIN/CUE: the drive refused the CD-Text lead-in before anything was written; burning without CD-Text");
+                            r.CdTextNote = " The drive wouldn't write CD-Text, so the disc has no album or track names.";
+                            if (!SendSheet(false)) { r.Message = "The drive didn't accept the disc layout (cue sheet): " + rep.Describe(); log?.Invoke("BIN/CUE: " + r.Message); return; }
+                        }
+                        else if (lw == LeadInResult.Failed)
+                        {
+                            r.DiscUntouched = false;
+                            r.Message = "Writing the CD-Text (in the lead-in) failed (the log says where). " + afterFailure;
+                            return;
+                        }
+                        else if (lw == LeadInResult.Cancelled) { r.Cancelled = true; r.DiscUntouched = false; r.Message = "Cancelled. " + afterFailure; return; }
+                        else r.CdTextWritten = true;
+                    }
 
                     // 2. Every sector of the session, from its first gap.
                     r.DiscUntouched = false;
@@ -190,7 +241,20 @@ namespace ArchivSector_OD.Burning
                 r.BurnTime = clock.Elapsed;
                 r.Burned = true;
                 RestoreDriveSpeed(drive, profile, speedX);
-                log?.Invoke($"BIN/CUE: {img.BurnSectors:N0} sectors written{(img.Sessions > 1 ? $" in {img.Sessions} sessions" : "")} and the {discName} closed in {r.BurnTime:hh\\:mm\\:ss}");
+                log?.Invoke($"BIN/CUE: {img.BurnSectors:N0} sectors written{(img.Sessions > 1 ? $" in {img.Sessions} sessions" : "")}{(r.CdTextWritten ? " with CD-Text" : "")} and the {discName} closed in {r.BurnTime:hh\\:mm\\:ss}");
+
+                // CD-Text: read it back and compare with what was meant.
+                if (r.CdTextWritten && img.CdText is not null)
+                {
+                    var back = CdText.Read(drive);
+                    var want = img.CdText.Lines().ToList();
+                    var got = back?.Lines().ToList() ?? new();
+                    bool same = back is not null && want.SequenceEqual(got);
+                    log?.Invoke(same ? $"BIN/CUE: CD-Text read back and matches ({want.Count} line(s))"
+                        : back is null ? "BIN/CUE: CD-TEXT CHECK: the drive reads no CD-Text on the disc"
+                        : "BIN/CUE: CD-TEXT CHECK: read back differently: " + string.Join(" | ", got.Select(l => $"{l.Label}: {l.Value}")));
+                    if (!same) r.CdTextNote = back is null ? " The CD-Text didn't read back from the disc." : " The CD-Text reads back differently from the .cue.";
+                }
 
                 string audioNote = "";
                 if (verify && !ct.IsCancellationRequested)
@@ -199,10 +263,12 @@ namespace ArchivSector_OD.Burning
                     audioNote = VerifyCue(drive, img, progress, ct, r, log);
                     r.VerifyTime = vclock.Elapsed;
                 }
-                r.Message = r.Verified == true ? $"Burned the BIN/CUE with ArchivSector-OD's own writer and verified it{audioNote}."
+                string withText = r.CdTextWritten && r.CdTextNote.Length == 0 ? ", with CD-Text (album and track names)" : "";
+                r.Message = r.Verified == true ? $"Burned the BIN/CUE with ArchivSector-OD's own writer{withText} and verified it{audioNote}."
                     : r.Verified == false ? (r.Message.Length > 0 ? r.Message : $"Burned, but {r.MismatchedSectors:N0} sector(s) on the disc don't match the image. Don't rely on this disc.")
                     : r.Cancelled ? "Burned the BIN/CUE with ArchivSector-OD's own writer. The check was stopped, so the disc wasn't fully verified."
                     : "Burned the BIN/CUE with ArchivSector-OD's own writer (not verified).";
+                if (r.CdTextNote.Length > 0) r.Message += r.CdTextNote;
             }
             finally
             {
@@ -210,6 +276,52 @@ namespace ArchivSector_OD.Burning
                 drive.Command(new byte[] { 0x1E, 0, 0, 0, 0, 0 }, 10);
                 drive.Unlock();
             }
+        }
+
+        private enum LeadInResult { Written, RefusedAtStart, Failed, Cancelled }
+
+        // CD-Text in the lead-in (beta 4). The drive makes the lead-in's main
+        // data and its TOC itself; we give it the R-W sub-channel of every
+        // lead-in sector: 96 bytes, each holding 6 bits. One 18-byte pack is
+        // 24 of those 6-bit pieces, so a sector carries 4 packs. The packs go
+        // round and round from the lead-in's start to LBA -150, so a player
+        // can pick them up anywhere.
+        private static LeadInResult WriteCdTextLeadIn(ScsiDrive drive, List<byte[]> packs, long leadInLba, IProgress<Progress>? progress, CancellationToken ct, Action<string>? log)
+        {
+            long sectors = -150 - leadInLba;
+            // The whole cycle as 6-bit pieces.
+            var symbols = new List<byte>(packs.Count * 24);
+            foreach (var p in packs)
+                for (int i = 0; i < 18; i += 3)
+                {
+                    symbols.Add((byte)(p[i] >> 2));
+                    symbols.Add((byte)(((p[i] & 0x03) << 4) | (p[i + 1] >> 4)));
+                    symbols.Add((byte)(((p[i + 1] & 0x0F) << 2) | (p[i + 2] >> 6)));
+                    symbols.Add((byte)(p[i + 2] & 0x3F));
+                }
+            log?.Invoke($"BIN/CUE: CD-Text: {packs.Count} packs, written into the lead-in from sector {leadInLba:N0} to -151 ({sectors:N0} sectors)");
+            progress?.Report(new Progress { Phase = "Writing CD-Text (lead-in)", Percent = -1 });
+
+            const int PerWrite = 32;
+            var buf = new byte[PerWrite * 96];
+            int at = 0;   // place in the cycle
+            for (long done = 0; done < sectors;)
+            {
+                if (ct.IsCancellationRequested) return LeadInResult.Cancelled;
+                int n = (int)Math.Min(PerWrite, sectors - done);
+                for (int b = 0; b < n * 96; b++) { buf[b] = symbols[at]; at = (at + 1) % symbols.Count; }
+                long lba = leadInLba + done;
+                var data = n == PerWrite ? buf : buf.AsSpan(0, n * 96).ToArray();
+                var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
+                var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
+                if (!rep.Ok)
+                {
+                    log?.Invoke($"BIN/CUE: CD-Text lead-in write at sector {lba:N0} failed: {rep.Describe()}");
+                    return done == 0 && rep.SenseKey == 5 ? LeadInResult.RefusedAtStart : LeadInResult.Failed;
+                }
+                done += n;
+            }
+            return LeadInResult.Written;
         }
 
         // The sectors as the drive wants them, piece by piece, in disc order.

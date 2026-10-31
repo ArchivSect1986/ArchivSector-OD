@@ -52,6 +52,8 @@ namespace ArchivSector_OD.Burning
         public List<Piece> Pieces = new();
         public string? Problem;                          // why it can't be burned with the own writer
         public int Sessions = 1;                         // "REM SESSION nn" lines (an Enhanced CD / CD-Extra has 2)
+        /// <summary>Album and track names from TITLE / PERFORMER / SONGWRITER lines (CD-Text), or null if there are none (beta 4).</summary>
+        public CdText? CdText;
         /// <summary>The tracks of one session (1, 2...).</summary>
         public List<Track> SessionTracks(int session) => Tracks.Where(t => t.Session == session).ToList();
         /// <summary>The pieces written in one session (a session's lead-out and the next lead-in aren't written by us).</summary>
@@ -118,6 +120,12 @@ namespace ArchivSector_OD.Burning
                 type = sp > 0 ? rest[(sp + 1)..] : "BINARY";
             }
             return (name, type.ToUpperInvariant());
+        }
+
+        private static string Unquote(string s)
+        {
+            s = s.Trim();
+            return s.Length >= 2 && s[0] == '"' && s[^1] == '"' ? s[1..^1] : s;
         }
 
         private sealed class RawTrack
@@ -244,11 +252,24 @@ namespace ArchivSector_OD.Burning
                             cur.Dcp = f.Contains("DCP");
                         }
                         break;
-                    // "REM SESSION 02" (ImgBurn's way of marking a disc's sessions).
+                    // CD-Text: before any TRACK it's the album's, under a TRACK that track's.
+                    case "TITLE":
+                    case "PERFORMER":
+                    case "SONGWRITER":
+                        (img.CdText ??= new CdText()).Set(cmd, cur?.Number ?? 0, Unquote(rest));
+                        break;
+                    // "REM SESSION 02" (ImgBurn's way of marking a disc's sessions),
+                    // and REM COMPOSER / ARRANGER / MESSAGE (more CD-Text).
                     case "REM":
                     {
                         var bits = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                         if (bits.Length < 2) break;
+                        string remField = bits[0].ToUpperInvariant();
+                        if (remField is "COMPOSER" or "ARRANGER" or "MESSAGE")
+                        {
+                            (img.CdText ??= new CdText()).Set(remField, cur?.Number ?? 0, Unquote(rest[bits[0].Length..].Trim()));
+                            break;
+                        }
                         switch (bits[0].ToUpperInvariant())
                         {
                             case "SESSION" when int.TryParse(bits[1], out int sNo) && sNo >= 1:
@@ -386,7 +407,8 @@ namespace ArchivSector_OD.Burning
         /// are minutes/seconds/frames counted from the start of the disc
         /// (LBA + 150).
         /// </summary>
-        public byte[] BuildCueSheet(int session = 1)
+        /// <param name="cdTextInLeadIn">CD-Text (beta 4): the host writes the lead-in's R-W sub-channel (the lead-in entry's sub-channel form 01).</param>
+        public byte[] BuildCueSheet(int session = 1, bool cdTextInLeadIn = false)
         {
             var tracks = SessionTracks(session);
             var e = new List<byte[]>();
@@ -414,7 +436,7 @@ namespace ArchivSector_OD.Burning
             // a one-session disc; a later session starts after the earlier
             // ones). Then each track, then the lead-out.
             var first = tracks[0];
-            e.Add(Entry(LeadCtl(first), 0, 0, LeadForm(first.Mode), first.PregapLba));
+            e.Add(Entry(LeadCtl(first), 0, 0, (byte)(LeadForm(first.Mode) | (cdTextInLeadIn ? 0x40 : 0)), first.PregapLba));
             foreach (var t in tracks)
             {
                 byte ca = (byte)(Ctl(t) | 0x01), tno = (byte)t.Number, form = DataForm(t.Mode);
