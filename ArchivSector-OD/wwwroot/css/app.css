@@ -515,7 +515,11 @@ html, body, #app {
 
 body {
     font-family: "Segoe UI", system-ui, sans-serif;
-    background: #0b1120;
+    /* See-through (v4.0 beta 4): until the app appears, the window's own
+       background shows, which MainWindow sets to the starting theme's
+       colour. A fixed colour here blinked Midnight's navy for a moment
+       under every other theme. .app-root covers the window after that. */
+    background: transparent;
     color: #e5e9f5;
 }
 

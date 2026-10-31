@@ -332,7 +332,14 @@
                 {
                     @if (movieOnlyResult.Success)
                     {
-                        <span style="color: var(--success);">Movie extracted (@FormatDuration(selectedTitleSeconds)): @movieOnlyResult.OutputFolder</span>
+                        @if (movieOnlyCount > 1)
+                        {
+                            <span style="color: var(--success);">@movieOnlyCount movies extracted, each as its own MKV, in @movieOnlyResult.OutputFolder</span>
+                        }
+                        else
+                        {
+                            <span style="color: var(--success);">Movie extracted (@FormatDuration(selectedTitleSeconds)): @movieOnlyResult.OutputFolder</span>
+                        }
                     }
                     else
                     {
@@ -566,6 +573,7 @@
     private MakeMkvService.ExtractResult? movieOnlyResult = null;
     private RedumperService.DumpResult? redumperResult = null;
     private int selectedTitleSeconds = 0;
+    private int movieOnlyCount = 0;   // films extracted in one go (beta 4: a disc with more than one film)
     private Func<Task>? lastAction = null;
     private string? lastOutputFolder = null;
     private string? trimMessage = null;
@@ -1597,6 +1605,7 @@
         makeMkvResult = null;
         backupResult = null;
         movieOnlyResult = null;
+        movieOnlyCount = 0;
         redumperResult = null;
         wasCancelled = false;
         notBuiltMessage = null;
@@ -2272,21 +2281,15 @@
 
         var titlePicker = new TitlePickerWindow(titles) { Owner = System.Windows.Application.Current.MainWindow };
         titlePicker.Show();
-        var movie = await titlePicker.ResultTask;
+        var picked = await titlePicker.ResultTask;
 
-        if (movie is null)
+        if (picked is null || picked.Count == 0)
         {
             AddLog("Movie-Only: cancelled at title selection");
             selectedMode = null;
             StateHasChanged();
             return;
         }
-
-        selectedTitleSeconds = movie.Seconds;
-        AddLog($"Movie-Only: selected \"{movie.Name}\" ({FormatDuration(movie.Seconds)}), {movie.Tracks.Count} track(s) found");
-
-        var scannedAudio = movie.Tracks.Where(t => t.Type == "Audio").ToList();
-        var scannedSub = movie.Tracks.Where(t => t.Type == "Subtitles").ToList();
 
         // Movie-Only MKVs get their own "MKV" folder (e.g.
         // BluRay_Movies\MKV\Movie Name\) so they don't mix with full
@@ -2299,77 +2302,113 @@
         var fallbackName = $"{DriveLetter}_{kindForFolder}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
         var suggestedName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
 
-        HashSet<string> chosenAudioIds;
-        HashSet<string> chosenSubIds;
-        string baseName;
-
-        if (scannedAudio.Count == 0 && scannedSub.Count == 0)
+        // 1. Every film's tracks and name first (beta 4: several films on one
+        // disc), so the extracting can then run on its own.
+        var jobs = new List<(MakeMkvService.TitleInfo Movie, HashSet<string> Audio, HashSet<string> Subs, List<MakeMkvService.TrackInfo> ScannedAudio, List<MakeMkvService.TrackInfo> ScannedSub, string Name, string Folder)>();
+        var namesTaken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int k = 0; k < picked.Count; k++)
         {
-            AddLog("Movie-Only: no per-track data available, using MakeMKV's default track selection");
-            chosenAudioIds = new HashSet<string>();
-            chosenSubIds = new HashSet<string>();
-            baseName = suggestedName;
-        }
-        else
-        {
-            var trackPicker = new TrackPickerWindow(movie.Tracks, suggestedName) { Owner = System.Windows.Application.Current.MainWindow };
-            trackPicker.Show();
-            var trackSelection = await trackPicker.ResultTask;
+            var movie = picked[k];
+            string which = picked.Count > 1 ? $"Film {k + 1} of {picked.Count}" : "";
+            AddLog($"Movie-Only: {(which.Length > 0 ? which + ": " : "")}selected \"{movie.Name}\" ({FormatDuration(movie.Seconds)}), {movie.Tracks.Count} track(s) found");
 
-            if (trackSelection is null)
+            var scannedAudio = movie.Tracks.Where(t => t.Type == "Audio").ToList();
+            var scannedSub = movie.Tracks.Where(t => t.Type == "Subtitles").ToList();
+            // Several films: each gets its own suggested name, to be changed to the film's title.
+            string suggestion = picked.Count > 1 ? $"{suggestedName} - Film {k + 1}" : suggestedName;
+
+            HashSet<string> chosenAudioIds;
+            HashSet<string> chosenSubIds;
+            string baseName;
+
+            if (scannedAudio.Count == 0 && scannedSub.Count == 0)
             {
-                AddLog("Movie-Only: cancelled at track selection");
-                selectedMode = null;
+                AddLog("Movie-Only: no per-track data available, using MakeMKV's default track selection");
+                chosenAudioIds = new HashSet<string>();
+                chosenSubIds = new HashSet<string>();
+                baseName = suggestion;
+            }
+            else
+            {
+                var trackPicker = new TrackPickerWindow(movie.Tracks, suggestion) { Owner = System.Windows.Application.Current.MainWindow };
+                if (picked.Count > 1) trackPicker.Title = $"{which} ({FormatDuration(movie.Seconds)}): Choose Audio & Subtitle Tracks and Its Name";
+                trackPicker.Show();
+                var trackSelection = await trackPicker.ResultTask;
+
+                if (trackSelection is null)
+                {
+                    AddLog("Movie-Only: cancelled at track selection");
+                    selectedMode = null;
+                    StateHasChanged();
+                    return;
+                }
+
+                chosenAudioIds = trackSelection.ChosenAudioIds;
+                chosenSubIds = trackSelection.ChosenSubIds;
+                baseName = string.IsNullOrWhiteSpace(trackSelection.ChosenOutputName) ? suggestion : trackSelection.ChosenOutputName;
+                AddLog($"Movie-Only: keeping {chosenAudioIds.Count}/{scannedAudio.Count} audio, {chosenSubIds.Count}/{scannedSub.Count} subtitle track(s), output name \"{baseName}\"");
+            }
+
+            // Two films given the same name: the second gets a number.
+            if (!namesTaken.Add(baseName))
+            {
+                int n = 2;
+                while (!namesTaken.Add($"{baseName} ({n})")) n++;
+                baseName = $"{baseName} ({n})";
+                AddLog($"Movie-Only: that name was already used for another film on this disc, so this one is \"{baseName}\"");
+            }
+
+            if (config.UnattendedAutoStart)
+            {
+                baseName = UniqueUnattendedName(categoryDir, baseName);
+            }
+            else if (!FileNamingService.CheckDuplicateOrConfirm(categoryDir, baseName, false, AddLog))
+            {
+                preflightBlockedReason = "Cancelled due to duplicate output";
                 StateHasChanged();
                 return;
             }
-
-            chosenAudioIds = trackSelection.ChosenAudioIds;
-            chosenSubIds = trackSelection.ChosenSubIds;
-            baseName = string.IsNullOrWhiteSpace(trackSelection.ChosenOutputName) ? suggestedName : trackSelection.ChosenOutputName;
-            AddLog($"Movie-Only: keeping {chosenAudioIds.Count}/{scannedAudio.Count} audio, {chosenSubIds.Count}/{scannedSub.Count} subtitle track(s), output name \"{baseName}\"");
+            jobs.Add((movie, chosenAudioIds, chosenSubIds, scannedAudio, scannedSub, baseName, Path.Combine(categoryDir, baseName)));
         }
 
-        if (config.UnattendedAutoStart)
+        // 2. Extract each film in turn, into its own folder.
+        int okCount = 0;
+        var failures = new List<string>();
+        var trimNotes = new List<string>();
+        MakeMkvService.ExtractResult? lastResult = null;
+        for (int k = 0; k < jobs.Count && !wasCancelled; k++)
         {
-            baseName = UniqueUnattendedName(categoryDir, baseName);
-        }
-        else if (!FileNamingService.CheckDuplicateOrConfirm(categoryDir, baseName, false, AddLog))
-        {
-            preflightBlockedReason = "Cancelled due to duplicate output";
+            var job = jobs[k];
+            string which = jobs.Count > 1 ? $"film {k + 1} of {jobs.Count} (\"{job.Name}\")" : "movie-only";
+            selectedTitleSeconds = job.Movie.Seconds;
+            runningLabel = $"Extracting {which} (disc index {indexResult.DiscIndex})… this may take a while";
+            isRunning = true;
+            StartProgressTimer(job.Folder, job.Movie.SizeBytes);
             StateHasChanged();
-            return;
-        }
 
-        var outputFolder = Path.Combine(categoryDir, baseName);
+            var result = await Task.Run(() =>
+                MakeMkvService.ExtractTitle(exe, indexResult.DiscIndex!, job.Movie.Index, job.Folder, p => currentProcess = p));
+            NoteLibreDrive(result.LibreDriveLine);
+            lastResult = result;
 
-        runningLabel = $"Extracting movie-only (disc index {indexResult.DiscIndex})… this may take a while";
-        isRunning = true;
-        StartProgressTimer(outputFolder, movie.SizeBytes);
-        StateHasChanged();
+            StopProgressTimer();
+            isRunning = false;
 
-        movieOnlyResult = await Task.Run(() =>
-            MakeMkvService.ExtractTitle(exe, indexResult.DiscIndex!, movie.Index, outputFolder, p => currentProcess = p));
-        NoteLibreDrive(movieOnlyResult.LibreDriveLine);
+            if (wasCancelled)
+            {
+                AddLog("Movie-Only: cancelled, cleaning up");
+                await CleanUpCancelledFolder(job.Folder);
+                break;
+            }
 
-        StopProgressTimer();
-        isRunning = false;
-
-        if (wasCancelled)
-        {
-            AddLog("Movie-Only: cancelled, cleaning up");
-            await CleanUpCancelledFolder(outputFolder);
-        }
-        else
-        {
-            AddLog(movieOnlyResult.Success ? $"Movie-Only: complete -- {movieOnlyResult.OutputFolder}" : $"Movie-Only: failed -- {movieOnlyResult.ErrorMessage}");
+            AddLog(result.Success ? $"Movie-Only: {which} complete -- {result.OutputFolder}" : $"Movie-Only: {which} failed -- {result.ErrorMessage}");
 
             string? finalMkvPath = null;
-            if (movieOnlyResult.Success)
+            if (result.Success)
             {
-                lastOutputFolder = movieOnlyResult.OutputFolder;
-                var renamed = MakeMkvService.RenameNewestMkv(outputFolder, baseName, AddLog);
-                finalMkvPath = renamed ?? Directory.GetFiles(outputFolder, "*.mkv").FirstOrDefault();
+                lastOutputFolder = result.OutputFolder;
+                var renamed = MakeMkvService.RenameNewestMkv(job.Folder, job.Name, AddLog);
+                finalMkvPath = renamed ?? Directory.GetFiles(job.Folder, "*.mkv").FirstOrDefault();
                 if (renamed is not null)
                 {
                     AddLog($"Renamed to: {renamed}");
@@ -2377,9 +2416,9 @@
                 }
             }
 
-            bool wantsTrim = movieOnlyResult.Success &&
-                (chosenAudioIds.Count < scannedAudio.Count || chosenSubIds.Count < scannedSub.Count) &&
-                (scannedAudio.Count > 0 || scannedSub.Count > 0);
+            bool wantsTrim = result.Success &&
+                (job.Audio.Count < job.ScannedAudio.Count || job.Subs.Count < job.ScannedSub.Count) &&
+                (job.ScannedAudio.Count > 0 || job.ScannedSub.Count > 0);
 
             if (wantsTrim && finalMkvPath is not null)
             {
@@ -2387,34 +2426,46 @@
                 if (mkvmergeExe is null)
                 {
                     AddLog("[WARNING] Exact track selection was requested but mkvmerge isn't configured in Settings -- keeping MakeMKV's full extraction instead.");
-                    trimMessage = "ℹ mkvmerge not configured (see Settings) -- kept all tracks";
+                    trimNotes.Add("ℹ mkvmerge not configured (see Settings) -- kept all tracks");
                 }
                 else
                 {
                     var trimResult = await Task.Run(() => MkvmergeService.TrimTracks(
-                        mkvmergeExe, finalMkvPath, scannedAudio, scannedSub, chosenAudioIds, chosenSubIds,
+                        mkvmergeExe, finalMkvPath, job.ScannedAudio, job.ScannedSub, job.Audio, job.Subs,
                         log: msg => AddLog(msg)));
-                    trimMessage = trimResult.Trimmed
-                        ? $"✓ {trimResult.Message}"
-                        : $"ℹ {trimResult.Message}";
+                    trimNotes.Add((trimResult.Trimmed ? "✓ " : "ℹ ") + (jobs.Count > 1 ? job.Name + ": " : "") + trimResult.Message);
                 }
-                StateHasChanged();
             }
             else if (wantsTrim && finalMkvPath is null)
             {
                 AddLog("[WARNING] Could not find the extracted .mkv file to trim.");
-                trimMessage = "⚠ Extraction succeeded but the file couldn't be found for trimming.";
+                trimNotes.Add("⚠ Extraction succeeded but the file couldn't be found for trimming.");
             }
+            trimMessage = trimNotes.Count > 0 ? string.Join("  ", trimNotes.Distinct()) : null;
+            StateHasChanged();
 
-            if (movieOnlyResult.Success && finalMkvPath is not null)
+            if (result.Success && finalMkvPath is not null)
             {
                 await VerifyMovieOnlyOutput(finalMkvPath);
             }
 
+            RecordHistory("Movie-Only extraction", result.Success ? (finalMkvPath ?? result.OutputFolder ?? "") : "", lastSha1, lastMd5, lastRedumpMatch);
+            if (result.Success) okCount++;
+            else failures.Add(jobs.Count > 1 ? $"{job.Name}: {result.ErrorMessage}" : result.ErrorMessage ?? "failed");
+        }
+
+        if (!wasCancelled && lastResult is not null)
+        {
+            // One film: as before. Several: a summary, all in the same MKV folder.
+            movieOnlyCount = okCount;
+            movieOnlyResult = jobs.Count == 1 ? lastResult
+                : failures.Count == 0 ? new MakeMkvService.ExtractResult { Success = true, OutputFolder = categoryDir }
+                : new MakeMkvService.ExtractResult { ErrorMessage = $"{okCount} of {jobs.Count} films extracted; " + string.Join("; ", failures) };
+            if (jobs.Count > 1) AddLog($"Movie-Only: {okCount} of {jobs.Count} films extracted into {categoryDir}");
+
             NotifyIfEnabled(config, movieOnlyResult.Success, "Movie-Only extraction",
-                movieOnlyResult.Success ? movieOnlyResult.OutputFolder : movieOnlyResult.ErrorMessage);
-            RecordHistory("Movie-Only extraction", movieOnlyResult.Success ? (finalMkvPath ?? movieOnlyResult.OutputFolder ?? "") : "", lastSha1, lastMd5, lastRedumpMatch);
-            if (movieOnlyResult.Success)
+                movieOnlyResult.Success ? (jobs.Count > 1 ? $"{okCount} films: {categoryDir}" : movieOnlyResult.OutputFolder) : movieOnlyResult.ErrorMessage);
+            if (okCount > 0 && failures.Count == 0)
             {
                 OnRipSucceeded(config);
                 AutoEjectIfEnabled(config, DriveLetter);

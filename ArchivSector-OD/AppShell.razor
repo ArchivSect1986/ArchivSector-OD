@@ -609,7 +609,8 @@
     // exists (then Midnight).
     // With "switch by itself" on, a holiday week that just started brings
     // its theme (unless it was turned down this year).
-    private static string PickStartTheme(AppConfig c)
+    // Also used by MainWindow (beta 4), so the window starts in this theme's colour.
+    internal static string PickStartTheme(AppConfig c)
     {
         string regular = Themes.Any(t => t.Id == c.RegularTheme) ? c.RegularTheme
                        : Themes.Any(t => t.Id == c.Theme) ? c.Theme : "midnight";
