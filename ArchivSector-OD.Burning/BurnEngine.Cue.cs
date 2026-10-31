@@ -89,62 +89,108 @@ namespace ArchivSector_OD.Burning
             drive.Command(new byte[] { 0x1E, 0, 0, 0, 1, 0 }, 10);
             try
             {
-                // Write parameters: session at once, buffer-underrun protection,
-                // the disc closed at the end, CD-ROM or CD-ROM XA.
-                var mode = new byte[256];
-                rep = drive.Read(new byte[] { 0x5A, 0x08, 0x05, 0, 0, 0, 0, 0x01, 0x00, 0 }, mode, 10);
-                if (!rep.Ok) { r.Message = "The drive didn't share its write settings: " + rep.Describe(); return; }
-                int p = 8 + ((mode[6] << 8) | mode[7]);
-                if ((mode[p] & 0x3F) != 0x05) { r.Message = "The drive's write settings page wasn't where expected."; return; }
-                int pageLen = mode[p + 1] + 2;
-                var param = new byte[8 + pageLen];
-                Array.Copy(mode, p, param, 8, pageLen);
-                param[8] &= 0x3F;
-                param[8 + 2] = 0x40 | 0x02;            // buffer-underrun protection on, write type 2 = session at once
-                param[8 + 3] = 0x00;                   // no next session (the disc is closed)
-                param[8 + 4] = 0x00;                   // data block type: raw (not used for session at once)
-                param[8 + 8] = img.HasMode2 ? (byte)0x20 : (byte)0x00;   // session format: CD-ROM XA or CD-DA/CD-ROM
-                rep = drive.Write(new byte[] { 0x55, 0x10, 0, 0, 0, 0, 0, (byte)(param.Length >> 8), (byte)param.Length, 0 }, param, 10);
-                if (!rep.Ok) { r.Message = "The drive didn't accept session-at-once writing: " + rep.Describe(); return; }
-
                 drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
                 SetDirectWriteSpeed(drive, profile, speedX, img.LeadOutLba, log);
 
-                // 1. The layout.
-                var sheet = img.BuildCueSheet();
-                log?.Invoke("BIN/CUE: cue sheet " + string.Join(" | ", Enumerable.Range(0, sheet.Length / 8)
-                    .Select(i => string.Join(" ", sheet.Skip(i * 8).Take(8).Select(b => b.ToString("X2"))))));
-                rep = drive.Write(new byte[] { 0x5D, 0, 0, 0, 0, 0, (byte)(sheet.Length >> 16), (byte)(sheet.Length >> 8), (byte)sheet.Length, 0 }, sheet, 60);
-                if (!rep.Ok) { r.Message = "The drive didn't accept the disc layout (cue sheet): " + rep.Describe(); log?.Invoke("BIN/CUE: " + r.Message); return; }
-
-                // 2. Every sector, from LBA -150.
-                r.DiscUntouched = false;
                 string afterFailure = profile == ProfileCdRw ? "The CD-RW can be erased and used again." : "A CD-R written part-way can't be used again.";
                 var clock = Stopwatch.StartNew();
-                if (!WriteCuePieces(drive, img, progress, ct, r, log, afterFailure)) return;
+                long done = 0, total = img.BurnSectors;
 
-                // 3. Lead-out and close.
-                progress?.Report(new Progress { Phase = "Finalizing", Percent = -1 });
-                rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600), 300, 1000);
-                if (r.Cancelled)
+                // Each session in turn (an Enhanced CD has two: music, then data).
+                // A session before the last is left open, so the drive notes
+                // where the next one may start; the last one closes the disc.
+                for (int session = 1; session <= img.Sessions; session++)
                 {
-                    r.BurnTime = clock.Elapsed;
-                    r.Message = "Cancelled. " + afterFailure;
-                    log?.Invoke("BIN/CUE: " + r.Message);
-                    return;
-                }
-                if (!rep.Ok) { r.Message = "The drive didn't confirm the last of the data was written: " + rep.Describe() + "." + DiscProblemHint(rep) + " " + afterFailure; log?.Invoke("BIN/CUE: " + r.Message); return; }
-                progress?.Report(new Progress { Phase = "Closing the disc", Percent = -1 });
-                if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(15)))
-                {
-                    r.Message = $"The drive didn't finish closing the {discName} in time.";
-                    log?.Invoke("BIN/CUE: " + r.Message);
-                    return;
+                    var tracks = img.SessionTracks(session);
+                    bool last = session == img.Sessions;
+                    bool xa = tracks.Any(t => t.Mode is CueImage.TrackMode.Mode2Raw or CueImage.TrackMode.Mode2Cooked);
+                    string which = img.Sessions > 1 ? $"session {session} of {img.Sessions}: " : "";
+
+                    // A later session: the drive must be ready to add it exactly
+                    // where the image puts it (after the earlier lead-out and
+                    // this lead-in), or the data in it wouldn't be found.
+                    if (session > 1)
+                    {
+                        var di2 = new byte[34];
+                        rep = drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di2, 10);
+                        var ti = new byte[48];
+                        var trep = drive.Read(new byte[] { 0x52, 0x01, 0, 0, 0, 0xFF, 0, 0, 48, 0 }, ti, 10);   // the next (not yet written) track
+                        long nwa = trep.Ok && (ti[7] & 0x01) != 0 ? BE32(ti, 12) : -1;
+                        log?.Invoke($"BIN/CUE: {which}disc {(rep.Ok ? (di2[2] & 3) switch { 0 => "blank", 1 => "open for another session", 2 => "closed", _ => "?" } : "unknown")}, " +
+                                    $"next writable sector {(nwa >= 0 ? nwa.ToString("N0") : "not given")}; the image's session starts at {tracks[0].Index1Lba:N0} (gap from {tracks[0].PregapLba:N0})");
+                        if (rep.Ok && (di2[2] & 3) != 1)
+                        {
+                            r.Message = $"The drive didn't leave the {discName} open for session {session}, so it can't be added. " + afterFailure;
+                            log?.Invoke("BIN/CUE: " + r.Message);
+                            return;
+                        }
+                        if (nwa >= 0 && nwa != tracks[0].Index1Lba && nwa != tracks[0].PregapLba)
+                        {
+                            r.Message = $"The drive would start session {session} at sector {nwa:N0}, but the image needs it at {tracks[0].Index1Lba:N0}. " +
+                                        "The data in that session wouldn't be found there, so it wasn't written. " + afterFailure;
+                            log?.Invoke("BIN/CUE: " + r.Message);
+                            return;
+                        }
+                    }
+
+                    // Write parameters: session at once, buffer-underrun protection,
+                    // another session to follow or the disc closed, CD-ROM or CD-ROM XA.
+                    var mode = new byte[256];
+                    rep = drive.Read(new byte[] { 0x5A, 0x08, 0x05, 0, 0, 0, 0, 0x01, 0x00, 0 }, mode, 10);
+                    if (!rep.Ok) { r.Message = "The drive didn't share its write settings: " + rep.Describe(); return; }
+                    int p = 8 + ((mode[6] << 8) | mode[7]);
+                    if ((mode[p] & 0x3F) != 0x05) { r.Message = "The drive's write settings page wasn't where expected."; return; }
+                    int pageLen = mode[p + 1] + 2;
+                    var param = new byte[8 + pageLen];
+                    Array.Copy(mode, p, param, 8, pageLen);
+                    param[8] &= 0x3F;
+                    param[8 + 2] = 0x40 | 0x02;            // buffer-underrun protection on, write type 2 = session at once
+                    param[8 + 3] = last ? (byte)0x00 : (byte)0xC0;   // last session: closed disc; otherwise "next session allowed"
+                    param[8 + 4] = 0x00;                   // data block type: raw (not used for session at once)
+                    param[8 + 8] = xa ? (byte)0x20 : (byte)0x00;     // session format: CD-ROM XA or CD-DA/CD-ROM
+                    rep = drive.Write(new byte[] { 0x55, 0x10, 0, 0, 0, 0, 0, (byte)(param.Length >> 8), (byte)param.Length, 0 }, param, 10);
+                    if (!rep.Ok)
+                    {
+                        r.Message = (img.Sessions > 1 && !last ? "The drive didn't accept session-at-once writing with another session to follow: " : "The drive didn't accept session-at-once writing: ") + rep.Describe() + (session > 1 ? " " + afterFailure : "");
+                        log?.Invoke("BIN/CUE: " + r.Message);
+                        return;
+                    }
+
+                    // 1. The layout.
+                    var sheet = img.BuildCueSheet(session);
+                    log?.Invoke($"BIN/CUE: {which}cue sheet " + string.Join(" | ", Enumerable.Range(0, sheet.Length / 8)
+                        .Select(i => string.Join(" ", sheet.Skip(i * 8).Take(8).Select(b => b.ToString("X2"))))));
+                    rep = drive.Write(new byte[] { 0x5D, 0, 0, 0, 0, 0, (byte)(sheet.Length >> 16), (byte)(sheet.Length >> 8), (byte)sheet.Length, 0 }, sheet, 60);
+                    if (!rep.Ok) { r.Message = $"The drive didn't accept the {which}disc layout (cue sheet): " + rep.Describe() + (session > 1 ? " " + afterFailure : ""); log?.Invoke("BIN/CUE: " + r.Message); return; }
+
+                    // 2. Every sector of the session, from its first gap.
+                    r.DiscUntouched = false;
+                    if (!WriteCuePieces(drive, img.SessionPieces(session), total, ref done, progress, ct, r, log, afterFailure)) return;
+
+                    // 3. The session's lead-out (and lead-in), and close.
+                    progress?.Report(new Progress { Phase = last ? "Finalizing" : $"Closing session {session}", Percent = -1 });
+                    rep = RetryWhileBusy(() => drive.Command(new byte[] { 0x35, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 600), 300, 1000);
+                    if (r.Cancelled)
+                    {
+                        r.BurnTime = clock.Elapsed;
+                        r.Message = "Cancelled. " + afterFailure;
+                        log?.Invoke("BIN/CUE: " + r.Message);
+                        return;
+                    }
+                    if (!rep.Ok) { r.Message = "The drive didn't confirm the last of the data was written: " + rep.Describe() + "." + DiscProblemHint(rep) + " " + afterFailure; log?.Invoke("BIN/CUE: " + r.Message); return; }
+                    progress?.Report(new Progress { Phase = last ? "Closing the disc" : $"Closing session {session}", Percent = -1 });
+                    if (!WaitReady(drive, CancellationToken.None, TimeSpan.FromMinutes(15)))
+                    {
+                        r.Message = $"The drive didn't finish closing the {discName} in time.";
+                        log?.Invoke("BIN/CUE: " + r.Message);
+                        return;
+                    }
+                    if (!last) log?.Invoke($"BIN/CUE: session {session} written and closed, the {discName} left open for session {session + 1}");
                 }
                 r.BurnTime = clock.Elapsed;
                 r.Burned = true;
                 RestoreDriveSpeed(drive, profile, speedX);
-                log?.Invoke($"BIN/CUE: {img.BurnSectors:N0} sectors written and the {discName} closed in {r.BurnTime:hh\\:mm\\:ss}");
+                log?.Invoke($"BIN/CUE: {img.BurnSectors:N0} sectors written{(img.Sessions > 1 ? $" in {img.Sessions} sessions" : "")} and the {discName} closed in {r.BurnTime:hh\\:mm\\:ss}");
 
                 string audioNote = "";
                 if (verify && !ct.IsCancellationRequested)
@@ -167,17 +213,17 @@ namespace ArchivSector_OD.Burning
         }
 
         // The sectors as the drive wants them, piece by piece, in disc order.
-        private static bool WriteCuePieces(ScsiDrive drive, CueImage img, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, string afterFailure)
+        // done/total count across all sessions, for one progress bar.
+        private static bool WriteCuePieces(ScsiDrive drive, List<CueImage.Piece> pieces, long total, ref long done, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, string afterFailure)
         {
-            long total = img.BurnSectors, done = 0;
             double speed = 0;
             var speedClock = Stopwatch.StartNew();
-            long speedFrom = 0;
+            long speedFrom = done;
             var lastReport = TimeSpan.Zero;
             var clock = Stopwatch.StartNew();
             var readBuf = new byte[64 * 2352];
 
-            foreach (var piece in img.Pieces)
+            foreach (var piece in pieces)
             {
                 int block = CueImage.BlockSize(piece.Mode);
                 int perWrite = 65536 / block;
@@ -409,9 +455,16 @@ namespace ArchivSector_OD.Burning
                     var cdb = new byte[] { 0xBE, 0x04, (byte)(from >> 24), (byte)(from >> 16), (byte)(from >> 8), (byte)from, 0, 0, (byte)n, 0x10, 0, 0 };
                     var rep = RetryWhileBusy(() => drive.Read(cdb, around, 60), 100, 50);
                     if (!rep.Ok) continue;
-                    for (int k = 0; k + 2352 <= around.Length; k += 4)
-                        if (around.AsSpan(k, 2352).SequenceEqual(sector))
-                            return k - Around * 2352;   // disc byte = file byte + shift
+                    // Outward from "no shift": the smallest shift that fits wins.
+                    // Music that repeats exactly (a test tone) also fits at
+                    // whole numbers of its period; a drive's real offset is
+                    // the small one (beta 3: a 440 Hz tone matched at 2205
+                    // samples, 1/20 s, before the true 0).
+                    int centre = Around * 2352;
+                    for (int d = 0; d <= centre; d += 4)
+                        foreach (int k in d == 0 ? new[] { centre } : new[] { centre + d, centre - d })
+                            if (k >= 0 && k + 2352 <= around.Length && around.AsSpan(k, 2352).SequenceEqual(sector))
+                                return k - centre;   // disc byte = file byte + shift
                     log?.Invoke($"BIN/CUE: couldn't line up the music at sector {lba:N0}");
                     return null;
                 }

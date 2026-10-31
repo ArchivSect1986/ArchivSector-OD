@@ -281,9 +281,10 @@ namespace ArchivSector_OD.Burning
                         r.VerifyTime = verifyClock.Elapsed;
                     }
 
+                    string what = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) ? "image" : "ISO";
                     r.Message = !r.Burned ? (r.Message.Length > 0 ? r.Message : "The burn didn't complete.")
-                        : r.Verified == true ? "Burned and verified: every byte on the disc matches the ISO" + (r.VerifiedByImgBurn ? " (checked by ImgBurn)." : ".")
-                        : r.Verified == false ? (r.Message.Length > 0 ? r.Message : $"Burned, but {r.MismatchedSectors:N0} sector(s) on the disc don't match the ISO. Don't rely on this disc.")
+                        : r.Verified == true ? $"Burned and verified: every byte on the disc matches the {what}" + (r.VerifiedByImgBurn ? " (checked by ImgBurn)." : ".")
+                        : r.Verified == false ? (r.Message.Length > 0 ? r.Message : $"Burned, but {r.MismatchedSectors:N0} sector(s) on the disc don't match the {what}. Don't rely on this disc.")
                         : r.Cancelled ? "Burned. The check was stopped, so the disc wasn't fully verified."
                         : r.Message.Length > 0 ? r.Message
                         : "Burned (not verified).";
@@ -425,8 +426,12 @@ namespace ArchivSector_OD.Burning
                 r.Message = "ImgBurn wasn't found at " + exe + ". Install it, set its location in Settings, or burn with Windows instead.";
                 return;
             }
+            // An ISO must be whole 2 KB sectors. A .cue (BIN/CUE, beta 3: ImgBurn
+            // burns the ones our writer can't, like Enhanced CDs) is a small
+            // text file pointing at the .bin; ImgBurn checks those itself.
+            bool cue = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
             long isoBytes = new FileInfo(isoPath).Length;
-            if (isoBytes == 0 || isoBytes % Sector != 0)
+            if (!cue && (isoBytes == 0 || isoBytes % Sector != 0))
             {
                 r.Message = "This file isn't a disc image made of whole 2 KB sectors, so it can't be burned as-is.";
                 return;
@@ -524,7 +529,7 @@ namespace ArchivSector_OD.Burning
                         else if (miscompare || verifyFailed)
                         {
                             r.Verified = false;
-                            r.Message = "Burned, but ImgBurn's verify found parts of the disc that don't match the ISO. Don't rely on this disc. ImgBurn's log: " + logPath;
+                            r.Message = "Burned, but ImgBurn's verify found parts of the disc that don't match the " + (cue ? "image" : "ISO") + ". Don't rely on this disc. ImgBurn's log: " + logPath;
                         }
                         else if (askedToStop || verifyAborted) r.Cancelled = true;
                         else r.Message = "Burned, but ImgBurn's verify result wasn't in its log, so the disc may not have been checked. ImgBurn's log: " + logPath;
