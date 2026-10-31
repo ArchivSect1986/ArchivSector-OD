@@ -345,6 +345,12 @@ namespace ArchivSector_OD.Burning
                 long generated = t.Pregap;
                 // The first track always has at least the standard 150-sector gap.
                 if (i == 0 && pregapInFile + generated < 150) generated = 150 - pregapInFile;
+                // A hidden track before track 1 (beta 4): music in track 1's gap,
+                // more than the standard 2 seconds of it. As EAC rips it and
+                // ImgBurn burns it, the .bin starts at sector 0: the standard
+                // 2 seconds before that are silence, then the hidden music,
+                // then track 1 proper at INDEX 01.
+                else if (i == 0 && t.Mode == TrackMode.Audio && pregapInFile > 150) generated = Math.Max(generated, 150);
 
                 track.PregapLba = lba;
                 Add(generated, t.Mode, null, 0, t.SectorSize, false);

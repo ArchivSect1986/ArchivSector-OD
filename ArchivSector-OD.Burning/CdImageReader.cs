@@ -57,6 +57,11 @@ namespace ArchivSector_OD.Burning
                     if (audio > 0) parts.Add($"{audio} music track{(audio == 1 ? "" : "s")}");
                     long secs = (LeadOutLba + 150) / 75;
                     if (Sessions > 1) kind = data > 0 && audio > 0 ? "Enhanced CD (music + data session)" : $"CD with {Sessions} sessions";
+                    if (Tracks.Count > 0 && Tracks[0].StartLba > 0 && !Tracks[0].IsData)
+                    {
+                        long h = Tracks[0].StartLba / 75;
+                        parts.Add($"a hidden track before track 1 ({h / 60}:{h % 60:D2})");
+                    }
                     return $"{kind} · {string.Join(", ", parts)} · {secs / 60}:{secs % 60:D2}";
                 }
             }
@@ -162,6 +167,12 @@ namespace ArchivSector_OD.Burning
                 rep = drive.Read(new byte[] { 0xBE, 0x00, (byte)(l >> 24), (byte)(l >> 16), (byte)(l >> 8), (byte)l, 0, 0, 1, 0xF8, 0, 0 }, raw, 30);
                 t.Mode = rep.Ok && raw[15] == 2 ? 2 : 1;
             }
+
+            // A hidden track before track 1 (beta 4): track 1's music starts later
+            // than sector 0, and what comes before it is track 1's gap, read
+            // and kept from sector 0 (as EAC does; the 2 seconds before sector 0
+            // are standard silence that most drives can't read).
+            if (toc.Tracks[0].StartLba > 0 && !toc.Tracks[0].IsData) toc.Tracks[0].PregapLba = 0;
 
             // Gaps before tracks 2 and up (within a session; the first track of
             // a later session has the standard 2-second gap after the lead-in).
@@ -395,7 +406,7 @@ namespace ArchivSector_OD.Burning
                 sb.AppendLine($"  TRACK {t.Number:D2} {(t.IsData ? $"MODE{t.Mode}/2352" : "AUDIO")}");
                 TextLines(t.Number, "    ");
                 if (text is not null && text.Codes.TryGetValue(t.Number, out var isrc) && isrc.Length == 12) sb.AppendLine($"    ISRC {isrc}");
-                if (t.Number > 1 && t.PregapLba < t.StartLba) sb.AppendLine($"    INDEX 00 {Msf(InBin(t.PregapLba))}");
+                if (t.PregapLba < t.StartLba) sb.AppendLine($"    INDEX 00 {Msf(InBin(t.PregapLba))}");   // track 1's: a hidden track
                 sb.AppendLine($"    INDEX 01 {Msf(InBin(t.StartLba))}");
             }
             File.WriteAllText(cue, sb.ToString());
