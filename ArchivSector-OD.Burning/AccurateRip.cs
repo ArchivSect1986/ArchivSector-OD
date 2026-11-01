@@ -19,7 +19,11 @@ namespace ArchivSector_OD.Burning
     //  - every drive reads music a few samples early or late (its "read
     //    offset"), so the checksums are tried at every shift up to ±3000
     //    samples (cheaply: one pass per track, then slid along), and the
-    //    shift most tracks agree on is used.
+    //    shift most tracks agree on is used. v1 slides; v2 doesn't, so for
+    //    a CD the database only has v2 checksums for, the shift comes from
+    //    the database's "frame 450" checksums (one sector of each track,
+    //    stored for exactly this), or failing that from the read offsets
+    //    drives commonly have (beta 4: a store CD with only a v2 set).
     // A track runs from its INDEX 01 to the next track's INDEX 01 (the gap
     // belongs to the track before). Only the image is read: no drive.
     public static class AccurateRip
@@ -195,8 +199,47 @@ namespace ArchivSector_OD.Burning
                 int n = audio.Count(a => known.TryGetValue(a.T.Number, out var list) && list.Any(c => c.Crc == v1At[a.T.Number][k + Shift]));
                 if (n > bestCount || (n == bestCount && Math.Abs(k) < Math.Abs(bestShift))) { bestCount = n; bestShift = k; }
             }
+            string how = "the v1 checksums";
+
+            // No v1 match at any shift: the frame-450 checksums (sector 450
+            // of each track, 588 samples, weighted 1 to 588).
+            if (bestCount <= 0)
+            {
+                var f450At = new Dictionary<int, uint[]>();
+                foreach (var a in audio.Where(a => a.Count > 451 * 588 + Shift && known.ContainsKey(a.T.Number)))
+                    f450At[a.T.Number] = SlideV1(src, a.Start + 450 * 588, 588, 1, 588, ct);
+                bestShift = 0; bestCount = -1;
+                for (int k = -Shift; k <= Shift; k++)
+                {
+                    int n = f450At.Count(f => known[f.Key].Any(c => c.Frame450 == f.Value[k + Shift]));
+                    if (n > bestCount || (n == bestCount && Math.Abs(k) < Math.Abs(bestShift))) { bestCount = n; bestShift = k; }
+                }
+                how = "the frame-450 checksums";
+                var sample = audio.FirstOrDefault(a => f450At.ContainsKey(a.T.Number));
+                if (sample.T is not null && known.TryGetValue(sample.T.Number, out var dbl) && dbl.Count > 0)
+                    log?.Invoke($"AccurateRip: track {sample.T.Number:D2} in the database: checksum {dbl[0].Crc:X8}, frame 450 {dbl[0].Frame450:X8}; this image's frame 450 at no shift: {f450At[sample.T.Number][Shift]:X8}");
+            }
+
+            // Still nothing: v2 worked out in full at the read offsets drives
+            // commonly have, on the shortest track the database knows.
+            if (bestCount <= 0)
+            {
+                var probe = audio.Where(a => known.TryGetValue(a.T.Number, out var l) && l.Count > 0).OrderBy(a => a.Count).FirstOrDefault();
+                bestShift = 0; bestCount = -1;
+                if (probe.T is not null)
+                    foreach (int k in CommonOffsets)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var (pv1, pv2) = Sums(src, probe.Start + k, probe.Count, probe.From, probe.To);
+                        if (known[probe.T.Number].Any(c => c.Crc == pv1 || c.Crc == pv2)) { bestShift = k; bestCount = 1; break; }
+                    }
+                how = "the usual drive read offsets";
+            }
+
             int shift = bestCount > 0 ? bestShift : 0;
             r.Offset = bestCount > 0 ? shift : null;
+            log?.Invoke(r.Offset is null ? "AccurateRip: no shift lines the image up with the database"
+                : $"AccurateRip: the image lines up with the database at a shift of {shift:+0;-0;0} samples (found with {how})");
 
             // Pass 2: v1 and v2 at that shift.
             foreach (var a in audio)
@@ -220,11 +263,18 @@ namespace ArchivSector_OD.Burning
                 log?.Invoke($"AccurateRip: track {t.Number:D2}: v1 {t.V1:X8}, v2 {t.V2:X8}: " + (t.Accurate ? $"accurate (confidence {t.Confidence})" : t.BestConfidence > 0 ? $"no match (the database's best has confidence {t.BestConfidence})" : "not in the database"));
         }
 
+        // Read offsets drives often have (samples; image shift = the offset).
+        private static readonly int[] CommonOffsets =
+        {
+            0, 6, 12, 30, 48, 91, 97, 102, 103, 116, 118, 120, 594, 667, 679, 685, 691, 696, 702, 704, 738, 1164, 1194, 1776,
+            -6, -12, -30, -48, -91, -97, -102, -103, -116, -472, -582, -594, -667, -685, -696, -702, -704, -738, -1164, -1194,
+        };
+
         // The database file: blocks of [track count, id1, id2, cddb], then
         // for each track [confidence, checksum, frame-450 checksum].
-        private static Dictionary<int, List<(uint Crc, int Confidence)>> Parse(byte[] d, int trackCount, out int blocks)
+        private static Dictionary<int, List<(uint Crc, int Confidence, uint Frame450)>> Parse(byte[] d, int trackCount, out int blocks)
         {
-            var known = new Dictionary<int, List<(uint, int)>>();
+            var known = new Dictionary<int, List<(uint, int, uint)>>();
             blocks = 0;
             int p = 0;
             while (p + 13 <= d.Length)
@@ -237,9 +287,10 @@ namespace ArchivSector_OD.Burning
                 {
                     int conf = d[p];
                     uint crc = BitConverter.ToUInt32(d, p + 1);
+                    uint f450 = BitConverter.ToUInt32(d, p + 5);
                     p += 9;
                     if (!known.TryGetValue(t, out var list)) known[t] = list = new();
-                    if (conf > 0) list.Add((crc, conf));
+                    if (conf > 0) list.Add((crc, conf, f450));
                 }
             }
             return known;
