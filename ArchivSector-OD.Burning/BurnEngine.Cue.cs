@@ -247,7 +247,7 @@ namespace ArchivSector_OD.Burning
                 if (r.CdTextWritten && img.CdText is not null)
                 {
                     var back = CdText.Read(drive);
-                    var want = img.CdText.Lines().ToList();
+                    var want = img.CdText.AsOnDisc().Lines().ToList();   // as written: "—" goes on as "-" (CD-Text is Latin-1)
                     var got = back?.Lines().ToList() ?? new();
                     bool same = back is not null && want.SequenceEqual(got);
                     log?.Invoke(same ? $"BIN/CUE: CD-Text read back and matches ({want.Count} line(s))"

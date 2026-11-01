@@ -184,6 +184,21 @@ namespace ArchivSector_OD.Burning
             return packs;
         }
 
+        /// <summary>
+        /// The same text as it goes onto a disc: each value through the same
+        /// clean-up as the packs (Latin-1, so a long dash becomes "-", curly
+        /// quotes straight ones). For comparing with what reads back (beta 4).
+        /// </summary>
+        public CdText AsOnDisc()
+        {
+            var t = new CdText();
+            foreach (var (field, byTrack) in Text)
+                foreach (var (track, value) in byTrack)
+                    t.Set(field, track, Clean(value));
+            foreach (var (track, code) in Codes) t.Codes[track] = code;
+            return t;
+        }
+
         // Latin-1 only, no control characters (a tab would mean "same as before").
         private static string Clean(string s)
         {

@@ -1,29 +1,32 @@
-﻿@using System.IO
+﻿﻿@using System.IO
 @using System.Windows
 @using ArchivSector_OD.Burning
 @implements IDisposable
 
 @*
-    Music CD mode (v4.0 beta 4): a music CD from WAV files. Add the .wav
-    files (or drop them here from File Explorer), put them in order, name
-    the album and the tracks, and the .cue for them goes to the burn queue
-    (Write mode), which burns it with CD-Text and verifies it like any
-    BIN/CUE. The names start from what a tagger saved in each .wav, or the
-    file name. The reading and the .cue are in the burning library
-    (MusicCd); nothing here uses a drive.
+    Music CD mode (v4.0 beta 4): a music CD from music files. Add them (or
+    drop them here from File Explorer), put them in order, name the album
+    and the tracks, and the .cue for them goes to the burn queue (Write
+    mode), which burns it with CD-Text and verifies it like any BIN/CUE.
+    The names start from what a tagger saved in each file, or the file name.
+    WAV files that are already CD audio (44.1 kHz, 16-bit stereo) are used
+    as they are; FLAC, MP3, M4A/AAC, WMA and other WAVs are converted to CD
+    audio first (AudioDecoder, Windows' own decoders) when the CD is made.
+    The reading and the .cue are in the burning library (MusicCd); nothing
+    here uses a drive.
 *@
 
-<div class="bay-card" data-file-drop="music-cd" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+<div class="bay-card" data-file-drop="@(working ? null : "music-cd")" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
     <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
         <div>
             <h2 style="margin: 0;">🎵 Make a music CD</h2>
-            <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Burn WAV files as a music CD that plays in any CD player, with the album and track names (CD-Text). Add them, or drag them here from File Explorer.</p>
+            <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Burn music files (WAV, FLAC, MP3, M4A/AAC or WMA) as a music CD that plays in any CD player, with the album and track names (CD-Text). Add them, or drag them here from File Explorer.</p>
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-            <button class="shortcut-btn" @onclick="AddWavs">➕ Add WAVs…</button>
+            <button class="shortcut-btn" @onclick="AddFiles" disabled="@working">➕ Add music…</button>
             @if (tracks.Count > 0)
             {
-                <button class="shortcut-btn" @onclick="ClearAll">Clear</button>
+                <button class="shortcut-btn" @onclick="ClearAll" disabled="@working">Clear</button>
             }
         </div>
     </div>
@@ -38,9 +41,27 @@
         </div>
     }
 
+    @if (working)
+    {
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+            <span>@workText</span>
+            @if (workPercent >= 0)
+            {
+                <div class="progress-bar"><div class="progress-fill" style="width: @WorkPercentText%;"></div></div>
+            }
+            @if (cts is not null)
+            {
+                <button class="bay-btn cancel-btn" style="width: auto; align-self: flex-start; padding: 8px 18px;" @onclick="Cancel">✖ Stop</button>
+            }
+        </div>
+    }
+
     @if (tracks.Count == 0)
     {
-        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add WAV files, or drop them (or a folder of them) here. They need to be CD audio: 44.1 kHz, 16-bit stereo.</p>
+        if (!working)
+        {
+            <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add music files, or drop them (or a folder of them) here. Files that aren't CD audio already are converted when the CD is made.</p>
+        }
     }
     else
     {
@@ -59,14 +80,15 @@
             {
                 <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap;">
                     <span style="width: 24px; text-align: right; color: var(--text-secondary);">@((tracks.IndexOf(t) + 1).ToString("D2"))</span>
-                    <input type="text" value="@t.Title" @onchange="e => t.Title = e.Value?.ToString() ?? string.Empty" placeholder="Track title" title="@t.Path"
+                    <input type="text" value="@t.Title" @onchange="e => t.Title = e.Value?.ToString() ?? string.Empty" placeholder="Track title" title="@t.Source"
                            style="flex: 2 1 200px; min-width: 0; padding: 5px 8px; font-size: 13px;" />
                     <input type="text" value="@t.Performer" @onchange="e => t.Performer = e.Value?.ToString() ?? string.Empty" placeholder="Artist"
                            style="flex: 1 1 140px; min-width: 0; padding: 5px 8px; font-size: 13px;" />
+                    <span style="width: 44px; text-align: right; color: var(--text-secondary);" title="@KindTitle(t)">@KindLabel(t)</span>
                     <span style="width: 44px; text-align: right; color: var(--text-secondary);">@Dur(t.Length)</span>
-                    <button class="shortcut-btn" @onclick="() => MoveUp(t)" disabled="@(tracks.IndexOf(t) == 0)" title="Play this one earlier">▲</button>
-                    <button class="shortcut-btn" @onclick="() => MoveDown(t)" disabled="@(tracks.IndexOf(t) == tracks.Count - 1)" title="Play this one later">▼</button>
-                    <button class="shortcut-btn" @onclick="() => Remove(t)" title="Take it off the CD (the file isn't touched)">✖</button>
+                    <button class="shortcut-btn" @onclick="() => MoveUp(t)" disabled="@(working || tracks.IndexOf(t) == 0)" title="Play this one earlier">▲</button>
+                    <button class="shortcut-btn" @onclick="() => MoveDown(t)" disabled="@(working || tracks.IndexOf(t) == tracks.Count - 1)" title="Play this one later">▼</button>
+                    <button class="shortcut-btn" @onclick="() => Remove(t)" disabled="@working" title="Take it off the CD (the file isn't touched)">✖</button>
                 </div>
             }
         </div>
@@ -84,11 +106,15 @@
                 <span><strong>Write the album and track names (CD-Text)</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Shown by players and car stereos that read CD-Text. The music plays the same either way.</span></span>
             </label>
             <span style="font-size: 13px; color: @TotalColor;">@TotalLine</span>
+            @if (ToConvert > 0)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">@ToConvert file(s) will be converted to CD audio (44.1 kHz, 16-bit stereo) when the CD is made.</span>
+            }
         </div>
 
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="ToQueue" disabled="@(!CanMake)">🔥 Add to burn queue</button>
-            <button class="shortcut-btn" @onclick="SaveCue" disabled="@(!CanMake)" title="Keep the .cue to burn this CD again later, here or in ImgBurn">💾 Save .cue…</button>
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="ToQueue" disabled="@(!CanMake || working)">🔥 Add to burn queue</button>
+            <button class="shortcut-btn" @onclick="SaveCue" disabled="@(!CanMake || working)" title="Keep the .cue to burn this CD again later, here or in ImgBurn">💾 Save .cue…</button>
         </div>
         @if (note is not null)
         {
@@ -103,7 +129,9 @@
 
     private sealed class Item
     {
-        public string Path = "";
+        public string Source = "";          // the file as added
+        public string? CdWav;               // a CD-audio .wav for it: the file itself, or its converted copy
+        public bool NeedsConvert;           // not CD audio as it is
         public string Title = "";
         public string Performer = "";
         public long Sectors;
@@ -118,6 +146,15 @@
     private bool noteOk;
     private static string? lastFolder;
 
+    // Reading the files, or converting them.
+    private bool working;
+    private string workText = "";
+    private double workPercent = -1;
+    private CancellationTokenSource? cts;
+
+    private static string MusicCdsFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ArchivSector-OD", "Music CDs");
+
+    private int ToConvert => tracks.Count(t => t.NeedsConvert && (t.CdWav is null || !File.Exists(t.CdWav)));
     private long DiscSectors => MusicCd.DiscSectors(tracks.Select(t => t.Sectors).ToList(), gaps);
     private bool TooLong => DiscSectors > MusicCd.SectorsPer80Min;
     private bool CanMake => tracks.Count > 0 && tracks.Count <= 99 && !TooLong;
@@ -134,6 +171,10 @@
         }
     }
     private string TotalColor => CanMake ? "var(--text-secondary)" : "var(--amber)";
+    private string WorkPercentText => Math.Max(0, workPercent).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string KindLabel(Item t) => Path.GetExtension(t.Source).TrimStart('.').ToUpperInvariant();
+    private static string KindTitle(Item t) => t.NeedsConvert ? "Converted to CD audio when the CD is made" : "Already CD audio";
 
     // "Between tracks": "gap" (2 seconds) or "none".
     private string GapChoice => gaps ? "gap" : "none";
@@ -141,35 +182,52 @@
 
     private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}" : $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
 
-    protected override void OnInitialized() => FileDrop.Dropped += OnFilesDropped;
+    protected override void OnInitialized()
+    {
+        FileDrop.Dropped += OnFilesDropped;
+        // Converted copies and .cue files for the queue are kept two weeks.
+        _ = Task.Run(CleanOldFiles);
+    }
 
-    private void AddWavs()
+    private static void CleanOldFiles()
+    {
+        try
+        {
+            if (!Directory.Exists(MusicCdsFolder)) return;
+            var old = DateTime.Now.AddDays(-14);
+            foreach (var d in Directory.GetDirectories(MusicCdsFolder))
+                try { if (Directory.GetLastWriteTime(d) < old) Directory.Delete(d, true); } catch { }
+            foreach (var f in Directory.GetFiles(MusicCdsFolder, "*.cue"))
+                try { if (File.GetLastWriteTime(f) < old) File.Delete(f); } catch { }
+        }
+        catch { }
+    }
+
+    private async Task AddFiles()
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Choose the WAV files for the CD",
-            Filter = "WAV files (*.wav)|*.wav",
+            Title = "Choose the music files for the CD",
+            Filter = "Music files (*.wav, *.flac, *.mp3, *.m4a, *.aac, *.wma)|*.wav;*.flac;*.mp3;*.m4a;*.aac;*.wma|All files (*.*)|*.*",
             Multiselect = true,
         };
         if (lastFolder is not null && Directory.Exists(lastFolder)) dlg.InitialDirectory = lastFolder;
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
         lastFolder = Path.GetDirectoryName(dlg.FileNames.FirstOrDefault() ?? "");
-        Add(dlg.FileNames.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(), new List<string>());
+        await Add(dlg.FileNames.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(), new List<string>());
     }
 
-    // Files dropped from Explorer: .wav files, or the .wav files in a dropped
-    // folder (not its subfolders), in file name order.
+    // Files dropped from Explorer: music files, or the music files in a
+    // dropped folder (not its subfolders), in file name order.
     private void OnFilesDropped(string target, IReadOnlyList<string> paths)
     {
         if (target != "music-cd") return;
         _ = InvokeAsync(() => AddDropped(paths));
     }
 
-    private static bool IsWav(string p) => p.EndsWith(".wav", StringComparison.OrdinalIgnoreCase);
-
-    private void AddDropped(IReadOnlyList<string> paths)
+    private async Task AddDropped(IReadOnlyList<string> paths)
     {
-        if (disposed) return;
+        if (disposed || working) return;
         var files = new List<string>();
         var skipped = new List<string>();
         foreach (var p in paths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
@@ -178,54 +236,77 @@
             {
                 if (Directory.Exists(p))
                 {
-                    var inside = Directory.EnumerateFiles(p).Where(IsWav).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
-                    if (inside.Count == 0) skipped.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(p)) + ": no WAV files in it.");
+                    var inside = Directory.EnumerateFiles(p).Where(AudioDecoder.IsMusicFile).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+                    if (inside.Count == 0) skipped.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(p)) + ": no music files in it.");
                     files.AddRange(inside);
                 }
-                else if (File.Exists(p) && IsWav(p)) files.Add(p);
-                else skipped.Add(Path.GetFileName(p) + ": only WAV files can go on a music CD.");
+                else if (File.Exists(p) && AudioDecoder.IsMusicFile(p)) files.Add(p);
+                else skipped.Add(Path.GetFileName(p) + ": not a music file (WAV, FLAC, MP3, M4A/AAC or WMA).");
             }
             catch { skipped.Add(Path.GetFileName(p) + ": couldn't be opened."); }
         }
-        Add(files, skipped);
-        StateHasChanged();
+        await Add(files, skipped);
     }
 
-    // Adds the files that are CD audio; the others are listed with why.
-    private void Add(List<string> files, List<string> skipped)
+    // What one file holds, worked out away from the screen's thread.
+    private sealed record Probe(string Path, Item? Item, string? Problem, string Album);
+
+    private static Probe ProbeFile(string full)
+    {
+        string name = Path.GetFileName(full);
+        var tags = MusicCd.ReadTags(full);
+        string title = tags.Title.Length > 0 ? tags.Title : MusicCd.TitleFromFileName(full);
+        if (full.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+        {
+            var w = MusicCd.ReadWav(full);
+            if (w.Problem is null)
+                return new Probe(full, new Item { Source = full, CdWav = full, Title = title, Performer = tags.Artist, Sectors = w.Sectors, Length = w.Length }, null, tags.Album);
+            if (!w.Convertible) return new Probe(full, null, $"{name}: {w.Problem}", "");
+        }
+        // Anything else is converted: how long is it?
+        var len = AudioDecoder.Length(full, out var problem);
+        if (len is null) return new Probe(full, null, $"{name}: {problem}", "");
+        long bytes = (long)Math.Round(len.Value.TotalSeconds * 44100) * 4;
+        return new Probe(full, new Item { Source = full, NeedsConvert = true, Title = title, Performer = tags.Artist, Sectors = (bytes + 2351) / 2352, Length = len.Value }, null, tags.Album);
+    }
+
+    // Adds the files that can go on a CD; the others are listed with why.
+    private async Task Add(List<string> files, List<string> skipped)
     {
         refused.Clear();
         refused.AddRange(skipped);
+        note = null;
+        var todo = files.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(f => !tracks.Any(t => string.Equals(t.Source, f, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (todo.Count == 0) { StateHasChanged(); return; }
+        working = true;
+        workText = todo.Count == 1 ? "Reading the file…" : $"Reading {todo.Count} files…";
+        workPercent = -1;
+        StateHasChanged();
+        List<Probe> probes;
+        try { probes = await Task.Run(() => todo.Select(ProbeFile).ToList()); }
+        finally { working = false; }
+
         bool firstOnes = tracks.Count == 0;
-        var added = new List<MusicCd.Wav>();
-        foreach (var f in files)
+        var added = new List<Probe>();
+        foreach (var p in probes)
         {
-            var full = Path.GetFullPath(f);
-            if (tracks.Any(t => string.Equals(t.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
-            var w = MusicCd.ReadWav(full);
-            if (w.Problem is not null) { refused.Add($"{Path.GetFileName(full)}: {w.Problem}"); continue; }
-            if (tracks.Count >= 99) { refused.Add($"{Path.GetFileName(full)}: a CD can hold 99 tracks at most."); continue; }
-            added.Add(w);
-            tracks.Add(new Item
-            {
-                Path = full,
-                Title = w.Title.Length > 0 ? w.Title : MusicCd.TitleFromFileName(full),
-                Performer = w.Artist,
-                Sectors = w.Sectors,
-                Length = w.Length,
-            });
+            if (p.Item is null) { refused.Add(p.Problem ?? Path.GetFileName(p.Path)); continue; }
+            if (tracks.Count >= 99) { refused.Add($"{Path.GetFileName(p.Path)}: a CD can hold 99 tracks at most."); continue; }
+            tracks.Add(p.Item);
+            added.Add(p);
         }
         // The album and its artist, from the first files' tags when they agree.
         if (firstOnes && added.Count > 0)
         {
-            var albums = added.Select(w => w.Album).Where(a => a.Length > 0).Distinct().ToList();
+            var albums = added.Select(p => p.Album).Where(a => a.Length > 0).Distinct().ToList();
             if (album.Length == 0 && albums.Count == 1) album = albums[0];
-            var artists = added.Select(w => w.Artist).Where(a => a.Length > 0).GroupBy(a => a).OrderByDescending(g => g.Count()).ToList();
+            var artists = added.Select(p => p.Item!.Performer).Where(a => a.Length > 0).GroupBy(a => a).OrderByDescending(g => g.Count()).ToList();
             if (albumArtist.Length == 0 && artists.Count > 0) albumArtist = artists[0].Key;
         }
         // A track with no artist of its own gets the album's.
         foreach (var t in tracks.Where(t => t.Performer.Length == 0)) t.Performer = albumArtist;
-        note = null;
+        if (!disposed) StateHasChanged();
     }
 
     // A new album artist goes to the tracks that had the old one (or none).
@@ -258,8 +339,7 @@
         note = null;
     }
 
-    private List<MusicCd.Track> CueTracks() =>
-        tracks.Select(t => new MusicCd.Track { Path = t.Path, Title = t.Title, Performer = t.Performer }).ToList();
+    private void Cancel() => cts?.Cancel();
 
     private string SuggestedName()
     {
@@ -267,6 +347,71 @@
         foreach (var c in Path.GetInvalidFileNameChars()) n = n.Replace(c, '_');
         return n;
     }
+
+    private static string SafeName(string s)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
+        s = s.Trim();
+        return s.Length == 0 ? "Track" : s.Length > 80 ? s[..80].Trim() : s;
+    }
+
+    // Converts the files that need it into "folder" (NN - Title.wav). False
+    // (with the note saying why) if one fails or it's stopped.
+    private async Task<bool> ConvertAll(string folder)
+    {
+        var list = tracks.Where(t => t.NeedsConvert && (t.CdWav is null || !File.Exists(t.CdWav))).ToList();
+        if (list.Count == 0) return true;
+        working = true;
+        workPercent = 0;
+        cts = new CancellationTokenSource();
+        var ct = cts.Token;
+        try
+        {
+            Directory.CreateDirectory(folder);
+            for (int i = 0; i < list.Count; i++)
+            {
+                var t = list[i];
+                int no = tracks.IndexOf(t) + 1;
+                var target = Path.Combine(folder, $"{no:D2} - {SafeName(t.Title)}.wav");
+                workText = $"Converting {i + 1} of {list.Count} to CD audio: {Path.GetFileName(t.Source)}";
+                int index = i;
+                var reporter = new Progress<double>(p => { workPercent = 100.0 * (index + p) / list.Count; if (!disposed) InvokeAsync(StateHasChanged); });
+                StateHasChanged();
+                var source = t.Source;
+                await Task.Run(() => AudioDecoder.ToCdWav(source, target, reporter, ct));
+                var w = MusicCd.ReadWav(target);
+                if (w.Problem is not null) { note = $"{Path.GetFileName(t.Source)} didn't convert properly: {w.Problem}"; noteOk = false; return false; }
+                t.CdWav = target;
+                t.Sectors = w.Sectors;
+                t.Length = w.Length;
+            }
+            LogService.Write("Music CD:", $"converted {list.Count} file(s) to CD audio in {folder}");
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            note = "Stopped. Nothing was added.";
+            noteOk = false;
+            return false;
+        }
+        catch (Exception ex)
+        {
+            note = "A file couldn't be converted: " + ex.Message;
+            noteOk = false;
+            LogService.Write("Music CD:", "conversion failed: " + ex.Message);
+            return false;
+        }
+        finally
+        {
+            cts.Dispose();
+            cts = null;
+            working = false;
+            workPercent = -1;
+        }
+    }
+
+    private List<MusicCd.Track> CueTracks() =>
+        tracks.Select(t => new MusicCd.Track { Path = t.CdWav!, Title = t.Title, Performer = t.Performer }).ToList();
 
     // Writes the .cue; false (with the note saying why) if it couldn't.
     private bool Write(string cuePath)
@@ -276,8 +421,9 @@
             // Every file still there and still CD audio?
             foreach (var t in tracks)
             {
-                var w = MusicCd.ReadWav(t.Path);
-                if (w.Problem is not null) { note = $"{Path.GetFileName(t.Path)}: {w.Problem}"; noteOk = false; return false; }
+                if (t.CdWav is null) { note = $"{Path.GetFileName(t.Source)} hasn't been converted."; noteOk = false; return false; }
+                var w = MusicCd.ReadWav(t.CdWav);
+                if (w.Problem is not null) { note = $"{Path.GetFileName(t.CdWav)}: {w.Problem}"; noteOk = false; return false; }
             }
             var folder = Path.GetDirectoryName(Path.GetFullPath(cuePath))!;
             Directory.CreateDirectory(folder);
@@ -294,24 +440,30 @@
         }
     }
 
-    // The .cue goes in ArchivSector-OD's own folder (it lists the WAV files
-    // where they are), then to the burn queue.
+    // The .cue (and any converted copies, in a folder of their own) goes in
+    // ArchivSector-OD's own folder, then to the burn queue.
     private async Task ToQueue()
     {
-        if (!CanMake) return;
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ArchivSector-OD", "Music CDs");
-        var cue = Path.Combine(folder, $"{SuggestedName()} {DateTime.Now:yyyyMMdd-HHmmss}.cue");
+        if (!CanMake || working) return;
+        var name = $"{SuggestedName()} {DateTime.Now:yyyyMMdd-HHmmss}";
+        if (!await ConvertAll(Path.Combine(MusicCdsFolder, name))) { StateHasChanged(); return; }
+        if (!CanMake) { note = "After converting, the CD is too long for an 80-minute CD."; noteOk = false; return; }
+        var cue = Path.Combine(MusicCdsFolder, name + ".cue");
         if (!Write(cue)) return;
         LogService.Write("Music CD:", $"{tracks.Count} track(s), {Dur(TimeSpan.FromSeconds(DiscSectors / 75.0))}, {(gaps ? "2-second gaps" : "no gaps")}{(cdText ? ", CD-Text" : "")}: {cue}");
-        note = "Added to the burn queue. Keep the WAV files where they are until it's burned.";
+        note = tracks.Any(t => t.NeedsConvert)
+            ? "Added to the burn queue. The converted copies are kept for two weeks; keep the other files where they are until it's burned."
+            : "Added to the burn queue. Keep the files where they are until it's burned.";
         noteOk = true;
         await AddToQueue.InvokeAsync(cue);
     }
 
-    private void SaveCue()
+    // The .cue where you choose; converted copies go in a folder next to it
+    // ("<name> (CD audio)"), so the .cue and its files stay together.
+    private async Task SaveCue()
     {
-        if (!CanMake) return;
-        var first = Path.GetDirectoryName(tracks[0].Path);
+        if (!CanMake || working) return;
+        var first = Path.GetDirectoryName(tracks[0].Source);
         var dlg = new Microsoft.Win32.SaveFileDialog
         {
             Title = "Save the music CD's .cue",
@@ -321,8 +473,16 @@
             OverwritePrompt = true,
         };
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        var cueFolder = Path.GetDirectoryName(Path.GetFullPath(dlg.FileName))!;
+        var copies = Path.Combine(cueFolder, Path.GetFileNameWithoutExtension(dlg.FileName) + " (CD audio)");
+        // Copies made earlier for the queue are made again beside the .cue.
+        foreach (var t in tracks.Where(t => t.NeedsConvert && t.CdWav is not null && !t.CdWav.StartsWith(copies, StringComparison.OrdinalIgnoreCase)))
+            t.CdWav = null;
+        if (!await ConvertAll(copies)) { StateHasChanged(); return; }
         if (!Write(dlg.FileName)) return;
-        note = $"Saved {Path.GetFileName(dlg.FileName)}. It lists the WAV files where they are now, so keep them together; it burns here (Write mode) or in ImgBurn.";
+        note = tracks.Any(t => t.NeedsConvert)
+            ? $"Saved {Path.GetFileName(dlg.FileName)}, with the converted files in \"{Path.GetFileName(copies)}\" next to it. It burns here (Write mode) or in ImgBurn."
+            : $"Saved {Path.GetFileName(dlg.FileName)}. It lists the files where they are now, so keep them together; it burns here (Write mode) or in ImgBurn.";
         noteOk = true;
     }
 
@@ -330,5 +490,6 @@
     {
         disposed = true;
         FileDrop.Dropped -= OnFilesDropped;
+        cts?.Cancel();
     }
 }

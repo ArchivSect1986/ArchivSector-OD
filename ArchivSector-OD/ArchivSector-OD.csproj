@@ -25,6 +25,10 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="8.0.40" />
+		<!-- Beta 4: Windows' own audio decoders (Media Foundation) for Music
+		     CD mode's FLAC / MP3 / M4A / WMA files. NAudio.Wasapi holds the
+		     Media Foundation reader and resampler; NAudio.Core comes with it. -->
+		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
 	</ItemGroup>
 
 	<!-- Burning engine (IMAPI2 wrapper). Lives in its own project so a
