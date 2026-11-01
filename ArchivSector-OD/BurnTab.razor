@@ -40,7 +40,10 @@
         <button class="nav-btn @(mode == "read" ? "active" : "")" @onclick='() => mode = "read"'>📀 Read disc</button>
         <button class="nav-btn @(mode == "copy" ? "active" : "")" @onclick='() => mode = "copy"'>🔁 Copy disc</button>
         <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'>✔ Verify disc</button>
+        <button class="nav-btn @(mode == "accuraterip" ? "active" : "")" @onclick='() => mode = "accuraterip"'>🎯 AccurateRip</button>
         <button class="nav-btn @(mode == "info" ? "active" : "")" @onclick='() => mode = "info"'>🔎 Drive info</button>
+        @* Beta 4: today's log, without going back to the drive bays. *@
+        <button class="nav-btn" @onclick="LogService.OpenToday" title="Opens today's saved log (all drives and TargetFill). Logs are kept for 30 days in %AppData%\ArchivSector-OD\Logs.">📄 Open log</button>
     </nav>
 
     <div style="display: @(mode == "build" ? "block" : "none");">
@@ -52,7 +55,7 @@
     </div>
 
     <div style="display: @(mode == "read" ? "block" : "none");">
-        <ReadPanel AddToQueue="@OnAddToQueue" Visible="@(Visible && mode == "read")" />
+        <ReadPanel AddToQueue="@OnAddToQueue" CheckWithAccurateRip="@OnCheckWithAccurateRip" Visible="@(Visible && mode == "read")" />
     </div>
 
     <div style="display: @(mode == "copy" ? "block" : "none");">
@@ -61,6 +64,10 @@
 
     <div style="display: @(mode == "verify" ? "block" : "none");">
         <VerifyPanel Visible="@(Visible && mode == "verify")" />
+    </div>
+
+    <div style="display: @(mode == "accuraterip" ? "block" : "none");">
+        <AccurateRipPanel @ref="accurateRip" />
     </div>
 
     <div style="display: @(mode == "info" ? "block" : "none");">
@@ -222,6 +229,14 @@
     // Build mode finished an ISO and wants it in the queue.
     private void OnAddToQueue(string isoPath) => queue?.AddIso(isoPath);
     // Music CD mode (beta 4) made a .cue: into the queue, and show it there.
+    // Read disc (beta 4) read a music CD and wants it checked: AccurateRip mode does it.
+    private AccurateRipPanel? accurateRip;
+    private void OnCheckWithAccurateRip(string cuePath)
+    {
+        mode = "accuraterip";
+        if (accurateRip is not null) _ = accurateRip.Check(cuePath);
+    }
+
     private void OnMusicCdToQueue(string cuePath)
     {
         queue?.AddIso(cuePath);

@@ -1,4 +1,4 @@
-@using System.IO
+﻿@using System.IO
 @using System.Windows
 @using ArchivSector_OD.Burning
 @implements IDisposable
@@ -13,6 +13,9 @@
     a mode 2 data track (PS1 games, Video CDs), which an ISO can't hold, is
     saved as .bin + .cue instead, with the reader Copy disc uses
     (CdImageReader), CD-Text and sessions included.
+    AccurateRip (beta 4): a music CD's BIN/CUE just read can be handed to
+    AccurateRip mode (CheckWithAccurateRip) to compare it with other
+    people's rips of the same CD.
 *@
 
 <div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
@@ -111,6 +114,10 @@
                     else
                     {
                         <span style="font-size: 12px; color: var(--text-secondary); align-self: center;">Added to the burn queue</span>
+                    }
+                    @if (resultIsCue && result.IsoPath is not null && toc?.HasAudio != false)
+                    {
+                        <button class="shortcut-btn" @onclick="CheckResult" title="Compare the music tracks with other people's rips of this CD">🎯 Check with AccurateRip</button>
                     }
                 </div>
             }
@@ -457,5 +464,12 @@
     }
 
     // Leaving the tab doesn't stop a read; it carries on.
+    // ---- AccurateRip (beta 4): a music CD's BIN/CUE goes to AccurateRip mode ----
+
+    /// <summary>Called with a .cue just read, to check it in AccurateRip mode.</summary>
+    [Parameter] public EventCallback<string> CheckWithAccurateRip { get; set; }
+
+    private Task CheckResult() => result?.IsoPath is null ? Task.CompletedTask : CheckWithAccurateRip.InvokeAsync(result.IsoPath);
+
     public void Dispose() => disposed = true;
 }
