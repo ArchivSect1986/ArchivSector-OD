@@ -106,7 +106,7 @@ namespace ArchivSector_OD.Burning
             catch (Exception ex) { problem = "The CD's track list couldn't be read: " + ex.Message; return null; }
         }
 
-        private static Toc? ReadToc(ScsiDrive drive, out string? problem)
+        internal static Toc? ReadToc(ScsiDrive drive, out string? problem)
         {
             problem = null;
             var buf = new byte[4 + 100 * 8];

@@ -6,15 +6,18 @@
 @*
     Read mode (v4.0 week 3): copies a data disc to an ISO, like ImgBurn's
     "Create image file from disc". The reading is in the burning library
-    (DiscReader). Movie discs are pointed to their drive bay instead, and
-    music CDs can't be stored as an ISO. The drive is marked busy while it
-    reads, so the bays and the Burn tab leave it alone.
+    (DiscReader). Movie discs are pointed to their drive bay instead. The
+    drive is marked busy while it reads, so the bays and the Burn tab leave
+    it alone.
+    Beta 4: a CD with music tracks (music, mixed-mode and Enhanced CDs),
+    which an ISO can't hold, is saved as .bin + .cue instead, with the
+    reader Copy disc uses (CdImageReader), CD-Text and sessions included.
 *@
 
 <div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
     <div>
-        <h2 style="margin: 0;">📀 Read a disc to an ISO</h2>
-        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Copy a data disc (backups, software, photos) to an ISO file, sector by sector.</p>
+        <h2 style="margin: 0;">📀 Read a disc to an image</h2>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Copy a data disc (backups, software, photos) to an ISO file, sector by sector. A CD with music tracks is saved as BIN/CUE.</p>
     </div>
 
     @if (state == State.Running)
@@ -53,26 +56,33 @@
             <span style="font-size: 12px; margin-left: 100px; color: @DiscColor;">@DiscText</span>
 
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <strong style="min-width: 90px;">Save ISO as</strong>
+                <strong style="min-width: 90px;">@(asCue ? "Save as" : "Save ISO as")</strong>
                 <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; color: @(outputPath is null ? "var(--text-secondary)" : "var(--text-primary)");">@(outputPath ?? "—")</span>
                 <button class="shortcut-btn" @onclick="ChooseOutput" disabled="@(!CanRead)">💾 Change…</button>
             </div>
 
-            <label style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <strong style="min-width: 90px;">Retries</strong>
-                <select @bind="retries" style="flex: 0 1 120px; font-size: 13px;">
-                    <option value="0">None</option>
-                    <option value="3">3 (default)</option>
-                    <option value="10">10</option>
-                    <option value="20">20</option>
-                </select>
-                <span style="font-size: 12px; color: var(--text-secondary);">How many more times to try a sector that won't read</span>
-            </label>
+            @if (asCue)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary); margin-left: 100px;">Saved as .bin + .cue: every sector raw (2352 bytes), with the track gaps@(toc?.CdText is not null ? ", CD-Text" : "")@(toc?.Sessions > 1 ? " and both sessions" : ""). A sector that won't read after a few tries becomes zeros and is counted.</span>
+            }
+            else
+            {
+                <label style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <strong style="min-width: 90px;">Retries</strong>
+                    <select @bind="retries" style="flex: 0 1 120px; font-size: 13px;">
+                        <option value="0">None</option>
+                        <option value="3">3 (default)</option>
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                    </select>
+                    <span style="font-size: 12px; color: var(--text-secondary);">How many more times to try a sector that won't read</span>
+                </label>
 
-            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
-                <input type="checkbox" @bind="continueOnErrors" style="margin-top: 3px;" />
-                <span><strong>Keep going past unreadable sectors</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Off: stop at the first sector that won't read, so a damaged copy is never saved. On: fill it with zeros and finish, to rescue what's left of a scratched disc.</span></span>
-            </label>
+                <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                    <input type="checkbox" @bind="continueOnErrors" style="margin-top: 3px;" />
+                    <span><strong>Keep going past unreadable sectors</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Off: stop at the first sector that won't read, so a damaged copy is never saved. On: fill it with zeros and finish, to rescue what's left of a scratched disc.</span></span>
+                </label>
+            }
             <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
                 <input type="checkbox" @bind="ejectAfter" style="margin-top: 3px;" />
                 <span><strong>Eject the disc when it's done</strong></span>
@@ -80,7 +90,7 @@
         </div>
 
         <div>
-            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(!CanRead || outputPath is null)">📀 Read to ISO</button>
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(!CanRead || outputPath is null)">@(asCue ? "📀 Read to BIN/CUE" : "📀 Read to ISO")</button>
         </div>
     }
 
@@ -90,7 +100,7 @@
             <strong style="color: @ResultColor;">@ResultIcon @result.Message</strong>
             @if (result.Ok)
             {
-                <span style="font-size: 12px; color: var(--text-secondary);">Read in @Dur(result.Time) · average @DiscHealthService.FormatSpeed(result.AverageBytesPerSec, OneX(result.Bytes))</span>
+                <span style="font-size: 12px; color: var(--text-secondary);">Read in @Dur(result.Time) · average @DiscHealthService.FormatSpeed(result.AverageBytesPerSec, resultIsCue ? 176_400 : OneX(result.Bytes))</span>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <button class="shortcut-btn" @onclick="OpenFolder">📂 Show in folder</button>
                     @if (!queued)
@@ -108,7 +118,7 @@
 </div>
 
 @code {
-    /// <summary>Hands a finished ISO to the burn queue (Write mode), e.g. to copy the disc.</summary>
+    /// <summary>Hands a finished ISO or .cue to the burn queue (Write mode), e.g. to copy the disc.</summary>
     [Parameter] public EventCallback<string> AddToQueue { get; set; }
     /// <summary>True while Read mode is showing: the drive list is checked then.</summary>
     [Parameter] public bool Visible { get; set; }
@@ -119,6 +129,9 @@
     private List<string> drives = new();
     private string driveLetter = "";
     private DiscReader.DiscInfo? disc;
+    private CdImageReader.Toc? toc;            // a CD with music tracks: read to BIN/CUE
+    private bool asCue, resultIsCue;
+    private int readSectorBytes = DiscReader.SectorSize;
     private bool checking, busyDrive;
     private string? outputPath;
     private int retries = 3;
@@ -142,12 +155,33 @@
         : busyDrive ? "⏳ This drive is busy (ripping, burning or checking). Pick another, or wait until it's done."
         : disc is null ? ""
         : disc.Problem is not null ? "⚠ " + disc.Problem
+        : asCue && toc is not null ? toc.Summary + CdTextLine + $" · {DiscHealthService.FormatBytes(toc.SectorsToRead * 2352)} as BIN/CUE"
         : $"{disc.Kind} · {disc.Label} · {disc.FileSystem} · {DiscHealthService.FormatBytes(disc.Bytes)}";
+    private string CdTextLine
+    {
+        get
+        {
+            if (toc?.CdText is null) return "";
+            string title = toc.CdText.Get("TITLE", 0), who = toc.CdText.Get("PERFORMER", 0);
+            return title.Length == 0 ? "" : $" · 💿 {title}" + (who.Length > 0 ? $" — {who}" : "");
+        }
+    }
+    // The name for the image: "Artist - Album" from CD-Text, else the disc's label.
+    private string ImageName
+    {
+        get
+        {
+            string title = toc?.CdText?.Get("TITLE", 0) ?? "", who = toc?.CdText?.Get("PERFORMER", 0) ?? "";
+            if (title.Length > 0) return who.Length > 0 ? $"{who} - {title}" : title;
+            var label = disc?.Label ?? "";
+            return label.Length > 0 && !label.Equals("Audio CD", StringComparison.OrdinalIgnoreCase) ? label : asCue ? "Music CD" : "disc";
+        }
+    }
     private string DiscColor => disc?.Problem is not null || busyDrive ? "var(--amber)" : "var(--text-secondary)";
 
     private string PercentText => (progress?.Percent ?? 0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
     private string ProgressLine => progress is null ? "Starting…"
-        : $"{progress.Percent:0.0}% · {DiscHealthService.FormatBytes(progress.SectorsDone * DiscReader.SectorSize)} of {DiscHealthService.FormatBytes(progress.TotalSectors * DiscReader.SectorSize)} · {DiscHealthService.FormatSpeed(progress.BytesPerSec, progress.OneX)} · {Dur(progress.Remaining)} left";
+        : $"{progress.Percent:0.0}% · {DiscHealthService.FormatBytes(progress.SectorsDone * readSectorBytes)} of {DiscHealthService.FormatBytes(progress.TotalSectors * readSectorBytes)} · {DiscHealthService.FormatSpeed(progress.BytesPerSec, progress.OneX)} · {Dur(progress.Remaining)} left";
 
     private string ResultColor => result is null ? "" : result.Ok && result.BadSectors == 0 ? "var(--success)" : result.Cancelled ? "var(--text-secondary)" : result.Ok ? "var(--amber)" : "var(--danger)";
     private string ResultIcon => result is null ? "" : result.Ok && result.BadSectors == 0 ? "✅" : result.Cancelled ? "⏸" : "⚠";
@@ -193,6 +227,8 @@
     private async Task CheckDiscAsync()
     {
         disc = null;
+        toc = null;
+        asCue = false;
         outputPath = null;
         if (string.IsNullOrEmpty(driveLetter)) return;
         var letter = driveLetter;
@@ -202,9 +238,25 @@
         StateHasChanged();
         // Asking a drive about its disc can take seconds while it spins up.
         var info = await Task.Run(() => DiscReader.DescribeDisc(letter));
+        // A CD: does it have music tracks? Then it's read to .bin + .cue.
+        CdImageReader.Toc? t = null;
+        if (info.IsAudioCd || info.Kind == "CD" || !info.Ready)
+        {
+            t = await Task.Run(() => CdImageReader.ReadToc(letter, out _));
+            if (t is not null && t.HasAudio)
+            {
+                info.Ready = true;
+                info.Problem = t.Sessions > 1 && !t.SessionLayoutKnown
+                    ? "This CD has more than one session, but the drive didn't give where each one starts and ends, so it can't be read here. ImgBurn or Redumper can."
+                    : null;
+            }
+            else t = null;
+        }
         checking = false;
         if (letter != driveLetter) return;
         disc = info;
+        toc = t;
+        asCue = t is not null;
         if (info.Ready && info.Problem is null)
         {
             var folder = lastOutputFolder;
@@ -215,7 +267,7 @@
                     ? cfg.OutputBaseFolder
                     : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             }
-            outputPath = Path.Combine(folder, SafeFileName(info.Label) + ".iso");
+            outputPath = Path.Combine(folder, SafeFileName(asCue ? ImageName : info.Label) + (asCue ? ".cue" : ".iso"));
         }
         if (!disposed) StateHasChanged();
     }
@@ -230,9 +282,9 @@
     {
         var dlg = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "Save the disc's ISO as",
-            Filter = "Disc image (*.iso)|*.iso",
-            FileName = outputPath is null ? "disc.iso" : Path.GetFileName(outputPath),
+            Title = asCue ? "Save the CD's BIN/CUE as" : "Save the disc's ISO as",
+            Filter = asCue ? "BIN/CUE (*.cue)|*.cue" : "Disc image (*.iso)|*.iso",
+            FileName = outputPath is null ? (asCue ? "Music CD.cue" : "disc.iso") : Path.GetFileName(outputPath),
             InitialDirectory = outputPath is null ? null : Path.GetDirectoryName(outputPath),
             OverwritePrompt = true,
         };
@@ -248,10 +300,12 @@
         if (!CanRead || outputPath is null) return;
         var letter = driveLetter;
         if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter)) { busyDrive = true; return; }
-        if (File.Exists(outputPath))
+        bool cue = asCue && toc is not null;
+        string binPath = Path.ChangeExtension(outputPath, ".bin");
+        if (File.Exists(outputPath) || (cue && File.Exists(binPath)))
         {
             var owner = System.Windows.Application.Current?.MainWindow;
-            var msg = $"{Path.GetFileName(outputPath)} already exists.\n\nReplace it?";
+            var msg = cue ? $"{Path.GetFileNameWithoutExtension(outputPath)} (.bin / .cue) already exists.\n\nReplace it?" : $"{Path.GetFileName(outputPath)} already exists.\n\nReplace it?";
             var ans = owner is null
                 ? MessageBox.Show(msg, "Read a disc", MessageBoxButton.YesNo, MessageBoxImage.Question)
                 : MessageBox.Show(owner, msg, "Read a disc", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -264,6 +318,8 @@
         result = null;
         queued = false;
         cancelRequested = false;
+        resultIsCue = cue;
+        readSectorBytes = cue ? 2352 : DiscReader.SectorSize;
         cts = new CancellationTokenSource();
         lastOutputFolder = Path.GetDirectoryName(outputPath);
         var opts = new DiscReader.Options
@@ -280,7 +336,9 @@
         DiscReader.Result r;
         try
         {
-            r = await DiscReader.ReadAsync(opts, reporter, cts.Token, line => LogService.Write($"{letter}:", line));
+            r = cue
+                ? await ReadCueAsync(letter, outputPath, toc!, cts.Token)
+                : await DiscReader.ReadAsync(opts, reporter, cts.Token, line => LogService.Write($"{letter}:", line));
         }
         catch (Exception ex)
         {
@@ -301,6 +359,65 @@
         if (!disposed) StateHasChanged();
     }
 
+    // A CD with music: CdImageReader into folder\name.bin + name.cue. Its
+    // result is put in DiscReader's shape so the rest of the panel is the same.
+    private async Task<DiscReader.Result> ReadCueAsync(string letter, string cuePath, CdImageReader.Toc t, CancellationToken ct)
+    {
+        string folder = Path.GetDirectoryName(Path.GetFullPath(cuePath))!, name = Path.GetFileNameWithoutExtension(cuePath);
+        string bin = Path.Combine(folder, name + ".bin");
+        long need = t.SectorsToRead * 2352;
+        if (Path.GetFullPath(cuePath).StartsWith(letter + ":", StringComparison.OrdinalIgnoreCase))
+            return new DiscReader.Result { Message = "The BIN/CUE can't be saved onto the disc being read." };
+        try
+        {
+            var root = Path.GetPathRoot(folder);
+            if (!string.IsNullOrEmpty(root))
+            {
+                var di = new DriveInfo(root);
+                long have = di.AvailableFreeSpace + (File.Exists(bin) ? new FileInfo(bin).Length : 0);
+                if (di.IsReady && have < need + 16L * 1024 * 1024)
+                    return new DiscReader.Result { Message = $"There isn't enough free space on {root} for the BIN/CUE ({DiscHealthService.FormatBytes(need)} needed, {DiscHealthService.FormatBytes(di.AvailableFreeSpace)} free)." };
+            }
+        }
+        catch { }
+
+        var cdReporter = new Progress<CdImageReader.Progress>(p =>
+        {
+            progress = new DiscReader.Progress
+            {
+                SectorsDone = p.SectorsDone,
+                TotalSectors = p.TotalSectors,
+                BytesPerSec = p.BytesPerSec,
+                OneX = 176_400,
+                Remaining = p.Remaining,
+                BadSectors = p.BadSectors,
+            };
+            if (!disposed) InvokeAsync(StateHasChanged);
+        });
+        var cr = await CdImageReader.ReadToBinCueAsync(letter, folder, name, cdReporter, ct, line => LogService.Write($"{letter}:", line));
+        if (!cr.Ok)
+        {
+            // Nothing half-read is left behind.
+            try { if (File.Exists(bin)) File.Delete(bin); } catch { }
+            try { if (File.Exists(cuePath)) File.Delete(cuePath); } catch { }
+        }
+        long bytes = cr.Ok && File.Exists(bin) ? new FileInfo(bin).Length : 0;
+        return new DiscReader.Result
+        {
+            Ok = cr.Ok,
+            Cancelled = cr.Cancelled,
+            IsoPath = cr.Ok ? cr.CuePath ?? cuePath : null,
+            Bytes = bytes,
+            BadSectors = cr.BadSectors,
+            Time = cr.Time,
+            AverageBytesPerSec = cr.Time.TotalSeconds > 0 ? bytes / cr.Time.TotalSeconds : 0,
+            Message = cr.Cancelled ? "Cancelled. The unfinished BIN/CUE was removed."
+                : !cr.Ok ? cr.Message
+                : cr.BadSectors == 0 ? $"Read the CD to BIN/CUE: every sector read cleanly ({t.Tracks.Count} track{(t.Tracks.Count == 1 ? "" : "s")}{(t.CdText is not null ? ", with CD-Text" : "")})."
+                : $"Read the CD to BIN/CUE, but {cr.BadSectors:N0} sector(s) couldn't be read and were saved as zeros.",
+        };
+    }
+
     private void RecordHistory(DiscReader.Result r, string letter)
     {
         try
@@ -309,8 +426,8 @@
             {
                 Timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                 DriveLetter = letter,
-                Title = disc?.Label ?? Path.GetFileNameWithoutExtension(r.IsoPath ?? ""),
-                System = "Disc read (ISO)",
+                Title = resultIsCue ? Path.GetFileNameWithoutExtension(r.IsoPath ?? "") : disc?.Label ?? Path.GetFileNameWithoutExtension(r.IsoPath ?? ""),
+                System = resultIsCue ? "Disc read (BIN/CUE)" : "Disc read (ISO)",
                 OutputPath = r.IsoPath ?? "",
                 Capacity = DiscHealthService.FormatBytes(r.Bytes),
                 RedumpMatch = r.BadSectors == 0 ? "Read cleanly" : $"{r.BadSectors:N0} unreadable sectors",
