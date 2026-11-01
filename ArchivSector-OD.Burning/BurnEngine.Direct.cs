@@ -261,6 +261,9 @@ namespace ArchivSector_OD.Burning
 
                 // 7. Verify: read every sector back straight from the disc
                 // (not through Windows, so nothing cached is compared).
+                // Beta 4: the tray is cycled first (like ImgBurn), so the disc is read fresh.
+                if (verify && !ct.IsCancellationRequested && !CycleTray(drive, progress, ct, log, "Direct write"))
+                    verify = false;
                 if (verify && !ct.IsCancellationRequested)
                 {
                     var vclock = Stopwatch.StartNew();

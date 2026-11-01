@@ -62,7 +62,7 @@
             <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; margin-top: 12px; color: var(--text-primary);">
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <strong style="min-width: 80px;">Drive</strong>
-                    <select class="settings-input" @bind="driveLetter" style="flex: 1; font-size: 13px;">
+                    <select class="settings-input" @bind="driveLetter" @bind:after="CheckSpeeds" style="flex: 1; font-size: 13px;">
                         @foreach (var d in Drives)
                         {
                             <option value="@Letter(d)" style="background: var(--bg-panel-alt); color: var(--text-primary);">@d.DisplayName</option>
@@ -91,10 +91,12 @@
                 }
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <strong style="min-width: 80px;">Speed</strong>
-                    <select class="settings-input" @bind="speedChoice" style="font-size: 13px;">
-                        <option value="Fastest" style="background: var(--bg-panel-alt); color: var(--text-primary);">Fastest</option>
-                        <option value="Middle" style="background: var(--bg-panel-alt); color: var(--text-primary);">Middle</option>
-                        <option value="Slowest" style="background: var(--bg-panel-alt); color: var(--text-primary);">Slowest</option>
+                    <select class="settings-input" @bind="speedChoice" style="font-size: 13px;" disabled="@speedsLoading">
+                        <option value="Fastest" style="background: var(--bg-panel-alt); color: var(--text-primary);">@(speeds.Count > 0 ? $"Fastest ({speeds[0].Label})" : "Fastest")</option>
+                        @foreach (var sp in speeds.Skip(1))
+                        {
+                            <option value="@SpeedKey(sp.X)" style="background: var(--bg-panel-alt); color: var(--text-primary);">@sp.Label</option>
+                        }
                     </select>
                     <span style="font-size: 12px; color: var(--text-secondary);">@SpeedHelp</span>
                 </div>
@@ -200,9 +202,51 @@
     // v4.0 week 6: write speed, picked for each disc from the speeds the
     // drive offers for it (discs differ, so not one fixed speed).
     private string speedChoice = "Fastest";
-    private string SpeedHelp => speedChoice == "Fastest"
-        ? "The fastest the drive offers for each disc."
-        : "Picked for each disc from the speeds the drive offers for it. A disc with only one speed uses that.";
+    // Beta 4: the speeds the drive offers for the blank in it now, so the
+    // list shows real speeds (16x, 12x, 8x...) instead of fastest / middle /
+    // slowest. Each disc in the queue gets the chosen speed, or the nearest
+    // slower one it offers (discs differ).
+    private List<BurnEngine.WriteSpeed> speeds = new();
+    private bool speedsLoading;
+    private string speedsKey = "", speedsFor = "";
+    private static string SpeedKey(double x) => x.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private string SpeedHelp => speedsLoading ? "Reading the blank disc's speeds…"
+        : speeds.Count == 0 ? (speedChoice == "Fastest" ? $"The fastest the drive offers for each disc. Put a blank disc in Drive {driveLetter}: to choose a speed." : "")
+        : speedChoice == "Fastest" ? $"The fastest the drive offers for each disc (the {speedsFor} in it now: {speeds[0].Label})."
+        : $"Speeds the drive offers for the {speedsFor} in it now. Each disc gets this speed, or the nearest slower one it offers.";
+
+    // The chosen drive's blank changed (or another drive was chosen): read its speeds.
+    private void CheckSpeeds()
+    {
+        if (running) return;
+        var d = Drives.FirstOrDefault(x => Letter(x) == driveLetter);
+        string key = d is null ? "" : $"{driveLetter}|{d.Media.State}|{d.Media.Type}|{d.Media.FreeSectors}|{d.Busy}";
+        if (key == speedsKey) return;
+        speedsKey = key;
+        if (d is null || d.Busy || !d.Media.CanBurnNow)
+        {
+            speeds = new();
+            if (speedChoice != "Fastest" && d?.Busy != true) speedChoice = "Fastest";
+            return;
+        }
+        _ = LoadSpeeds(driveLetter, d.Media.TypeName);
+    }
+
+    private async Task LoadSpeeds(string letter, string mediaName)
+    {
+        speedsLoading = true;
+        StateHasChanged();
+        List<BurnEngine.WriteSpeed> found;
+        try { found = await Task.Run(() => BurnEngine.QueryWriteSpeeds(letter)); }
+        catch { found = new(); }
+        speedsLoading = false;
+        if (letter != driveLetter || disposed) return;
+        speeds = found;
+        speedsFor = mediaName;
+        // Keep the choice if this disc offers it too.
+        if (speedChoice != "Fastest" && !speeds.Skip(1).Any(sp => SpeedKey(sp.X) == speedChoice)) speedChoice = "Fastest";
+        StateHasChanged();
+    }
 
     private bool running, stopAfterCurrent, disposed;
     private CancellationTokenSource? cts;
@@ -267,6 +311,7 @@
         // Keep the chosen drive; pick the first one if none is chosen yet.
         if ((string.IsNullOrEmpty(driveLetter) || !Drives.Any(d => Letter(d) == driveLetter)) && Drives.Count > 0 && !running)
             driveLetter = Letter(Drives[0]);
+        CheckSpeeds();
     }
 
     // A program picked here is remembered (the same setting as the bays' burn screen).
@@ -474,7 +519,10 @@
 
                 // This disc's speed (0 = fastest).
                 double speedX = speedPick == "Fastest" ? 0 : await Task.Run(() => BurnEngine.PickSpeed(letter, speedPick));
-                if (speedX > 0) LogService.Write($"{letter}:", $"Burn queue: {speedPick.ToLowerInvariant()} speed for this {blank.MediaType} is {BurnEngine.SpeedText(speedX)}");
+                if (speedPick != "Fastest")
+                    LogService.Write($"{letter}:", speedX > 0
+                        ? $"Burn queue: {speedPick}x asked; this {blank.MediaType} is burned at {BurnEngine.SpeedText(speedX)}"
+                        : $"Burn queue: {speedPick}x asked; this {blank.MediaType} is burned at its fastest (it offers nothing slower that fits, or only one speed)");
 
                 // 2. Burn (and verify).
                 phaseIndex = 0;

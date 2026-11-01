@@ -243,6 +243,11 @@ namespace ArchivSector_OD.Burning
                 RestoreDriveSpeed(drive, profile, speedX);
                 log?.Invoke($"BIN/CUE: {img.BurnSectors:N0} sectors written{(img.Sessions > 1 ? $" in {img.Sessions} sessions" : "")}{(r.CdTextWritten ? " with CD-Text" : "")} and the {discName} closed in {r.BurnTime:hh\\:mm\\:ss}");
 
+                // Beta 4: the tray is cycled before the checks (like ImgBurn),
+                // so the CD-Text and the sectors are read fresh.
+                if (verify && !ct.IsCancellationRequested && !CycleTray(drive, progress, ct, log, "BIN/CUE"))
+                    verify = false;
+
                 // CD-Text: read it back and compare with what was meant.
                 if (r.CdTextWritten && img.CdText is not null)
                 {

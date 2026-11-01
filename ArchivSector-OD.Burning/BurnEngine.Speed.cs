@@ -74,14 +74,21 @@ namespace ArchivSector_OD.Burning
         }
 
         /// <summary>
-        /// For the burn queue: "Fastest" (0), "Middle" or "Slowest" of the
-        /// speeds offered for the disc in the drive. 0 = fastest.
+        /// For the burn queue: "Fastest" (0), a speed in x ("8": that one,
+        /// or the nearest slower one this disc offers, or its slowest if all
+        /// are faster; beta 4), or "Middle" / "Slowest" of the speeds offered
+        /// for the disc in the drive. 0 = fastest.
         /// </summary>
         public static double PickSpeed(string driveLetter, string choice)
         {
             if (string.Equals(choice, "Fastest", StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(choice)) return 0;
             var speeds = QueryWriteSpeeds(driveLetter);
             if (speeds.Count <= 1) return 0;   // only one speed: it's also the fastest
+            if (double.TryParse(choice, NumberStyles.Float, CultureInfo.InvariantCulture, out var want) && want > 0)
+            {
+                var pick = speeds.Where(sp => sp.X <= want + 0.05).Select(sp => sp.X).DefaultIfEmpty(speeds[^1].X).Max();
+                return pick >= speeds[0].X - 0.05 ? 0 : pick;   // the fastest anyway: let the drive go flat out
+            }
             return string.Equals(choice, "Slowest", StringComparison.OrdinalIgnoreCase)
                 ? speeds[^1].X
                 : speeds[speeds.Count / 2].X;
