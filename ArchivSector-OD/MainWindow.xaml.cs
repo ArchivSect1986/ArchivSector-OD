@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Windows;
 using Microsoft.AspNetCore.Components.WebView.Wpf;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Web.WebView2.Core;
 
 namespace ArchivSector_OD
 {
@@ -64,11 +66,35 @@ namespace ArchivSector_OD
                         CrashWatch.ScreenProcessFailed(f.ProcessFailedKind.ToString(), f.Reason.ToString(), f.ExitCode, f.ProcessDescription);
                 }
                 catch { }
+                // v4.0 beta 4: files dropped from Explorer onto a drop zone
+                // (index.html sends them with postMessageWithAdditionalObjects).
+                try { e.WebView.CoreWebView2.WebMessageReceived += OnWebMessage; }
+                catch { }
             };
 #if DEBUG
             services.AddBlazorWebViewDeveloperTools();
 #endif
             blazorWebView.Services = services.BuildServiceProvider();
+        }
+
+        // "archivsector-drop:<zone>" with the dropped files attached: their
+        // paths go to the panel that owns the zone (FileDrop). Every other
+        // message is Blazor's own and is left alone.
+        private static void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            const string Prefix = "archivsector-drop:";
+            string? msg;
+            try { msg = e.TryGetWebMessageAsString(); } catch { return; }
+            if (msg is null || !msg.StartsWith(Prefix, StringComparison.Ordinal)) return;
+            var paths = new List<string>();
+            try
+            {
+                if (e.AdditionalObjects is not null)
+                    foreach (var o in e.AdditionalObjects)
+                        if (o is CoreWebView2File f && !string.IsNullOrEmpty(f.Path)) paths.Add(f.Path);
+            }
+            catch { return; }
+            FileDrop.Raise(msg.Substring(Prefix.Length), paths);
         }
 
         // Each theme's page background (--bg-root in app.css), for the moment

@@ -12,9 +12,11 @@
     disc health check on the fresh disc, then ejects it and asks for the
     next blank. The drive is marked busy for the whole queue, so the drive
     bays and the Burn tab's scan leave it alone.
+    Beta 4: ISOs and .cue files (or folders of them) can be dropped onto
+    the queue from Explorer (FileDrop).
 *@
 
-<div class="bay-card">
+<div class="bay-card" data-file-drop="@(running ? null : "burn-queue")">
     <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
         <h2 style="margin: 0;">📚 Burn queue</h2>
         <div style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -25,11 +27,15 @@
             }
         </div>
     </div>
-    <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs (or BIN/CUE CD images) one after another. After each disc it's ejected, and the next one starts when you put in a blank.</p>
+    <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs (or BIN/CUE CD images) one after another. After each disc it's ejected, and the next one starts when you put in a blank. You can also drag them here from File Explorer.</p>
+    @if (dropNote is not null)
+    {
+        <p style="margin: 0 0 8px; font-size: 12px; color: var(--amber);">⚠ @dropNote</p>
+    }
 
     @if (items.Count == 0)
     {
-        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add ISOs to start a queue.</p>
+        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add ISOs, or drop them here, to start a queue.</p>
     }
     else
     {
@@ -186,6 +192,7 @@
     }
 
     private readonly List<QueueItem> items = new();
+    private string? dropNote;   // what a drop left out (beta 4)
     private string driveLetter = "";
     private string? imgBurnPath;
     private bool useImgBurn, verify = true, healthCheck, deleteIso, settingsLoaded;
@@ -286,6 +293,55 @@
             items.Add(MakeItem(full));
         }
         summary = null;
+        dropNote = null;
+    }
+
+    protected override void OnInitialized() => FileDrop.Dropped += OnFilesDropped;
+
+    // Files dropped from Explorer (beta 4): ISOs and .cue files are added in
+    // the order dropped; a folder adds the ISOs and .cue files inside it
+    // (not its subfolders). Anything else is left out and said so.
+    private void OnFilesDropped(string target, IReadOnlyList<string> paths)
+    {
+        if (target != "burn-queue") return;
+        _ = InvokeAsync(() => AddDropped(paths));
+    }
+
+    private static bool IsImageFile(string p) =>
+        p.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+
+    private void AddDropped(IReadOnlyList<string> paths)
+    {
+        if (running || disposed) return;
+        var files = new List<string>();
+        var skipped = new List<string>();
+        foreach (var p in paths)
+        {
+            try
+            {
+                if (Directory.Exists(p))
+                {
+                    var inside = Directory.EnumerateFiles(p).Where(IsImageFile).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+                    if (inside.Count == 0) skipped.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(p)) + " (no ISOs or .cue files in it)");
+                    files.AddRange(inside);
+                }
+                else if (File.Exists(p) && IsImageFile(p)) files.Add(p);
+                else skipped.Add(Path.GetFileName(p));
+            }
+            catch { skipped.Add(Path.GetFileName(p)); }
+        }
+        int added = 0;
+        foreach (var f in files)
+        {
+            var full = Path.GetFullPath(f);
+            if (items.Any(i => string.Equals(i.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
+            items.Add(MakeItem(full));
+            added++;
+        }
+        if (added > 0) summary = null;
+        dropNote = skipped.Count == 0 ? null
+            : "Only ISOs and .cue files can be queued, so this was left out: " + string.Join(", ", skipped.Take(5)) + (skipped.Count > 5 ? $" and {skipped.Count - 5} more" : "") + ".";
+        StateHasChanged();
     }
 
     /// <summary>Adds one ISO to the list (from Build mode). Ignored if it's already there.</summary>
@@ -306,7 +362,7 @@
         items.Insert(i - 1, it);
     }
 
-    private void ClearList() { items.Clear(); summary = null; }
+    private void ClearList() { items.Clear(); summary = null; dropNote = null; }
 
     private void ResetList()
     {
@@ -511,5 +567,9 @@
     }
 
     // Leaving the tab never stops a running queue; it carries on.
-    public void Dispose() => disposed = true;
+    public void Dispose()
+    {
+        disposed = true;
+        FileDrop.Dropped -= OnFilesDropped;
+    }
 }

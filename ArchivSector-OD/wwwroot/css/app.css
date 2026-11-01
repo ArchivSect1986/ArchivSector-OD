@@ -1253,3 +1253,9 @@ body {
 #blazor-error-ui {
     display: none;
 }
+
+/* v4.0 beta 4: files dragged from Explorer over a drop zone (index.html). */
+.file-drop-over {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+}
