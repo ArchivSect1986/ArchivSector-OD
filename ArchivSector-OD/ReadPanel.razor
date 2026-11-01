@@ -13,6 +13,8 @@
     a mode 2 data track (PS1 games, Video CDs), which an ISO can't hold, is
     saved as .bin + .cue instead, with the reader Copy disc uses
     (CdImageReader), CD-Text and sessions included.
+    Secure read (beta 4): the CD is read twice and compared, and sectors
+    that differ are read again until one version wins (CdImageReader).
     AccurateRip (beta 4): a music CD's BIN/CUE just read can be handed to
     AccurateRip mode (CheckWithAccurateRip) to compare it with other
     people's rips of the same CD.
@@ -68,6 +70,10 @@
             @if (asCue)
             {
                 <span style="font-size: 12px; color: var(--text-secondary); margin-left: 100px;">Saved as .bin + .cue: every sector raw (2352 bytes), with the track gaps@(toc?.CdText is not null ? ", CD-Text" : "")@(toc?.Sessions > 1 ? " and both sessions" : ""). A sector that won't read after a few tries becomes zeros and is counted.</span>
+                <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                    <input type="checkbox" @bind="secureRead" style="margin-top: 3px;" />
+                    <span><strong>Secure read (slower)</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the CD twice and compares. Any sector that comes back different is read again until one version clearly wins, like EAC's secure mode. Takes about twice as long; worth it for a worn or scratched music CD.</span></span>
+                </label>
             }
             else
             {
@@ -139,6 +145,7 @@
     private DiscReader.DiscInfo? disc;
     private CdImageReader.Toc? toc;            // a CD with music tracks: read to BIN/CUE
     private bool asCue, resultIsCue;
+    private bool secureRead;   // beta 4: read twice and compare (BIN/CUE only)
     private int readSectorBytes = DiscReader.SectorSize;
     private bool checking, busyDrive;
     private string? outputPath;
@@ -402,7 +409,7 @@
             };
             if (!disposed) InvokeAsync(StateHasChanged);
         });
-        var cr = await CdImageReader.ReadToBinCueAsync(letter, folder, name, cdReporter, ct, line => LogService.Write($"{letter}:", line));
+        var cr = await CdImageReader.ReadToBinCueAsync(letter, folder, name, cdReporter, ct, line => LogService.Write($"{letter}:", line), secureRead);
         if (!cr.Ok)
         {
             // Nothing half-read is left behind.
@@ -416,11 +423,13 @@
             Cancelled = cr.Cancelled,
             IsoPath = cr.Ok ? cr.CuePath ?? cuePath : null,
             Bytes = bytes,
-            BadSectors = cr.BadSectors,
+            BadSectors = cr.BadSectors + cr.SecureUncertain,   // uncertain sectors show the result in amber too
             Time = cr.Time,
             AverageBytesPerSec = cr.Time.TotalSeconds > 0 ? bytes / cr.Time.TotalSeconds : 0,
             Message = cr.Cancelled ? "Cancelled. The unfinished BIN/CUE was removed."
                 : !cr.Ok ? cr.Message
+                : cr.Secure && cr.SecureUncertain > 0 ? $"Read the CD to BIN/CUE (secure), but {cr.SecureUncertain:N0} sector(s) read differently every time and are uncertain (the log lists them). {cr.SecureDiffered - cr.SecureUncertain:N0} other(s) were settled by re-reading."
+                : cr.Secure && cr.BadSectors == 0 ? $"Read the CD to BIN/CUE (secure): every sector read cleanly" + (cr.SecureDiffered > 0 ? $"; {cr.SecureDiffered:N0} that read differently the second time were settled by re-reading." : ", the same both times.")
                 : cr.BadSectors == 0 ? $"Read the CD to BIN/CUE: every sector read cleanly ({t.Tracks.Count} track{(t.Tracks.Count == 1 ? "" : "s")}{(t.CdText is not null ? ", with CD-Text" : "")})."
                 : $"Read the CD to BIN/CUE, but {cr.BadSectors:N0} sector(s) couldn't be read and were saved as zeros.",
         };
