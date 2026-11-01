@@ -1,4 +1,4 @@
-@using System.IO
+﻿@using System.IO
 @using System.Windows
 @using ArchivSector_OD.Burning
 @implements IDisposable
@@ -133,7 +133,7 @@
         {
             <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;">
                 <button class="bay-btn game" style="width: auto; padding: 0 18px;" @onclick="Start" disabled="@(Todo == 0 || string.IsNullOrEmpty(driveLetter))">
-                    🔥 Burn @(Todo == 1 ? "1 ISO" : Todo + " ISOs")
+                    🔥 Burn @(HowMany(Todo, items.Any(i => i.State == ItemState.Waiting && i.IsCue)))
                 </button>
                 @if (items.Any(i => i.State != ItemState.Waiting))
                 {
@@ -210,6 +210,8 @@
     private string SummaryIcon => summaryOk ? "✅" : summaryStopped ? "⏸" : "⚠";
 
     private int Todo => items.Count(i => i.State == ItemState.Waiting);
+    // "2 ISOs", or "2 images" once a BIN/CUE is among them (beta 4).
+    private static string HowMany(int n, bool anyCue) => anyCue ? (n == 1 ? "1 image" : $"{n} images") : (n == 1 ? "1 ISO" : $"{n} ISOs");
 
     // Each disc counts its own steps (burn, verify, health check), so the
     // overall bar only moves forward as a disc goes from one step to the next.
@@ -346,7 +348,7 @@
         // The whole queue owns the drive: the bays and the Burn tab's scan leave it alone.
         RipActivity.Set(letter, "queue", true);
         string speedPick = speedChoice;
-        LogService.Write($"{letter}:", $"Burn queue started: {total} ISO(s), {engineName}, speed {speedPick.ToLowerInvariant()}, verify {(doVerify ? "on" : "off")}, health check {(doHealth ? "on" : "off")}");
+        LogService.Write($"{letter}:", $"Burn queue started: {HowMany(total, todo.Any(i => i.IsCue))}, {engineName}, speed {speedPick.ToLowerInvariant()}, verify {(doVerify ? "on" : "off")}, health check {(doHealth ? "on" : "off")}");
         int ok = 0, failed = 0, skipped = 0;
         bool userStopped = false;
 
