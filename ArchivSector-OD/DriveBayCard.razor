@@ -113,6 +113,12 @@
         </p>
     }
 
+    @* v4.0 beta 4: a music CD's CD-Text, album and artist. *@
+    @if (MediaPresent && cdTextLine is not null)
+    {
+        <p class="bay-meta" style="margin-top: -6px;">💿 @cdTextLine</p>
+    }
+
     @if (!string.IsNullOrEmpty(BlankMediaType) && blankDiscLine is not null)
     {
         <p class="bay-meta" style="margin-top: -6px;">@blankDiscLine</p>
@@ -612,6 +618,7 @@
     // the name; during a dump, an edit is applied when it finishes;
     // after, the Rename button renames the finished folder and files.
     private string gameNameDraft = "";
+    private string? cdTextLine;   // v4.0 beta 4: "Album — Artist" from a music CD's CD-Text
     private string? gameNameNote = null;
     private string? lastTitleId = null;   // v3.4: an Xbox 360 dump that couldn't be named automatically
     private string? lastGameFolder = null; // folder of the last finished game dump
@@ -771,6 +778,39 @@
     {
         healthRunning = busy;
         if (busy) BatchSyncService.RemoveQueued(DriveLetter);
+    }
+
+    // v4.0 beta 4: a music CD's CD-Text (read straight from the drive)
+    // shows on the card, and "Artist - Album" goes in the name box for the
+    // rip unless a name was already typed there.
+    private async Task ReadCdTextAsync()
+    {
+        var letter = DriveLetter;
+        ArchivSector_OD.Burning.CdText? text = null;
+        try
+        {
+            text = await Task.Run(() =>
+            {
+                if (ArchivSector_OD.Burning.BurnEngine.IsBusy(letter) || RipActivity.IsDriveBusy(letter)) return null;
+                using var drive = ArchivSector_OD.Burning.ScsiDrive.Open(letter, out _);
+                return drive is null ? null : ArchivSector_OD.Burning.CdText.Read(drive);
+            });
+        }
+        catch { text = null; }
+        if (text is null || !MediaPresent || Category != DiscCategory.Audio || letter != DriveLetter) return;
+
+        string album = text.Get("TITLE", 0), artist = text.Get("PERFORMER", 0);
+        cdTextLine = album.Length > 0 && artist.Length > 0 ? $"{album} — {artist}"
+                   : album.Length > 0 ? album : artist.Length > 0 ? artist : null;
+        if (cdTextLine is null) return;
+        string suggestion = album.Length > 0 && artist.Length > 0 ? $"{artist} - {album}" : album;
+        if (suggestion.Length > 0 && string.IsNullOrWhiteSpace(gameNameDraft))
+        {
+            gameNameDraft = FileNamingService.SanitizeFilename(suggestion);
+            AddLog($"CD-Text: {cdTextLine} -- suggested name \"{gameNameDraft}\"");
+        }
+        else AddLog($"CD-Text: {cdTextLine}");
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task TryAutoStart()
@@ -2522,6 +2562,7 @@
             lastTitleId = null;
             logGameSystem = null;
             logAudioCd = false;
+            cdTextLine = null;
             gameNameDraft = "";
             gameNameNote = null;
             lastGameFolder = null;
@@ -2543,6 +2584,9 @@
 
                 _ = TryAutoStart();
             }
+
+            // A music CD: its CD-Text names it (album and artist), when it has any.
+            if (Category == DiscCategory.Audio) _ = ReadCdTextAsync();
         }
         previousMediaPresent = MediaPresent;
     }
