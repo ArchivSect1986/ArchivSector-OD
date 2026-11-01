@@ -143,6 +143,15 @@ namespace ArchivSector_OD.Burning
             drive.Command(new byte[] { 0xBB, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
         }
 
+        // CD reading slowed to "x" (beta 4): for reading sectors that came
+        // back wrong at full speed once more, slowly. SET CD SPEED, read
+        // speed in KB/s (1x = 176.4), write speed left as it is.
+        internal static void SlowReadSpeed(ScsiDrive drive, double x)
+        {
+            int kbs = (int)Math.Round(x * 176.4);
+            drive.Command(new byte[] { 0xBB, 0, (byte)(kbs >> 8), (byte)kbs, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0 }, 10);
+        }
+
         // Windows' engine: IMAPI2 counts in sectors per second.
         private static void SetImapiWriteSpeed(dynamic fmt, double speedX)
         {

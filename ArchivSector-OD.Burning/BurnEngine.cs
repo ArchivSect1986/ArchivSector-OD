@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -52,6 +52,7 @@ namespace ArchivSector_OD.Burning
             public bool Cancelled;
             public bool? Verified;          // null = not verified
             public long MismatchedSectors;
+            public List<long> BadSectorLbas = new();   // BIN/CUE verify: which sectors (beta 4)
             public bool VerifiedByImgBurn;   // ImgBurn did the check (its "Exact Match")
             public bool IsoDeleted;          // the ISO went to the Recycle Bin afterwards
             public string Message = "";

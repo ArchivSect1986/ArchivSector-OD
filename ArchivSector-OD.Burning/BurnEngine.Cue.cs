@@ -448,6 +448,54 @@ namespace ArchivSector_OD.Burning
                 });
             }
 
+            // A sector that doesn't read or doesn't match in the big read is
+            // read again on its own, a few times, before it counts (beta 4: a
+            // PS1 burn reported 1 bad sector that read fine afterwards). Then
+            // a few more times with the drive slowed to 8x: mode 2 form 2
+            // sectors (Video CD video, XA audio) have no error correction of
+            // their own, so a fast read near the edge of a CD-RW can come
+            // back slightly wrong where a slow one doesn't. Before each try,
+            // sectors far away are read, so the drive reads the disc again
+            // instead of handing back the same wrong copy from its memory
+            // (as EAC does).
+            var badLbas = new List<long>();
+            int secondTry = 0, slowTry = 0;
+            bool slowed = false;
+            byte[] one = new byte[2352];
+            const int FlushSectors = 26;
+            var flush = new byte[FlushSectors * 2352];
+            long discEnd = img.LeadOutLba;
+            void FlushCache(long at)
+            {
+                long away = at >= 30_000 ? at - 30_000 : Math.Min(at + 30_000, Math.Max(0, discEnd - FlushSectors));
+                var cf = new byte[] { 0xBE, 0x00, (byte)(away >> 24), (byte)(away >> 16), (byte)(away >> 8), (byte)away, 0, 0, (byte)FlushSectors, 0xF8, 0, 0 };
+                RetryWhileBusy(() => drive.Read(cf, flush, 30), 20, 50);
+            }
+            void Bad(long at) { bad++; badLbas.Add(at); }
+            bool TryRead(long at, byte type, byte flags, Func<byte[], bool> match, int times)
+            {
+                for (int t = 0; t < times; t++)
+                {
+                    FlushCache(at);
+                    var c1 = new byte[] { 0xBE, type, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, 0, 1, flags, 0, 0 };
+                    var r1 = RetryWhileBusy(() => drive.Read(c1, one, 30), 20, 50);
+                    if (r1.Ok && match(one)) return true;
+                }
+                return false;
+            }
+            bool Reread(long at, byte type, byte flags, Func<byte[], bool> match)
+            {
+                if (TryRead(at, type, flags, match, 3)) { secondTry++; return true; }
+                if (!slowed)
+                {
+                    slowed = true;
+                    SlowReadSpeed(drive, 8);
+                    log?.Invoke("BIN/CUE: reading the sectors that don't match again at 8x");
+                }
+                if (TryRead(at, type, flags, match, 3)) { slowTry++; return true; }
+                return false;
+            }
+
             // ---- data tracks: exact ----
             const int N = 26;
             var disc = new byte[N * 2352];
@@ -458,7 +506,7 @@ namespace ArchivSector_OD.Burning
                 fs.Position = piece.FileOffset;
                 for (long i = 0; i < piece.Count;)
                 {
-                    if (ct.IsCancellationRequested) { r.Cancelled = true; r.Verified = null; return ""; }
+                    if (ct.IsCancellationRequested) { if (slowed) FullDriveSpeed(drive); r.Cancelled = true; r.Verified = null; return ""; }
                     int n = (int)Math.Min(N, piece.Count - i);
                     long lba = piece.StartLba + i;
                     ReadFully(fs, file, n * piece.FileSectorSize);
@@ -467,7 +515,7 @@ namespace ArchivSector_OD.Burning
                     var rep = RetryWhileBusy(() => drive.Read(cdb, target, 60), 100, 50);
                     for (int s = 0; s < n; s++)
                     {
-                        if (!rep.Ok) { bad++; continue; }
+                        if (ct.IsCancellationRequested) break;
                         int d = s * 2352, f = s * piece.FileSectorSize;
                         int fileData = piece.Mode is CueImage.TrackMode.Mode1Raw or CueImage.TrackMode.Mode2Raw ? f + 16 : f;   // where the stored part starts in the file
                         int len = piece.Mode switch
@@ -475,7 +523,9 @@ namespace ArchivSector_OD.Burning
                             CueImage.TrackMode.Mode1Raw or CueImage.TrackMode.Mode1Cooked => 2048,
                             _ => (file[fileData + 2] & 0x20) != 0 ? 2332 : 2056,    // mode 2: form 2 (sub-header + 2324) or form 1 (sub-header + 2048)
                         };
-                        if (!target.AsSpan(d + 16, len).SequenceEqual(file.AsSpan(fileData, len))) bad++;
+                        if (rep.Ok && target.AsSpan(d + 16, len).SequenceEqual(file.AsSpan(fileData, len))) continue;
+                        long at = lba + s;
+                        if (!Reread(at, 0x00, 0xF8, x => x.AsSpan(16, len).SequenceEqual(file.AsSpan(fileData, len)))) Bad(at);
                     }
                     i += n;
                     done += n;
@@ -509,7 +559,7 @@ namespace ArchivSector_OD.Burning
                         // with the shift, part of them comes from outside it.
                         for (long i = 0; i < piece.Count;)
                         {
-                            if (ct.IsCancellationRequested) { r.Cancelled = true; r.Verified = null; return ""; }
+                            if (ct.IsCancellationRequested) { if (slowed) FullDriveSpeed(drive); r.Cancelled = true; r.Verified = null; return ""; }
                             int n = (int)Math.Min(N, piece.Count - i);
                             long lba = piece.StartLba + i;
                             var cdb = new byte[] { 0xBE, 0x04, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0x10, 0, 0 };
@@ -519,9 +569,9 @@ namespace ArchivSector_OD.Burning
                             {
                                 long at = lba + s;
                                 if (at <= piece.StartLba || at >= piece.StartLba + piece.Count - 1) continue;
-                                if (!rep.Ok) { bad++; continue; }
                                 if (!ExpectedAudio(img, at * 2352 - shift.Value, expected, open)) continue;
-                                if (!target.AsSpan(s * 2352, 2352).SequenceEqual(expected)) bad++;
+                                if (rep.Ok && target.AsSpan(s * 2352, 2352).SequenceEqual(expected)) continue;
+                                if (!Reread(at, 0x04, 0x10, x => x.AsSpan().SequenceEqual(expected))) Bad(at);
                             }
                             i += n;
                             done += n;
@@ -535,9 +585,31 @@ namespace ArchivSector_OD.Burning
             }
 
             r.MismatchedSectors = bad;
+            r.BadSectorLbas = badLbas;
             r.Verified = bad == 0;
+            if (slowed) FullDriveSpeed(drive);
+            if (secondTry > 0) log?.Invoke($"BIN/CUE: {secondTry:N0} sector(s) matched when read again on their own");
+            if (slowTry > 0) log?.Invoke($"BIN/CUE: {slowTry:N0} sector(s) matched when read again at 8x");
             log?.Invoke(bad == 0 ? $"BIN/CUE: verified ({clock.Elapsed:hh\\:mm\\:ss}){audioNote}" : $"BIN/CUE: VERIFY FAILED, {bad:N0} sector(s) differ or couldn't be read");
+            if (badLbas.Count > 0)
+            {
+                var ranges = ToRanges(badLbas);
+                log?.Invoke("BIN/CUE: problem sectors at " + string.Join(", ", ranges.Take(20).Select(b => b.Count == 1 ? $"{b.Lba:N0}" : $"{b.Lba:N0}-{b.Lba + b.Count - 1:N0}"))
+                            + (ranges.Count > 20 ? $" and {ranges.Count - 20} more ranges" : ""));
+            }
             return audioNote;
+        }
+
+        // Sector numbers in order → runs (first sector, how many).
+        internal static List<(long Lba, long Count)> ToRanges(IEnumerable<long> lbas)
+        {
+            var list = new List<(long Lba, long Count)>();
+            foreach (var l in lbas.OrderBy(x => x))
+            {
+                if (list.Count > 0 && list[^1].Lba + list[^1].Count == l) list[^1] = (list[^1].Lba, list[^1].Count + 1);
+                else if (list.Count == 0 || list[^1].Lba + list[^1].Count <= l) list.Add((l, 1));
+            }
+            return list;
         }
 
         // How many bytes the disc's music is shifted by compared with the

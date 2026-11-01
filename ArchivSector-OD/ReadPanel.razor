@@ -9,15 +9,16 @@
     (DiscReader). Movie discs are pointed to their drive bay instead. The
     drive is marked busy while it reads, so the bays and the Burn tab leave
     it alone.
-    Beta 4: a CD with music tracks (music, mixed-mode and Enhanced CDs),
-    which an ISO can't hold, is saved as .bin + .cue instead, with the
-    reader Copy disc uses (CdImageReader), CD-Text and sessions included.
+    Beta 4: a CD with music tracks (music, mixed-mode and Enhanced CDs) or
+    a mode 2 data track (PS1 games, Video CDs), which an ISO can't hold, is
+    saved as .bin + .cue instead, with the reader Copy disc uses
+    (CdImageReader), CD-Text and sessions included.
 *@
 
 <div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
     <div>
         <h2 style="margin: 0;">📀 Read a disc to an image</h2>
-        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Copy a data disc (backups, software, photos) to an ISO file, sector by sector. A CD with music tracks is saved as BIN/CUE.</p>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Copy a data disc (backups, software, photos) to an ISO file, sector by sector. A CD with music tracks, a PS1 game or a Video CD is saved as BIN/CUE.</p>
     </div>
 
     @if (state == State.Running)
@@ -174,7 +175,7 @@
             string title = toc?.CdText?.Get("TITLE", 0) ?? "", who = toc?.CdText?.Get("PERFORMER", 0) ?? "";
             if (title.Length > 0) return who.Length > 0 ? $"{who} - {title}" : title;
             var label = disc?.Label ?? "";
-            return label.Length > 0 && !label.Equals("Audio CD", StringComparison.OrdinalIgnoreCase) ? label : asCue ? "Music CD" : "disc";
+            return label.Length > 0 && !label.Equals("Audio CD", StringComparison.OrdinalIgnoreCase) ? label : asCue && toc?.HasAudio == true ? "Music CD" : "disc";
         }
     }
     private string DiscColor => disc?.Problem is not null || busyDrive ? "var(--amber)" : "var(--text-secondary)";
@@ -238,12 +239,12 @@
         StateHasChanged();
         // Asking a drive about its disc can take seconds while it spins up.
         var info = await Task.Run(() => DiscReader.DescribeDisc(letter));
-        // A CD: does it have music tracks? Then it's read to .bin + .cue.
+        // A CD: does it have music tracks or a mode 2 track? Then it's read to .bin + .cue.
         CdImageReader.Toc? t = null;
         if (info.IsAudioCd || info.Kind == "CD" || !info.Ready)
         {
             t = await Task.Run(() => CdImageReader.ReadToc(letter, out _));
-            if (t is not null && t.HasAudio)
+            if (t is not null && t.NeedsBinCue)
             {
                 info.Ready = true;
                 info.Problem = t.Sessions > 1 && !t.SessionLayoutKnown

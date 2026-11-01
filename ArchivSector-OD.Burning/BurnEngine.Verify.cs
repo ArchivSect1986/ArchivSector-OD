@@ -234,6 +234,7 @@ namespace ArchivSector_OD.Burning
             r.Cancelled = br.Cancelled || ct.IsCancellationRequested;
             r.Sectors = r.Cancelled ? 0 : sectors;
             r.Different = br.MismatchedSectors;
+            r.BadRanges = ToRanges(br.BadSectorLbas);
             r.AverageBytesPerSec = r.Time.TotalSeconds > 0 && r.Sectors > 0 ? r.Sectors * 2352.0 / r.Time.TotalSeconds : 0;
             r.Ok = !r.Cancelled && br.Verified == true;
             r.Message = r.Cancelled ? "Stopped before the end, so the disc wasn't fully checked."

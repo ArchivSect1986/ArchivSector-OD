@@ -14,6 +14,9 @@ namespace ArchivSector_OD.Burning
     // the next lead-in between them can't be read and aren't needed), and
     // the .cue marks the sessions the way ImgBurn does (REM SESSION,
     // REM LEAD-OUT, REM LEAD-IN, REM PREGAP), so ImgBurn can burn the copy.
+    // Mode 2 data CDs (v4.0 beta 4): PS1 games, Video CDs and other CD-ROM XA
+    // discs keep form 2 sectors (video, XA audio) that an ISO's 2048-byte
+    // sectors can't hold, so they're read here too, even without music.
     public static class CdImageReader
     {
         public sealed class TocTrack
@@ -45,15 +48,19 @@ namespace ArchivSector_OD.Burning
             public long SectorsToRead => Ranges.Sum(r => r.To - r.From);
             public bool HasAudio => Tracks.Any(t => !t.IsData);
             public bool HasData => Tracks.Any(t => t.IsData);
+            /// <summary>A mode 2 (CD-ROM XA) data track: PS1 games, Video CDs.</summary>
+            public bool HasMode2 => Tracks.Any(t => t.IsData && t.Mode == 2);
+            /// <summary>Music or mode 2: only a .bin + .cue holds every sector as it is.</summary>
+            public bool NeedsBinCue => HasAudio || HasMode2;
             public long Sectors => LeadOutLba;
             public string Summary
             {
                 get
                 {
                     int data = Tracks.Count(t => t.IsData), audio = Tracks.Count - data;
-                    var kind = data == 0 ? "Music CD" : audio == 0 ? "Data CD" : "CD with data and music";
+                    var kind = data == 0 ? "Music CD" : audio == 0 ? (HasMode2 ? "Mode 2 data CD (CD-ROM XA)" : "Data CD") : "CD with data and music";
                     var parts = new List<string>();
-                    if (data > 0) parts.Add($"{data} data track{(data == 1 ? "" : "s")}");
+                    if (data > 0) parts.Add($"{data} {(HasMode2 ? "mode 2 " : "")}data track{(data == 1 ? "" : "s")}");
                     if (audio > 0) parts.Add($"{audio} music track{(audio == 1 ? "" : "s")}");
                     long secs = (LeadOutLba + 150) / 75;
                     if (Sessions > 1) kind = data > 0 && audio > 0 ? "Enhanced CD (music + data session)" : $"CD with {Sessions} sessions";

@@ -143,7 +143,7 @@
 
     private bool CanStart => !checking && disc is not null && (disc.Ready || cdCopy) && disc.Problem is null && target.Length > 0 && SpaceProblem is null;
 
-    // A CD with music tracks (beta 2): copied as .bin + .cue instead of an ISO.
+    // A CD with music tracks (beta 2) or a mode 2 track (beta 4): copied as .bin + .cue instead of an ISO.
     private CdImageReader.Toc? toc;
     private bool cdCopy;
     private long ImageBytes => cdCopy && toc is not null ? toc.LeadOutLba * 2352L : disc?.Bytes ?? 0;
@@ -156,7 +156,8 @@
         : checking ? "Checking the disc…"
         : disc is null ? ""
         : disc.Problem is not null ? "⚠ " + disc.Problem
-        : cdCopy && toc is not null ? toc.Summary + (disc.Label.Length > 0 ? " · " + disc.Label : "") + CdTextLine + " (copied with its music tracks" + (toc.CdText is not null ? " and CD-Text" : "") + ")"
+        : cdCopy && toc is not null ? toc.Summary + (disc.Label.Length > 0 ? " · " + disc.Label : "") + CdTextLine
+            + (toc.HasAudio ? " (copied with its music tracks" + (toc.CdText is not null ? " and CD-Text" : "") + ")" : " (copied as BIN/CUE, every mode 2 sector in full)")
         : $"{disc.Kind} · {disc.Label} · {disc.FileSystem} · {DiscHealthService.FormatBytes(disc.Bytes)}";
     private string DiscColor => disc?.Problem is not null ? "var(--amber)" : "var(--text-secondary)";
     // CD-Text (beta 4): the album and artist, when the CD carries them.
@@ -260,14 +261,15 @@
         checking = true;
         StateHasChanged();
         var info = await Task.Run(() => DiscReader.DescribeDisc(letter));
-        // A CD: does it have music tracks? Then it's copied as .bin + .cue.
+        // A CD: does it have music tracks, or a mode 2 track (PS1 games,
+        // Video CDs; beta 4)? Then it's copied as .bin + .cue.
         toc = null;
         cdCopy = false;
         if (info.IsAudioCd || info.Kind == "CD" || !info.Ready)
         {
             string? tocProblem = null;
             var t = await Task.Run(() => CdImageReader.ReadToc(letter, out tocProblem));
-            if (t is not null && t.HasAudio)
+            if (t is not null && t.NeedsBinCue)
             {
                 toc = t;
                 cdCopy = true;
