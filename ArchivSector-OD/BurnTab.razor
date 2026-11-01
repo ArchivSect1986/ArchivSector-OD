@@ -36,6 +36,7 @@
     <nav class="app-nav" aria-label="Burn modes" style="justify-self: start;">
         <button class="nav-btn @(mode == "write" ? "active" : "")" @onclick='() => mode = "write"'>🔥 Write</button>
         <button class="nav-btn @(mode == "build" ? "active" : "")" @onclick='() => mode = "build"'>📦 Build ISO</button>
+        <button class="nav-btn @(mode == "music" ? "active" : "")" @onclick='() => mode = "music"'>🎵 Music CD</button>
         <button class="nav-btn @(mode == "read" ? "active" : "")" @onclick='() => mode = "read"'>📀 Read disc</button>
         <button class="nav-btn @(mode == "copy" ? "active" : "")" @onclick='() => mode = "copy"'>🔁 Copy disc</button>
         <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'>✔ Verify disc</button>
@@ -44,6 +45,10 @@
 
     <div style="display: @(mode == "build" ? "block" : "none");">
         <BuildPanel AddToQueue="@OnAddToQueue" />
+    </div>
+
+    <div style="display: @(mode == "music" ? "block" : "none");">
+        <MusicCdPanel AddToQueue="@OnMusicCdToQueue" />
     </div>
 
     <div style="display: @(mode == "read" ? "block" : "none");">
@@ -216,6 +221,12 @@
 
     // Build mode finished an ISO and wants it in the queue.
     private void OnAddToQueue(string isoPath) => queue?.AddIso(isoPath);
+    // Music CD mode (beta 4) made a .cue: into the queue, and show it there.
+    private void OnMusicCdToQueue(string cuePath)
+    {
+        queue?.AddIso(cuePath);
+        mode = "write";
+    }
     // Recorders the queue can use: writers, plus busy drives (a busy drive
     // isn't asked what it writes, and may be the one the queue is using).
     private IReadOnlyList<BurnerDrive> queueDrives = Array.Empty<BurnerDrive>();

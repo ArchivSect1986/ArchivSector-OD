@@ -1,0 +1,334 @@
+﻿@using System.IO
+@using System.Windows
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    Music CD mode (v4.0 beta 4): a music CD from WAV files. Add the .wav
+    files (or drop them here from File Explorer), put them in order, name
+    the album and the tracks, and the .cue for them goes to the burn queue
+    (Write mode), which burns it with CD-Text and verifies it like any
+    BIN/CUE. The names start from what a tagger saved in each .wav, or the
+    file name. The reading and the .cue are in the burning library
+    (MusicCd); nothing here uses a drive.
+*@
+
+<div class="bay-card" data-file-drop="music-cd" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+        <div>
+            <h2 style="margin: 0;">🎵 Make a music CD</h2>
+            <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Burn WAV files as a music CD that plays in any CD player, with the album and track names (CD-Text). Add them, or drag them here from File Explorer.</p>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <button class="shortcut-btn" @onclick="AddWavs">➕ Add WAVs…</button>
+            @if (tracks.Count > 0)
+            {
+                <button class="shortcut-btn" @onclick="ClearAll">Clear</button>
+            }
+        </div>
+    </div>
+
+    @if (refused.Count > 0)
+    {
+        <div style="display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--amber);">
+            @foreach (var line in refused)
+            {
+                <span>⚠ @line</span>
+            }
+        </div>
+    }
+
+    @if (tracks.Count == 0)
+    {
+        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add WAV files, or drop them (or a folder of them) here. They need to be CD audio: 44.1 kHz, 16-bit stereo.</p>
+    }
+    else
+    {
+        <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Album</strong>
+                <input type="text" value="@album" @onchange="e => album = e.Value?.ToString() ?? string.Empty" placeholder="Album title"
+                       style="flex: 1 1 220px; max-width: 360px; padding: 6px 8px; font-size: 13px;" />
+                <input type="text" value="@albumArtist" @onchange="OnAlbumArtistChanged" placeholder="Album artist"
+                       style="flex: 1 1 180px; max-width: 280px; padding: 6px 8px; font-size: 13px;" />
+            </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+            @foreach (var t in tracks)
+            {
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap;">
+                    <span style="width: 24px; text-align: right; color: var(--text-secondary);">@((tracks.IndexOf(t) + 1).ToString("D2"))</span>
+                    <input type="text" value="@t.Title" @onchange="e => t.Title = e.Value?.ToString() ?? string.Empty" placeholder="Track title" title="@t.Path"
+                           style="flex: 2 1 200px; min-width: 0; padding: 5px 8px; font-size: 13px;" />
+                    <input type="text" value="@t.Performer" @onchange="e => t.Performer = e.Value?.ToString() ?? string.Empty" placeholder="Artist"
+                           style="flex: 1 1 140px; min-width: 0; padding: 5px 8px; font-size: 13px;" />
+                    <span style="width: 44px; text-align: right; color: var(--text-secondary);">@Dur(t.Length)</span>
+                    <button class="shortcut-btn" @onclick="() => MoveUp(t)" disabled="@(tracks.IndexOf(t) == 0)" title="Play this one earlier">▲</button>
+                    <button class="shortcut-btn" @onclick="() => MoveDown(t)" disabled="@(tracks.IndexOf(t) == tracks.Count - 1)" title="Play this one later">▼</button>
+                    <button class="shortcut-btn" @onclick="() => Remove(t)" title="Take it off the CD (the file isn't touched)">✖</button>
+                </div>
+            }
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+            <label style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <strong style="min-width: 90px;">Between tracks</strong>
+                <select value="@GapChoice" @onchange="OnGapChanged" style="flex: 0 1 280px; font-size: 13px;">
+                    <option value="gap">2 seconds of silence (usual)</option>
+                    <option value="none">No gap (live albums, DJ mixes)</option>
+                </select>
+            </label>
+            <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                <input type="checkbox" @bind="cdText" style="margin-top: 3px;" />
+                <span><strong>Write the album and track names (CD-Text)</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Shown by players and car stereos that read CD-Text. The music plays the same either way.</span></span>
+            </label>
+            <span style="font-size: 13px; color: @TotalColor;">@TotalLine</span>
+        </div>
+
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="ToQueue" disabled="@(!CanMake)">🔥 Add to burn queue</button>
+            <button class="shortcut-btn" @onclick="SaveCue" disabled="@(!CanMake)" title="Keep the .cue to burn this CD again later, here or in ImgBurn">💾 Save .cue…</button>
+        </div>
+        @if (note is not null)
+        {
+            <span style="font-size: 12px; color: @(noteOk ? "var(--text-secondary)" : "var(--amber)");">@note</span>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>Hands the CD's .cue to the burn queue (and shows Write mode).</summary>
+    [Parameter] public EventCallback<string> AddToQueue { get; set; }
+
+    private sealed class Item
+    {
+        public string Path = "";
+        public string Title = "";
+        public string Performer = "";
+        public long Sectors;
+        public TimeSpan Length;
+    }
+
+    private readonly List<Item> tracks = new();
+    private readonly List<string> refused = new();
+    private string album = "", albumArtist = "";
+    private bool gaps = true, cdText = true, disposed;
+    private string? note;
+    private bool noteOk;
+    private static string? lastFolder;
+
+    private long DiscSectors => MusicCd.DiscSectors(tracks.Select(t => t.Sectors).ToList(), gaps);
+    private bool TooLong => DiscSectors > MusicCd.SectorsPer80Min;
+    private bool CanMake => tracks.Count > 0 && tracks.Count <= 99 && !TooLong;
+    private string TotalLine
+    {
+        get
+        {
+            var len = TimeSpan.FromSeconds(DiscSectors / 75.0);
+            string count = tracks.Count == 1 ? "1 track" : $"{tracks.Count} tracks";
+            return tracks.Count > 99 ? $"{count}: a CD can hold 99 at most."
+                : TooLong ? $"{count} · {Dur(len)}: too long for an 80-minute CD (79:57 at most). Take a track off."
+                : DiscSectors > MusicCd.SectorsPer74Min ? $"{count} · {Dur(len)} of 80:00 · needs an 80-minute CD (most CD-Rs are)"
+                : $"{count} · {Dur(len)} of 80:00";
+        }
+    }
+    private string TotalColor => CanMake ? "var(--text-secondary)" : "var(--amber)";
+
+    // "Between tracks": "gap" (2 seconds) or "none".
+    private string GapChoice => gaps ? "gap" : "none";
+    private void OnGapChanged(ChangeEventArgs e) => gaps = e.Value?.ToString() != "none";
+
+    private static string Dur(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}" : $"{(int)t.TotalMinutes}:{t.Seconds:D2}";
+
+    protected override void OnInitialized() => FileDrop.Dropped += OnFilesDropped;
+
+    private void AddWavs()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose the WAV files for the CD",
+            Filter = "WAV files (*.wav)|*.wav",
+            Multiselect = true,
+        };
+        if (lastFolder is not null && Directory.Exists(lastFolder)) dlg.InitialDirectory = lastFolder;
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        lastFolder = Path.GetDirectoryName(dlg.FileNames.FirstOrDefault() ?? "");
+        Add(dlg.FileNames.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(), new List<string>());
+    }
+
+    // Files dropped from Explorer: .wav files, or the .wav files in a dropped
+    // folder (not its subfolders), in file name order.
+    private void OnFilesDropped(string target, IReadOnlyList<string> paths)
+    {
+        if (target != "music-cd") return;
+        _ = InvokeAsync(() => AddDropped(paths));
+    }
+
+    private static bool IsWav(string p) => p.EndsWith(".wav", StringComparison.OrdinalIgnoreCase);
+
+    private void AddDropped(IReadOnlyList<string> paths)
+    {
+        if (disposed) return;
+        var files = new List<string>();
+        var skipped = new List<string>();
+        foreach (var p in paths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (Directory.Exists(p))
+                {
+                    var inside = Directory.EnumerateFiles(p).Where(IsWav).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+                    if (inside.Count == 0) skipped.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(p)) + ": no WAV files in it.");
+                    files.AddRange(inside);
+                }
+                else if (File.Exists(p) && IsWav(p)) files.Add(p);
+                else skipped.Add(Path.GetFileName(p) + ": only WAV files can go on a music CD.");
+            }
+            catch { skipped.Add(Path.GetFileName(p) + ": couldn't be opened."); }
+        }
+        Add(files, skipped);
+        StateHasChanged();
+    }
+
+    // Adds the files that are CD audio; the others are listed with why.
+    private void Add(List<string> files, List<string> skipped)
+    {
+        refused.Clear();
+        refused.AddRange(skipped);
+        bool firstOnes = tracks.Count == 0;
+        var added = new List<MusicCd.Wav>();
+        foreach (var f in files)
+        {
+            var full = Path.GetFullPath(f);
+            if (tracks.Any(t => string.Equals(t.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
+            var w = MusicCd.ReadWav(full);
+            if (w.Problem is not null) { refused.Add($"{Path.GetFileName(full)}: {w.Problem}"); continue; }
+            if (tracks.Count >= 99) { refused.Add($"{Path.GetFileName(full)}: a CD can hold 99 tracks at most."); continue; }
+            added.Add(w);
+            tracks.Add(new Item
+            {
+                Path = full,
+                Title = w.Title.Length > 0 ? w.Title : MusicCd.TitleFromFileName(full),
+                Performer = w.Artist,
+                Sectors = w.Sectors,
+                Length = w.Length,
+            });
+        }
+        // The album and its artist, from the first files' tags when they agree.
+        if (firstOnes && added.Count > 0)
+        {
+            var albums = added.Select(w => w.Album).Where(a => a.Length > 0).Distinct().ToList();
+            if (album.Length == 0 && albums.Count == 1) album = albums[0];
+            var artists = added.Select(w => w.Artist).Where(a => a.Length > 0).GroupBy(a => a).OrderByDescending(g => g.Count()).ToList();
+            if (albumArtist.Length == 0 && artists.Count > 0) albumArtist = artists[0].Key;
+        }
+        // A track with no artist of its own gets the album's.
+        foreach (var t in tracks.Where(t => t.Performer.Length == 0)) t.Performer = albumArtist;
+        note = null;
+    }
+
+    // A new album artist goes to the tracks that had the old one (or none).
+    private void OnAlbumArtistChanged(ChangeEventArgs e)
+    {
+        var old = albumArtist;
+        albumArtist = e.Value?.ToString() ?? string.Empty;
+        foreach (var t in tracks.Where(t => t.Performer.Length == 0 || t.Performer == old)) t.Performer = albumArtist;
+    }
+
+    private void MoveUp(Item t)
+    {
+        int i = tracks.IndexOf(t);
+        if (i > 0) { tracks.RemoveAt(i); tracks.Insert(i - 1, t); }
+    }
+
+    private void MoveDown(Item t)
+    {
+        int i = tracks.IndexOf(t);
+        if (i >= 0 && i < tracks.Count - 1) { tracks.RemoveAt(i); tracks.Insert(i + 1, t); }
+    }
+
+    private void Remove(Item t) { tracks.Remove(t); note = null; }
+
+    private void ClearAll()
+    {
+        tracks.Clear();
+        refused.Clear();
+        album = albumArtist = "";
+        note = null;
+    }
+
+    private List<MusicCd.Track> CueTracks() =>
+        tracks.Select(t => new MusicCd.Track { Path = t.Path, Title = t.Title, Performer = t.Performer }).ToList();
+
+    private string SuggestedName()
+    {
+        string n = album.Trim().Length > 0 ? (albumArtist.Trim().Length > 0 ? $"{albumArtist.Trim()} - {album.Trim()}" : album.Trim()) : "Music CD";
+        foreach (var c in Path.GetInvalidFileNameChars()) n = n.Replace(c, '_');
+        return n;
+    }
+
+    // Writes the .cue; false (with the note saying why) if it couldn't.
+    private bool Write(string cuePath)
+    {
+        try
+        {
+            // Every file still there and still CD audio?
+            foreach (var t in tracks)
+            {
+                var w = MusicCd.ReadWav(t.Path);
+                if (w.Problem is not null) { note = $"{Path.GetFileName(t.Path)}: {w.Problem}"; noteOk = false; return false; }
+            }
+            var folder = Path.GetDirectoryName(Path.GetFullPath(cuePath))!;
+            Directory.CreateDirectory(folder);
+            MusicCd.SaveCue(cuePath, MusicCd.BuildCue(album, albumArtist, CueTracks(), gaps, cdText, folder));
+            var check = CueImage.Load(cuePath);
+            if (check.Problem is not null) { note = "The .cue couldn't be made: " + check.Problem; noteOk = false; return false; }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            note = "The .cue couldn't be saved: " + ex.Message;
+            noteOk = false;
+            return false;
+        }
+    }
+
+    // The .cue goes in ArchivSector-OD's own folder (it lists the WAV files
+    // where they are), then to the burn queue.
+    private async Task ToQueue()
+    {
+        if (!CanMake) return;
+        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ArchivSector-OD", "Music CDs");
+        var cue = Path.Combine(folder, $"{SuggestedName()} {DateTime.Now:yyyyMMdd-HHmmss}.cue");
+        if (!Write(cue)) return;
+        LogService.Write("Music CD:", $"{tracks.Count} track(s), {Dur(TimeSpan.FromSeconds(DiscSectors / 75.0))}, {(gaps ? "2-second gaps" : "no gaps")}{(cdText ? ", CD-Text" : "")}: {cue}");
+        note = "Added to the burn queue. Keep the WAV files where they are until it's burned.";
+        noteOk = true;
+        await AddToQueue.InvokeAsync(cue);
+    }
+
+    private void SaveCue()
+    {
+        if (!CanMake) return;
+        var first = Path.GetDirectoryName(tracks[0].Path);
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Save the music CD's .cue",
+            Filter = "Cue sheet (*.cue)|*.cue",
+            FileName = SuggestedName() + ".cue",
+            InitialDirectory = first,
+            OverwritePrompt = true,
+        };
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        if (!Write(dlg.FileName)) return;
+        note = $"Saved {Path.GetFileName(dlg.FileName)}. It lists the WAV files where they are now, so keep them together; it burns here (Write mode) or in ImgBurn.";
+        noteOk = true;
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        FileDrop.Dropped -= OnFilesDropped;
+    }
+}
