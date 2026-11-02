@@ -13,7 +13,9 @@
     next blank. The drive is marked busy for the whole queue, so the drive
     bays and the Burn tab's scan leave it alone.
     Beta 4: ISOs and .cue files (or folders of them) can be dropped onto
-    the queue from Explorer (FileDrop).
+    the queue from Explorer (FileDrop). The list of images still to burn is
+    kept in %AppData%\ArchivSector-OD\burn-queue.txt and put back when the
+    app starts again.
 *@
 
 <div class="bay-card" data-file-drop="@(running ? null : "burn-queue")">
@@ -28,6 +30,10 @@
         </div>
     </div>
     <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs (or BIN/CUE CD images) one after another. After each disc it's ejected, and the next one starts when you put in a blank. You can also drag them here from File Explorer.</p>
+    @if (restoredNote is not null)
+    {
+        <p style="margin: 0 0 8px; font-size: 12px; color: var(--text-secondary);">↺ @restoredNote</p>
+    }
     @if (dropNote is not null)
     {
         <p style="margin: 0 0 8px; font-size: 12px; color: var(--amber);">⚠ @dropNote</p>
@@ -194,6 +200,8 @@
     }
 
     private readonly List<QueueItem> items = new();
+    private string? restoredNote;   // beta 4: what came back from last time
+    private string savedList = "";
     private string? dropNote;   // what a drop left out (beta 4)
     private string driveLetter = "";
     private string? imgBurnPath;
@@ -341,7 +349,59 @@
         dropNote = null;
     }
 
-    protected override void OnInitialized() => FileDrop.Dropped += OnFilesDropped;
+    protected override void OnInitialized()
+    {
+        FileDrop.Dropped += OnFilesDropped;
+        RestoreQueue();
+    }
+
+    // ---- the list kept between runs of the app (beta 4) ----
+
+    private static string QueueFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ArchivSector-OD", "burn-queue.txt");
+
+    // The images not burned yet, one path per line, in order.
+    private string PendingList() =>
+        string.Join("\n", items.Where(i => i.State != ItemState.Done).Select(i => i.Path));
+
+    private void RestoreQueue()
+    {
+        try
+        {
+            if (!File.Exists(QueueFile)) return;
+            var paths = File.ReadAllLines(QueueFile).Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            int gone = 0;
+            foreach (var p in paths)
+            {
+                if (!File.Exists(p)) { gone++; continue; }
+                if (items.Any(i => string.Equals(i.Path, p, StringComparison.OrdinalIgnoreCase))) continue;
+                items.Add(MakeItem(p));
+            }
+            savedList = PendingList();
+            if (items.Count > 0 || gone > 0)
+                restoredNote = (items.Count > 0 ? $"{HowMany(items.Count, items.Any(i => i.IsCue))} from last time {(items.Count == 1 ? "is" : "are")} back in the queue." : "")
+                    + (gone > 0 ? $" {gone} from last time {(gone == 1 ? "isn't" : "aren't")} there any more and {(gone == 1 ? "was" : "were")} left out." : "");
+            restoredNote = restoredNote?.Trim();
+            if (gone > 0) SaveQueue();
+        }
+        catch { }
+    }
+
+    // Saved whenever the list of images still to burn changes.
+    private void SaveQueue()
+    {
+        var now = PendingList();
+        if (now == savedList) return;
+        savedList = now;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(QueueFile)!);
+            if (now.Length == 0) { if (File.Exists(QueueFile)) File.Delete(QueueFile); }
+            else File.WriteAllText(QueueFile, now);
+        }
+        catch { }
+    }
+
+    protected override void OnAfterRender(bool firstRender) => SaveQueue();
 
     // Files dropped from Explorer (beta 4): ISOs and .cue files are added in
     // the order dropped; a folder adds the ISOs and .cue files inside it
@@ -407,7 +467,7 @@
         items.Insert(i - 1, it);
     }
 
-    private void ClearList() { items.Clear(); summary = null; dropNote = null; }
+    private void ClearList() { items.Clear(); summary = null; dropNote = null; restoredNote = null; }
 
     private void ResetList()
     {

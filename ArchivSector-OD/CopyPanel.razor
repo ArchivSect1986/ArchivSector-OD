@@ -1,4 +1,4 @@
-@using System.IO
+﻿@using System.IO
 @using System.Windows
 @using ArchivSector_OD.Burning
 @implements IDisposable
@@ -80,6 +80,13 @@
                 <input type="checkbox" checked="@keepIso" @onchange="e => keepIso = (bool)(e.Value ?? false)" />
                 Keep the image afterwards
             </label>
+            @if (cdCopy)
+            {
+                <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                    <input type="checkbox" checked="@secureRead" @onchange="e => secureRead = (bool)(e.Value ?? false)" style="margin-top: 3px;" />
+                    <span>Secure read (slower)<br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the original twice and compares; any sector that comes back different is read again until one version clearly wins. About twice as long to read; worth it for a worn or scratched CD.</span></span>
+                </label>
+            }
         </div>
         <div>
             <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(!CanStart)">🔁 Copy</button>
@@ -129,6 +136,7 @@
     private bool checking, wasVisible, disposed;
     private int copies = 1;
     private bool verify = true, keepIso;
+    private bool secureRead;   // beta 4: read the original CD twice and compare (BIN/CUE copies only)
     private string tempFolder = DefaultTempFolder();
 
     private CancellationTokenSource? cts;
@@ -302,7 +310,7 @@
         long cdSectors = toc?.LeadOutLba ?? 0;
         bool oneDrive = src == dst;
         int count = copies;
-        bool doVerify = verify, keep = keepIso;
+        bool doVerify = verify, keep = keepIso, secure = secureRead && asCue;
         if (RipActivity.IsDriveBusy(src) || BurnService.IsBusy(src) || RipActivity.IsDriveBusy(dst) || BurnService.IsBusy(dst))
         {
             summary = "A drive is busy (ripping, burning or checking). Try again when it's done.";
@@ -321,7 +329,7 @@
         var ct = cts.Token;
         int ok = 0, failed = 0;
         bool stopped = false, readOk = false, unchecked_ = false;
-        LogService.Write($"{src}:", $"Copy: {label} from {src}: to {dst}:, {count} cop{(count == 1 ? "y" : "ies")}, verify {(doVerify ? "on" : "off")}; temporary image {iso}");
+        LogService.Write($"{src}:", $"Copy: {label} from {src}: to {dst}:, {count} cop{(count == 1 ? "y" : "ies")}, verify {(doVerify ? "on" : "off")}{(secure ? ", secure read" : "")}; temporary image {iso}");
 
         try
         {
@@ -351,10 +359,13 @@
                         stepText = $"{p.Percent:0.0}% · {DiscHealthService.FormatSpeed(p.BytesPerSec, 176_400)} · {Dur(p.Remaining)} left" + (p.BadSectors > 0 ? $" · ⚠ {p.BadSectors:N0} unreadable" : "");
                         Ui();
                     });
-                    var cr = await CdImageReader.ReadToBinCueAsync(src, tempFolder, baseName, cdReporter, ct, line => LogService.Write($"{src}:", line));
-                    readGood = cr.Ok && cr.BadSectors == 0;
+                    var cr = await CdImageReader.ReadToBinCueAsync(src, tempFolder, baseName, cdReporter, ct, line => LogService.Write($"{src}:", line), secure);
+                    // Secure read: sectors that read differently every time count as not read cleanly too.
+                    readGood = cr.Ok && cr.BadSectors == 0 && cr.SecureUncertain == 0;
                     readCancelled = cr.Cancelled;
-                    readMessage = cr.Ok ? $"{cr.BadSectors:N0} sector(s) couldn't be read." : cr.Message;
+                    readMessage = !cr.Ok ? cr.Message
+                        : cr.BadSectors > 0 ? $"{cr.BadSectors:N0} sector(s) couldn't be read."
+                        : $"{cr.SecureUncertain:N0} sector(s) read differently every time, so the copy couldn't be made bit-perfect (the log lists them).";
                 }
                 else
                 {

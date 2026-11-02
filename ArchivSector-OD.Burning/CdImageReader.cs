@@ -122,6 +122,7 @@ namespace ArchivSector_OD.Burning
             // Start far from the end of the first pass, so nothing comes from the drive's memory.
             Flush(drive, toc, ranges[0].From + 30_000);
             long pos = 0;   // sector in the .bin
+            int logged = 0;
             foreach (var (from, to) in ranges)
             for (long lba = from; lba < to;)
             {
@@ -133,6 +134,8 @@ namespace ArchivSector_OD.Burning
                 fs.Position = pos * 2352;
                 int got = 0;
                 while (got < n * 2352) { int k = fs.Read(file, got, n * 2352 - got); if (k <= 0) break; got += k; }
+                // The sectors in this chunk that read differently (or wouldn't read the first time).
+                var odd = new List<(int S, bool WasBad, byte[]? First, byte[]? Second)>();
                 for (int s = 0; s < n; s++)
                 {
                     long at = lba + s;
@@ -140,18 +143,27 @@ namespace ArchivSector_OD.Burning
                     bool same = rep.Ok && !wasBad && target.AsSpan(s * 2352, 2352).SequenceEqual(file.AsSpan(s * 2352, 2352));
                     if (same) continue;
                     if (!wasBad) r.SecureDiffered++;
-                    var first = wasBad ? null : file.AsSpan(s * 2352, 2352).ToArray();
-                    var second = rep.Ok ? target.AsSpan(s * 2352, 2352).ToArray() : null;
-                    var (best, votes, settled) = Settle(drive, toc, ranges, at, first, second);
-                    if (best is not null)
+                    odd.Add((s, wasBad, wasBad ? null : file.AsSpan(s * 2352, 2352).ToArray(), rep.Ok ? target.AsSpan(s * 2352, 2352).ToArray() : null));
+                }
+                if (odd.Count > 0)
+                {
+                    // Settled together: one stretch, from the first odd sector to the last.
+                    var results = SettleRun(drive, toc, lba, odd.Select(o => (o.S, o.First, o.Second)).ToList());
+                    for (int k = 0; k < odd.Count; k++)
                     {
-                        fs.Position = (pos + s) * 2352;
-                        fs.Write(best, 0, 2352);
-                        if (wasBad) { badLbas.Remove(at); r.BadSectors--; }
+                        var (s, wasBad, _, _) = odd[k];
+                        var (best, votes, settled) = results[k];
+                        long at = lba + s;
+                        if (best is not null)
+                        {
+                            fs.Position = (pos + s) * 2352;
+                            fs.Write(best, 0, 2352);
+                            if (wasBad) { badLbas.Remove(at); r.BadSectors--; }
+                        }
+                        if (!settled) { r.SecureUncertain++; if (r.UncertainLbas.Count < 200) r.UncertainLbas.Add(at); }
+                        if (++logged <= 20)
+                            log?.Invoke($"Read CD: sector {at:N0} {(wasBad ? "(unreadable the first time) " : "")}" + (best is null ? "still won't read" : settled ? $"settled ({votes} reads agree)" : $"uncertain (best version seen {votes} time(s))"));
                     }
-                    if (!settled) { r.SecureUncertain++; if (r.UncertainLbas.Count < 200) r.UncertainLbas.Add(at); }
-                    if (r.SecureDiffered + (wasBad ? 1 : 0) <= 20)
-                        log?.Invoke($"Read CD: sector {at:N0} {(wasBad ? "(unreadable the first time) " : "")}" + (best is null ? "still won't read" : settled ? $"settled ({votes} reads agree)" : $"uncertain (best version seen {votes} time(s))"));
                 }
                 lba += n;
                 pos += n;
@@ -178,32 +190,68 @@ namespace ArchivSector_OD.Burning
             return true;
         }
 
-        // One sector read again and again, the drive's memory cleared before
-        // each, until one version has been seen 3 times and more often than
-        // any other (or 16 reads). The versions from the two passes count.
-        private static (byte[]? Best, int Votes, bool Settled) Settle(ScsiDrive drive, Toc toc, List<(long From, long To)> ranges, long at, byte[]? first, byte[]? second)
+        // The odd sectors of one chunk (place in the chunk, the version from
+        // each pass), settled together: the stretch from the first to the
+        // last is read again and again, the drive's memory cleared before
+        // each read, until every sector has a version seen 3 times and at
+        // least 2 more times than any other (or 16 reads). One read of the
+        // stretch gives every sector a vote, so a worn patch with thousands of
+        // odd sectors costs a few reads per chunk rather than per sector. A
+        // stretch that won't read as a whole is read a sector at a time.
+        private static List<(byte[]? Best, int Votes, bool Settled)> SettleRun(ScsiDrive drive, Toc toc, long chunkLba, List<(int S, byte[]? First, byte[]? Second)> odd)
         {
-            var versions = new List<(byte[] Data, int Count)>();
-            void Add(byte[] d)
+            var votes = odd.Select(_ => new List<(byte[] Data, int Count)>()).ToList();
+            void Add(int k, byte[] d)
             {
-                for (int i = 0; i < versions.Count; i++)
-                    if (versions[i].Data.AsSpan().SequenceEqual(d)) { versions[i] = (versions[i].Data, versions[i].Count + 1); return; }
-                versions.Add((d, 1));
+                var v = votes[k];
+                for (int i = 0; i < v.Count; i++)
+                    if (v[i].Data.AsSpan().SequenceEqual(d)) { v[i] = (v[i].Data, v[i].Count + 1); return; }
+                v.Add((d, 1));
             }
-            if (first is not null) Add(first);
-            if (second is not null) Add(second);
+            bool Settled(int k)
+            {
+                var top = votes[k].OrderByDescending(v => v.Count).ToList();
+                return top.Count > 0 && top[0].Count >= 3 && (top.Count == 1 || top[0].Count >= top[1].Count + 2);
+            }
+            for (int k = 0; k < odd.Count; k++)
+            {
+                if (odd[k].First is not null) Add(k, odd[k].First!);
+                if (odd[k].Second is not null) Add(k, odd[k].Second!);
+            }
             for (int attempt = 0; attempt < 16; attempt++)
             {
-                var top = versions.OrderByDescending(v => v.Count).ToList();
-                if (top.Count > 0 && top[0].Count >= 3 && (top.Count == 1 || top[0].Count >= top[1].Count + 2)) break;
-                Flush(drive, toc, at);
-                var one = new byte[2352];
-                if (drive.Read(new byte[] { 0xBE, 0x00, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, 0, 1, 0xF8, 0, 0 }, one, 30).Ok) Add(one);
+                var open = Enumerable.Range(0, odd.Count).Where(k => !Settled(k)).ToList();
+                if (open.Count == 0) break;
+                int firstS = odd[open[0]].S, lastS = odd[open[^1]].S;
+                long from = chunkLba + firstS;
+                int count = lastS - firstS + 1;
+                Flush(drive, toc, from);
+                var buf = new byte[count * 2352];
+                var rep = drive.Read(new byte[] { 0xBE, 0x00, (byte)(from >> 24), (byte)(from >> 16), (byte)(from >> 8), (byte)from, 0, 0, (byte)count, 0xF8, 0, 0 }, buf, 60);
+                if (rep.Ok)
+                {
+                    foreach (var k in open) Add(k, buf.AsSpan((odd[k].S - firstS) * 2352, 2352).ToArray());
+                }
+                else
+                {
+                    // Something in the stretch won't read: one sector at a time.
+                    foreach (var k in open)
+                    {
+                        long at = chunkLba + odd[k].S;
+                        Flush(drive, toc, at);
+                        var one = new byte[2352];
+                        if (drive.Read(new byte[] { 0xBE, 0x00, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, 0, 1, 0xF8, 0, 0 }, one, 30).Ok) Add(k, one);
+                    }
+                }
             }
-            if (versions.Count == 0) return (null, 0, false);
-            var sorted = versions.OrderByDescending(v => v.Count).ToList();
-            bool settled = sorted[0].Count >= 3 && (sorted.Count == 1 || sorted[0].Count >= sorted[1].Count + 2);
-            return (sorted[0].Data, sorted[0].Count, settled);
+            var result = new List<(byte[]? Best, int Votes, bool Settled)>();
+            for (int k = 0; k < odd.Count; k++)
+            {
+                if (votes[k].Count == 0) { result.Add((null, 0, false)); continue; }
+                var top = votes[k].OrderByDescending(v => v.Count).First();
+                result.Add((top.Data, top.Count, Settled(k)));
+            }
+            return result;
         }
 
         // Reads sectors far from "at", so the next read of "at" comes from the
