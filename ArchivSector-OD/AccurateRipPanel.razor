@@ -46,6 +46,14 @@
                     }
                 </div>
             }
+            @if (learnNote is not null)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">💡 @learnNote</span>
+            }
+            else if (result.Offset is int off && off != 0 && result.AccurateCount > 0)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">💡 If this image came from your drive with no read offset set, that drive's offset is @off.ToString("+0;-0") samples: set it under Read offset in Read disc, and later rips will match with no shift.</span>
+            }
             <span style="font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere;">@cuePath@(result.Pressings > 0 ? $" · {result.Pressings} checksum set(s) in the database" : "")</span>
         </div>
     }
@@ -58,7 +66,7 @@
 @code {
     private bool running, disposed;
     private double percent;
-    private string? cuePath, dropNote;
+    private string? cuePath, dropNote, learnNote;
     private AccurateRip.Result? result;
     private CancellationTokenSource? cts;
     private static string? lastFolder;
@@ -113,6 +121,7 @@
         percent = 0;
         result = null;
         dropNote = null;
+        learnNote = null;
         cts = new CancellationTokenSource();
         StateHasChanged();
         var reporter = new Progress<double>(p => { percent = p; if (!disposed) InvokeAsync(StateHasChanged); });
@@ -130,7 +139,30 @@
             cts = null;
             running = false;
         }
+        Learn(cue);
         if (!disposed) StateHasChanged();
+    }
+
+    // Beta 4: a check of the CD Read disc just read tells that drive's real
+    // read offset (what it was read with plus the shift found). It's saved
+    // when at least half the tracks are accurate, so a different pressing
+    // or a bad read can't set a wrong one.
+    private void Learn(string cue)
+    {
+        var last = ReadOffsetService.LastRead;
+        if (result is null || !result.Ok || result.Offset is not int shift || last is null) return;
+        if (!string.Equals(Path.GetFullPath(last.Value.Cue), Path.GetFullPath(cue), StringComparison.OrdinalIgnoreCase)) return;
+        if (result.Tracks.Count == 0 || result.AccurateCount * 2 < result.Tracks.Count) return;
+        var (_, model, applied) = last.Value;
+        int real = applied + shift;
+        if (shift == 0)
+        {
+            learnNote = $"The {model}'s read offset ({applied:+0;-0;0} samples) is right: this read matches with no shift.";
+            return;
+        }
+        ReadOffsetService.Save(model, real);
+        learnNote = $"Saved {real:+0;-0;0} samples as the read offset for the {model}, learned from this check: later reads will match with no shift.";
+        LogService.Write("AccurateRip:", $"read offset {real:+0;-0;0} samples saved for the {model} (read with {applied:+0;-0;0}, lined up at {shift:+0;-0})");
     }
 
     private void Cancel() => cts?.Cancel();

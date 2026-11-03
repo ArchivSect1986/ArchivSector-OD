@@ -53,6 +53,51 @@ namespace ArchivSector_OD.Burning
             public int AccurateCount => Tracks.Count(t => t.Accurate);
         }
 
+        // ---- drive read offsets (beta 4) ----
+
+        private static string? offsetPage;   // the list, fetched once per run
+
+        /// <summary>
+        /// The read offset AccurateRip lists for a drive ("ASUS BW-16D1HT" ->
+        /// +6), from accuraterip.com/driveoffsets.htm, or null if the drive
+        /// isn't listed or the page can't be reached. The page lists drives as
+        /// "VENDOR - MODEL" next to their offset; letters and digits are
+        /// compared, so spaces and dashes don't matter.
+        /// </summary>
+        public static async Task<int?> DriveOffsetAsync(string vendorAndModel, CancellationToken ct = default)
+        {
+            string want = Squash(vendorAndModel);
+            if (want.Length < 4) return null;
+            try
+            {
+                if (offsetPage is null)
+                {
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                    http.DefaultRequestHeaders.UserAgent.ParseAdd("ArchivSector-OD");
+                    offsetPage = await http.GetStringAsync("http://www.accuraterip.com/driveoffsets.htm", ct);
+                }
+                // Row by row; in each, the cells as text.
+                foreach (System.Text.RegularExpressions.Match row in System.Text.RegularExpressions.Regex.Matches(offsetPage, @"<tr[^>]*>(.*?)</tr>",
+                    System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                {
+                    var cells = System.Text.RegularExpressions.Regex.Matches(row.Groups[1].Value, @"<td[^>]*>(.*?)</td>",
+                            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                        .Select(c => System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(c.Groups[1].Value, "<[^>]+>", "")).Trim())
+                        .ToList();
+                    for (int i = 0; i + 1 < cells.Count; i++)
+                    {
+                        if (Squash(cells[i]) != want) continue;
+                        var m = System.Text.RegularExpressions.Regex.Match(cells[i + 1], @"^([+-]?\d{1,4})$");
+                        if (m.Success && int.TryParse(m.Groups[1].Value, out int off)) return off;
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static string Squash(string s) => new string(s.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+
         // ---- the CD's IDs ----
 
         /// <summary>The database file for the CD, or null (with why) if the .cue has no music.</summary>

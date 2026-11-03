@@ -21,6 +21,12 @@ namespace ArchivSector_OD.Burning
     // time, until one version has a clear majority, and that one is kept.
     // Sectors that never settle are counted and listed (like EAC's secure
     // mode, without C2 error pointers, which many drives report badly).
+    // Read offset (v4.0 beta 4): every drive reads music a few samples early
+    // or late. With the drive's offset given (AccurateRip lists it per model;
+    // +6 for an ASUS BW-16D1HT), the music in the .bin is shifted back by it,
+    // so the image holds what's really on the CD, the way EAC saves it, and
+    // matches AccurateRip and other rips with no shift. Data tracks are left
+    // as they are; what would come from outside the music is silence.
     // Mode 2 data CDs (v4.0 beta 4): PS1 games, Video CDs and other CD-ROM XA
     // discs keep form 2 sectors (video, XA audio) that an ISO's 2048-byte
     // sectors can't hold, so they're read here too, even without music.
@@ -101,6 +107,98 @@ namespace ArchivSector_OD.Burning
             public long SecureDiffered;      // sectors that read differently the second time
             public long SecureUncertain;     // of those, ones no version won a clear majority for
             public List<long> UncertainLbas = new();
+        }
+
+        // ---- read offset (beta 4) ----
+
+        /// <summary>The drive's maker and model ("ASUS BW-16D1HT"), or "" if it can't be asked.</summary>
+        public static string DriveModel(string driveLetter)
+        {
+            try
+            {
+                using var drive = ScsiDrive.Open(driveLetter.TrimEnd(':', '\\').ToUpperInvariant(), out _);
+                if (drive is null) return "";
+                var inq = new byte[96];
+                if (!drive.Read(new byte[] { 0x12, 0, 0, 0, 96, 0 }, inq, 10).Ok) return "";
+                string vendor = Encoding.ASCII.GetString(inq, 8, 8).Trim(), product = Encoding.ASCII.GetString(inq, 16, 16).Trim();
+                return (vendor + " " + product).Trim();
+            }
+            catch { return ""; }
+        }
+
+        // The music in the .bin shifted back by the drive's offset: a drive
+        // with offset +N returns each sample N samples early, so what's really
+        // on the CD at a place is what the drive returned N samples later.
+        // Each stretch of music (between data tracks or sessions) is shifted
+        // on its own; anything from outside it becomes silence.
+        private static void ApplyReadOffset(FileStream fs, Toc toc, List<(long From, long To)> ranges, int offsetSamples, Action<string>? log)
+        {
+            long d = offsetSamples * 4L;   // bytes
+            // Music stretches in the .bin, in sectors.
+            long InBinPos(long at)
+            {
+                long before = 0;
+                foreach (var (from, to) in ranges)
+                {
+                    if (at < to) return before + Math.Max(0, at - from);
+                    before += to - from;
+                }
+                return before;
+            }
+            var stretches = new List<(long From, long To)>();
+            for (int i = 0; i < toc.Tracks.Count; i++)
+            {
+                var t = toc.Tracks[i];
+                if (t.IsData) continue;
+                long from = i == 0 ? 0 : t.PregapLba;
+                var next = i + 1 < toc.Tracks.Count ? toc.Tracks[i + 1] : null;
+                long sessionEnd = toc.SessionLeadOuts.Count >= t.Session ? toc.SessionLeadOuts[t.Session - 1] : toc.LeadOutLba;
+                long to = next is not null && next.Session == t.Session ? next.PregapLba : sessionEnd;
+                long b0 = InBinPos(from), b1 = InBinPos(to);
+                if (stretches.Count > 0 && stretches[^1].To == b0) stretches[^1] = (stretches[^1].From, b1);
+                else if (b1 > b0) stretches.Add((b0, b1));
+            }
+            const int Block = 1 << 20;
+            var buf = new byte[Block];
+            foreach (var (s0, s1) in stretches)
+            {
+                long start = s0 * 2352, end = s1 * 2352;
+                // Reads [p, p+len) from the stretch, silence outside it.
+                void ReadOld(long p, byte[] dst, int len)
+                {
+                    Array.Clear(dst, 0, len);
+                    long a = Math.Max(p, start), b = Math.Min(p + len, end);
+                    if (b <= a) return;
+                    fs.Position = a;
+                    int off = (int)(a - p), want = (int)(b - a), got = 0;
+                    while (got < want) { int k = fs.Read(dst, off + got, want - got); if (k <= 0) break; got += k; }
+                }
+                if (d > 0)
+                {
+                    // Forward: each block is read from further on than anything written so far.
+                    for (long p = start; p < end; p += Block)
+                    {
+                        int len = (int)Math.Min(Block, end - p);
+                        ReadOld(p + d, buf, len);
+                        fs.Position = p;
+                        fs.Write(buf, 0, len);
+                    }
+                }
+                else
+                {
+                    // Backward, for the same reason the other way round.
+                    for (long p = end; p > start;)
+                    {
+                        int len = (int)Math.Min(Block, p - start);
+                        p -= len;
+                        ReadOld(p + d, buf, len);
+                        fs.Position = p;
+                        fs.Write(buf, 0, len);
+                    }
+                }
+            }
+            fs.Flush();
+            log?.Invoke($"Read CD: read offset {offsetSamples:+0;-0} samples corrected in the music ({stretches.Count} stretch{(stretches.Count == 1 ? "" : "es")}), so the image holds what's on the CD");
         }
 
         // ---- secure read (beta 4) ----
@@ -413,12 +511,12 @@ namespace ArchivSector_OD.Burning
         /// read as fast as it goes; a sector that won't read after a few tries
         /// becomes zeros and is counted.
         /// </summary>
-        public static Task<Result> ReadToBinCueAsync(string driveLetter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, bool secure = false) =>
+        public static Task<Result> ReadToBinCueAsync(string driveLetter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, bool secure = false, int readOffset = 0) =>
             Task.Factory.StartNew(() =>
             {
                 var r = new Result { Secure = secure };
                 var clock = Stopwatch.StartNew();
-                try { ReadToBinCue(driveLetter.TrimEnd(':', '\\').ToUpperInvariant(), folder, name, progress, ct, r, log, secure); }
+                try { ReadToBinCue(driveLetter.TrimEnd(':', '\\').ToUpperInvariant(), folder, name, progress, ct, r, log, secure, readOffset); }
                 catch (Exception ex) { r.Message = "The read stopped: " + ex.Message; }
                 r.Time = clock.Elapsed;
                 log?.Invoke("Read CD: " + (r.Ok ? $"finished, {r.BadSectors:N0} unreadable sector(s)"
@@ -427,7 +525,7 @@ namespace ArchivSector_OD.Burning
                 return r;
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-        private static void ReadToBinCue(string letter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, bool secure = false)
+        private static void ReadToBinCue(string letter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, bool secure = false, int readOffset = 0)
         {
             using var drive = ScsiDrive.Open(letter, out var problem);
             if (drive is null) { r.Message = problem ?? "The drive couldn't be opened."; return; }
@@ -531,6 +629,9 @@ namespace ArchivSector_OD.Burning
                     partLog = false;
                     if (!SecondPass(drive, toc, fs, ranges, badLbas, ref done, work, progress, ct, r, log, clock)) return;
                 }
+
+                if (readOffset != 0 && toc.HasAudio)
+                    ApplyReadOffset(fs, toc, ranges, readOffset, log);
             }
 
             if (!secure && partLog && inAudio && toc.LeadOutLba > firstAudio)

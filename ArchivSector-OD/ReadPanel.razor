@@ -74,6 +74,15 @@
                     <input type="checkbox" @bind="secureRead" style="margin-top: 3px;" />
                     <span><strong>Secure read (slower)</strong><br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the CD twice and compares. Any sector that comes back different is read again until one version clearly wins, like EAC's secure mode. Takes about twice as long; worth it for a worn or scratched music CD.</span></span>
                 </label>
+                @if (toc?.HasAudio == true && driveModel.Length > 0)
+                {
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <strong style="min-width: 90px;">Read offset</strong>
+                        <input type="number" value="@readOffset" @onchange="OnOffsetChanged" min="-3000" max="3000" step="1"
+                               style="width: 90px; padding: 5px 8px; font-size: 13px;" />
+                        <span style="font-size: 12px; color: var(--text-secondary);">samples for the @driveModel@(offsetNote.Length > 0 ? $" ({offsetNote})" : ""). The music is corrected by it, so the image matches what's on the CD, like EAC's.</span>
+                    </div>
+                }
             }
             else
             {
@@ -146,6 +155,18 @@
     private CdImageReader.Toc? toc;            // a CD with music tracks: read to BIN/CUE
     private bool asCue, resultIsCue;
     private bool secureRead;   // beta 4: read twice and compare (BIN/CUE only)
+    // Beta 4: the drive's read offset for music, kept per drive model (ConfigService.ReadOffsets).
+    // Set by itself (ReadOffsetService): saved, from AccurateRip's drive list, or learned from a check.
+    private string driveModel = "", offsetNote = "";
+    private int readOffset;
+
+    private void OnOffsetChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var v)) return;
+        readOffset = Math.Clamp(v, -3000, 3000);
+        ReadOffsetService.Save(driveModel, readOffset);
+        offsetNote = "set for this drive";
+    }
     private int readSectorBytes = DiscReader.SectorSize;
     private bool checking, busyDrive;
     private string? outputPath;
@@ -272,6 +293,8 @@
         disc = info;
         toc = t;
         asCue = t is not null;
+        driveModel = t?.HasAudio == true ? await Task.Run(() => CdImageReader.DriveModel(letter)) : "";
+        (readOffset, offsetNote) = await ReadOffsetService.GetAsync(driveModel, line => LogService.Write($"{letter}:", line));
         if (info.Ready && info.Problem is null)
         {
             var folder = lastOutputFolder;
@@ -409,7 +432,10 @@
             };
             if (!disposed) InvokeAsync(StateHasChanged);
         });
-        var cr = await CdImageReader.ReadToBinCueAsync(letter, folder, name, cdReporter, ct, line => LogService.Write($"{letter}:", line), secureRead);
+        int applied = t.HasAudio ? readOffset : 0;
+        var cr = await CdImageReader.ReadToBinCueAsync(letter, folder, name, cdReporter, ct, line => LogService.Write($"{letter}:", line), secureRead, applied);
+        // For AccurateRip mode: a check of this image can learn (or confirm) the drive's offset.
+        if (cr.Ok && t.HasAudio && driveModel.Length > 0) ReadOffsetService.LastRead = (cr.CuePath ?? cuePath, driveModel, applied);
         if (!cr.Ok)
         {
             // Nothing half-read is left behind.

@@ -53,6 +53,11 @@ namespace ArchivSector_OD
         // verified (every byte matched). Off by default.
         public bool DeleteIsoAfterBurn { get; set; } = false;
 
+        // v4.0 beta 4: each drive model's read offset for music CDs, in
+        // samples ("ASUS BW-16D1HT" -> 6), set in Read disc. Music read to
+        // BIN/CUE (Read disc, Copy disc) is shifted back by it.
+        public Dictionary<string, int> ReadOffsets { get; set; } = new();
+
         // v3.4: shortcuts the user said "No" to repointing ("<link>|<target>"),
         // so they aren't asked about again.
         public List<string> IgnoredShortcuts { get; set; } = new();

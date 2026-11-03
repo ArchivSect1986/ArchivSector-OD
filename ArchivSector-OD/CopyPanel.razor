@@ -359,7 +359,14 @@
                         stepText = $"{p.Percent:0.0}% · {DiscHealthService.FormatSpeed(p.BytesPerSec, 176_400)} · {Dur(p.Remaining)} left" + (p.BadSectors > 0 ? $" · ⚠ {p.BadSectors:N0} unreadable" : "");
                         Ui();
                     });
-                    var cr = await CdImageReader.ReadToBinCueAsync(src, tempFolder, baseName, cdReporter, ct, line => LogService.Write($"{src}:", line), secure);
+                    // Beta 4: the source drive's read offset (set in Read disc) corrects the music.
+                    int offset = 0;
+                    if (toc?.HasAudio == true)
+                    {
+                        var model = await Task.Run(() => CdImageReader.DriveModel(src));
+                        offset = (await ReadOffsetService.GetAsync(model, line => LogService.Write($"{src}:", line))).Offset;
+                    }
+                    var cr = await CdImageReader.ReadToBinCueAsync(src, tempFolder, baseName, cdReporter, ct, line => LogService.Write($"{src}:", line), secure, offset);
                     // Secure read: sectors that read differently every time count as not read cleanly too.
                     readGood = cr.Ok && cr.BadSectors == 0 && cr.SecureUncertain == 0;
                     readCancelled = cr.Cancelled;
