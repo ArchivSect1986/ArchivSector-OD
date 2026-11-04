@@ -803,10 +803,16 @@ namespace ArchivSector_OD.Burning
             var rep = drive.Read(new byte[] { 0x23, 0, 0, 0, 0, 0, 0, 0, 252, 0 }, fc, 10);
             if (!rep.Ok) { r.Message = "The drive didn't say how big the DVD-RW is: " + rep.Describe(); return false; }
             long capacity = BE32(fc, 4);
-            bool formatted = (fc[8] & 3) == 2;
+            int descType = fc[8] & 3;   // 1 = unformatted, 2 = formatted, 3 = no disc
+            bool formatted = descType == 2;
+            log?.Invoke($"Direct write: DVD-RW in overwrite mode: format capacity {capacity:N0} sectors, descriptor type {descType} ({(descType == 2 ? "formatted" : descType == 1 ? "not fully formatted" : "unknown")})");
             if (!formatted || capacity <= 0)
             {
-                r.Message = "This DVD-RW is in \"overwrite\" mode but isn't fully formatted. Erase it (🧽 Erase this disc… → Quick erase) and burn again.";
+                // Beta 4: Windows' "Like a USB flash drive" quick format leaves
+                // a DVD-RW like this. The fix is an erase, which ImgBurn can't
+                // do for us either, so it doesn't take over.
+                r.Message = "This DVD-RW is in \"overwrite\" mode but isn't fully formatted (Windows' quick format leaves it like that). Erase it (🧽 Erase this disc… → Quick erase, about a minute) and burn again.";
+                r.NoFallback = true;
                 return false;
             }
             long blocks = (isoSectors + 15) / 16 * 16;

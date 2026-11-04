@@ -171,7 +171,10 @@ namespace ArchivSector_OD
                     progress?.Report(new BurnEngine.Progress { Phase = "Switching to " + name, Percent = -1 });
                     r = await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, fallback,
                         line => LogService.Write($"{letter}:", line), speedX);
-                    r.Message = $"ArchivSector-OD's own writer couldn't start ({why}), so {name} burned this disc instead. " + r.Message;
+                    // Beta 4: only say the other program burned it if it did.
+                    r.Message = r.Burned
+                        ? $"ArchivSector-OD's own writer couldn't start ({why}), so {name} burned this disc instead. " + r.Message
+                        : $"ArchivSector-OD's own writer couldn't start ({why}), and {name} couldn't burn it either: " + r.Message;
                     direct = false;
                 }
             }
