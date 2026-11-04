@@ -39,7 +39,11 @@ else if (state == State.Confirm && isoPath is not null)
         {
             <span class="bay-subtitle" style="margin: 0;">🎮 Xbox 360 @xboxKind game: the layer break is set for a console (sector @(xboxKind == "XGD3" ? "2,133,520" : "1,913,760")).@(xboxSlowest ? " The slowest speed is picked: Xbox discs burned slowly read best on the console." : "")</span>
         }
-        @if (NeedsBurnerMax)
+        @if (xboxBlank)
+        {
+            <span style="color: var(--danger); font-size: 12px;">⚠ @BurnEngine.XboxSecurityDataBlank</span>
+        }
+        @if (NeedsBurnerMax && !xboxBlank)
         {
             <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; border-left: 3px solid var(--amber); padding-left: 10px;">
                 @if (BurnService.BurnerMaxHint(DriveModel) is string hint)
@@ -340,6 +344,7 @@ else if (state == State.Done && result is not null)
     private string? xboxKind;
     private long raisedSectors;          // the blank's capacity as the drive gives it now (0 = not asked)
     private bool checkingCapacity;
+    private bool xboxBlank;              // an Xbox 360 image whose security data is blank: not burned
     private string? burnerMaxNote;
     private bool NeedsBurnerMax => xboxKind == "XGD3" && BlankMediaType == "DVD+R DL" && raisedSectors < BurnEngine.Xgd3Sectors;
 
@@ -392,7 +397,8 @@ else if (state == State.Done && result is not null)
     private long Limit => useImgBurn || useDirect ? DiscBytes : BlankFreeBytes;
     private bool TooBigForWindows => isoBytes > BlankFreeBytes;
     private bool TooBigForDisc => isoBytes > DiscBytes;
-    private bool CantStart => IsDvd
+    private bool CantStart => xboxBlank || CantStartOther;
+    private bool CantStartOther => IsDvd
         ? dvd?.Problem is not null || (!useDirect && !useImgBurn) || TooBigForDisc
         : IsCue
         ? (BlankMediaType is not ("CD-R" or "CD-RW")) || (!useDirect && !useImgBurn) || (useDirect && TooBigForDisc)
@@ -436,9 +442,12 @@ else if (state == State.Done && result is not null)
         if (dvd is not null && dvd.Problem is null) isoBytes = dvd.ImageBytes;
         // An Xbox 360 game (beta 4): an XGD3 one on a DVD+R DL needs its capacity checked.
         xboxKind = cue is null ? BurnEngine.XboxGameKind(dvd?.ImagePath ?? isoPath) : null;
+        // Beta 4: an Xbox image with blank security data is caught here, whatever program would burn it.
+        xboxBlank = xboxKind is not null && BurnEngine.XboxSecurityDataPresent(dvd?.ImagePath ?? isoPath) == false;
+        if (xboxBlank) LogService.Write($"{DriveLetter}:", "Burn: " + BurnEngine.XboxSecurityDataBlank);
         raisedSectors = 0;
         burnerMaxNote = null;
-        if (xboxKind == "XGD3" && BlankMediaType == "DVD+R DL") _ = CheckCapacity();
+        if (xboxKind == "XGD3" && BlankMediaType == "DVD+R DL" && !xboxBlank) _ = CheckCapacity();
         if (!engineLoaded)
         {
             imgBurnPath = BurnService.ImgBurnPath();

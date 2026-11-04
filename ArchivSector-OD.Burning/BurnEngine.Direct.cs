@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace ArchivSector_OD.Burning
 {
@@ -472,7 +472,7 @@ namespace ArchivSector_OD.Burning
                 if (isoSectors > free)
                     why = $"This is an Xbox 360 XGD3 game: it needs {isoSectors:N0} sectors and this DVD+R DL has {free:N0}. Raise the disc's capacity first: run the BurnerMAX Payload Tool on this drive with the blank in (each new blank needs it), or use a drive with Burner Max firmware, then burn again.";
                 else if (!StealthPresent(isoPath, Xgd3StealthAt))
-                    why = "This Xbox 360 game image isn't ready to burn: its security data (SS, DMI and PFI) is blank, as in Redump images, so a console would only show \"Play DVD\". Run abgx360 with AutoFix on the ISO first; it patches them in.";
+                    why = XboxSecurityDataBlank;
                 else if (!SetLayerBreak(drive, Xgd3LayerBreak, log))
                     why = $"This is an Xbox 360 XGD3 game, which needs the layer change at sector {Xgd3LayerBreak:N0}, and the drive didn't accept it. Its capacity may not have been raised far enough: send the BurnerMAX payload again, then burn again.";
                 if (why is not null)
@@ -516,7 +516,7 @@ namespace ArchivSector_OD.Burning
                 // apart; burned without it, a console only offers "Play DVD".
                 if (!StealthPresent(isoPath, Xgd2StealthAt))
                 {
-                    r.Message = "This Xbox 360 game image isn't ready to burn: its security data (SS, DMI and PFI) is blank, as in Redump images, so a console would only show \"Play DVD\". Run abgx360 with AutoFix on the ISO first; it patches them in. Nothing was written.";
+                    r.Message = XboxSecurityDataBlank + " Nothing was written.";
                     r.NoFallback = true;
                     log?.Invoke("Direct write: " + r.Message);
                     return false;
@@ -543,6 +543,28 @@ namespace ArchivSector_OD.Burning
             }
             catch { return null; }
         }
+
+        /// <summary>
+        /// For an Xbox 360 game image: true if its security data (PFI, DMI,
+        /// SS) is in place, false if it's blank or couldn't be read (a disc
+        /// burned from it would only show "Play DVD"). Null if it isn't an
+        /// Xbox 360 game. For the Write panel and the burn queue, so a bad
+        /// image is caught when it's picked, whatever program would burn it.
+        /// </summary>
+        public static bool? XboxSecurityDataPresent(string isoPath)
+        {
+            try
+            {
+                long bytes = new FileInfo(isoPath).Length;
+                if (IsXbox360Xgd2(isoPath, bytes)) return StealthPresent(isoPath, Xgd2StealthAt);
+                if (IsXbox360Xgd3(isoPath, bytes)) return StealthPresent(isoPath, Xgd3StealthAt);
+                return null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Why an Xbox 360 image with blank security data isn't burned (shown on the Write panel and in the queue).</summary>
+        public const string XboxSecurityDataBlank = "This Xbox 360 game image's security data (SS, DMI and PFI) is blank or couldn't be read, so a console would only show \"Play DVD\". Run abgx360 with AutoFix on the ISO first; it patches them in.";
 
         /// <summary>Sectors an XGD3 game needs on the disc.</summary>
         public const long Xgd3Sectors = Xgd3Bytes / Sector;
@@ -626,7 +648,7 @@ namespace ArchivSector_OD.Burning
                 }
                 return true;
             }
-            catch { return true; }   // can't tell: don't stop the burn over it
+            catch { return false; }   // beta 4: can't read it, so it can't be checked: don't burn it
         }
 
         // SEND DVD STRUCTURE, format 20h (layer boundary): layer 0 holds

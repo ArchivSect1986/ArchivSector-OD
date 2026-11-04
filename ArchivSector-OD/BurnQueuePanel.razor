@@ -611,6 +611,15 @@
                 // "Fastest" gets the slowest the disc offers instead (beta 4):
                 // fast burns are what give "Disc Unrecognizable" on the console.
                 string? xbox = it.IsCue ? null : BurnEngine.XboxGameKind(it.Dvd?.ImagePath ?? it.Path);
+                // Beta 4: an Xbox image with blank security data is skipped, whatever program would burn it.
+                if (xbox is not null && BurnEngine.XboxSecurityDataPresent(it.Dvd?.ImagePath ?? it.Path) == false)
+                {
+                    it.State = ItemState.Skipped;
+                    it.Detail = "Skipped: " + BurnEngine.XboxSecurityDataBlank;
+                    skipped++;
+                    LogService.Write($"{letter}:", "Burn queue: skipped " + it.Path + " — " + it.Detail);
+                    continue;   // the blank disc stays in for the next one
+                }
                 double speedX = speedPick == "Fastest" ? 0 : await Task.Run(() => BurnEngine.PickSpeed(letter, speedPick));
                 if (xbox is not null && speedPick == "Fastest")
                 {
