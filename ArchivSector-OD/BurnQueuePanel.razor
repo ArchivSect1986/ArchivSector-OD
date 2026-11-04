@@ -181,6 +181,9 @@
         // BIN/CUE CD image (beta 2): its layout, read when it's added.
         public CueImage? Cue;
         public bool IsCue => Path.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+        // Layer break file (beta 4): an image and where its layer 0 ends.
+        public DvdLayerFile? Dvd;
+        public bool IsDvd => DvdLayerFile.IsDvdFile(Path);
     }
 
     // A queue item from a file: an ISO, or a BIN/CUE CD image (its size is the sectors it fills).
@@ -191,6 +194,11 @@
         {
             it.Cue = CueImage.Load(full);
             if (it.Cue.Problem is null) it.Bytes = (it.Cue.LeadOutLba + 150) * 2048L;
+        }
+        else if (it.IsDvd)
+        {
+            it.Dvd = DvdLayerFile.Load(full);
+            if (it.Dvd.Problem is null) it.Bytes = it.Dvd.ImageBytes;
         }
         else
         {
@@ -300,7 +308,9 @@
         _ => "•",
     };
     private static string Line(QueueItem it) => it.Detail
-        ?? (it.Cue is not null
+        ?? (it.Dvd is not null
+            ? (it.Dvd.Problem is null ? "Layer break file: " + it.Dvd.Summary : "Layer break file: " + it.Dvd.Problem)
+            : it.Cue is not null
             ? (it.Cue.Problem is null ? "BIN/CUE CD image: " + it.Cue.Summary : "BIN/CUE: " + it.Cue.Problem)
             : $"{DiscHealthService.FormatBytes(it.Bytes)} ({it.Bytes:N0} bytes)");
 
@@ -335,7 +345,7 @@
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Title = "Choose the ISOs (or BIN/CUE CD images) to burn",
-            Filter = "Disc images (*.iso, *.cue)|*.iso;*.cue|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|All files (*.*)|*.*",
+            Filter = "Disc images (*.iso, *.cue, *.dvd)|*.iso;*.cue;*.dvd|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|Layer break files (*.dvd)|*.dvd|All files (*.*)|*.*",
             Multiselect = true,
         };
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
@@ -413,7 +423,7 @@
     }
 
     private static bool IsImageFile(string p) =>
-        p.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+        p.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) || DvdLayerFile.IsDvdFile(p);
 
     private void AddDropped(IReadOnlyList<string> paths)
     {
@@ -445,7 +455,7 @@
         }
         if (added > 0) summary = null;
         dropNote = skipped.Count == 0 ? null
-            : "Only ISOs and .cue files can be queued, so this was left out: " + string.Join(", ", skipped.Take(5)) + (skipped.Count > 5 ? $" and {skipped.Count - 5} more" : "") + ".";
+            : "Only ISOs, .cue and .dvd files can be queued, so this was left out: " + string.Join(", ", skipped.Take(5)) + (skipped.Count > 5 ? $" and {skipped.Count - 5} more" : "") + ".";
         StateHasChanged();
     }
 
@@ -565,6 +575,26 @@
                     }
                 }
 
+                // A layer break file (beta 4) needs our own writer or ImgBurn (Windows can't set a layer break).
+                if (it.IsDvd)
+                {
+                    string? dvdSkip = it.Dvd?.Problem is not null ? "Skipped: " + it.Dvd.Problem : null;
+                    if (dvdSkip is null && !direct && !imgBurn)
+                    {
+                        if (BurnEngine.DirectWriteSupports(blank.MediaType)) direct = true;
+                        else if (imgBurnPath is not null) imgBurn = true;
+                        else dvdSkip = "Skipped: Windows can't set a layer break, and neither ArchivSector-OD's own writer nor ImgBurn can burn this disc.";
+                    }
+                    if (dvdSkip is not null)
+                    {
+                        it.State = ItemState.Skipped;
+                        it.Detail = dvdSkip;
+                        skipped++;
+                        LogService.Write($"{letter}:", "Burn queue: skipped " + it.Path + " — " + it.Detail);
+                        continue;
+                    }
+                }
+
                 bool wholeDisc = imgBurn || direct;
                 long limit = wholeDisc ? BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes)) : blank.FreeBytes;
                 if (it.Bytes > limit)
@@ -577,9 +607,19 @@
                     continue;   // the blank disc stays in for the next ISO
                 }
 
-                // This disc's speed (0 = fastest).
+                // This disc's speed (0 = fastest). An Xbox 360 game left at
+                // "Fastest" gets the slowest the disc offers instead (beta 4):
+                // fast burns are what give "Disc Unrecognizable" on the console.
+                string? xbox = it.IsCue ? null : BurnEngine.XboxGameKind(it.Dvd?.ImagePath ?? it.Path);
                 double speedX = speedPick == "Fastest" ? 0 : await Task.Run(() => BurnEngine.PickSpeed(letter, speedPick));
-                if (speedPick != "Fastest")
+                if (xbox is not null && speedPick == "Fastest")
+                {
+                    speedX = await Task.Run(() => BurnEngine.PickSpeed(letter, "Slowest"));
+                    LogService.Write($"{letter}:", speedX > 0
+                        ? $"Burn queue: Xbox 360 {xbox} game, so it's burned at the slowest speed this {blank.MediaType} offers ({BurnEngine.SpeedText(speedX)})"
+                        : $"Burn queue: Xbox 360 {xbox} game; this {blank.MediaType} offers only one speed");
+                }
+                else if (speedPick != "Fastest")
                     LogService.Write($"{letter}:", speedX > 0
                         ? $"Burn queue: {speedPick}x asked; this {blank.MediaType} is burned at {BurnEngine.SpeedText(speedX)}"
                         : $"Burn queue: {speedPick}x asked; this {blank.MediaType} is burned at its fastest (it offers nothing slower that fits, or only one speed)");
@@ -597,7 +637,7 @@
                     stepPercent = p.Percent;
                     Ui();
                 });
-                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete && !it.IsCue, direct, speedX);
+                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete && !it.IsCue && !it.IsDvd, direct, speedX);
                 stepPercent = -1;
                 LogService.Write($"{letter}:", "Burn queue: " + it.Path + " — " + r.Message);
 
@@ -605,6 +645,8 @@
                 {
                     it.State = ItemState.Failed;
                     it.Detail = r.Message;
+                    // An XGD3 game refused on a drive BurnerMAX hasn't worked on: point to one it has (beta 4).
+                    if (xbox == "XGD3" && r.NoFallback && BurnService.BurnerMaxHint(model) is string hint) it.Detail += " " + hint;
                     failed++;
                     if (r.Cancelled || ct.IsCancellationRequested) break;
                 }

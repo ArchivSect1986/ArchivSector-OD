@@ -58,6 +58,16 @@ namespace ArchivSector_OD
         // BIN/CUE (Read disc, Copy disc) is shifted back by it.
         public Dictionary<string, int> ReadOffsets { get; set; } = new();
 
+        // v4.0 beta 4: where the BurnerMAX Payload Tool is (asked the first
+        // time the Write panel opens it for an Xbox 360 XGD3 game). Not
+        // shipped with the app: it's someone else's program.
+        public string BurnerMaxPath { get; set; } = "";
+
+        // v4.0 beta 4: drive models BurnerMAX has raised a DVD+R DL's
+        // capacity on (learned when the Write panel sees it raised), so a
+        // drive it doesn't work on can point to one it does.
+        public List<string> BurnerMaxDrives { get; set; } = new();
+
         // v3.4: shortcuts the user said "No" to repointing ("<link>|<target>"),
         // so they aren't asked about again.
         public List<string> IgnoredShortcuts { get; set; } = new();

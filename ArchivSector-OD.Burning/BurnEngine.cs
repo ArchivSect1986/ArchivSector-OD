@@ -60,6 +60,10 @@ namespace ArchivSector_OD.Burning
             // (drive couldn't be opened, disc type not handled, ...), so
             // another program can safely burn the same disc instead.
             public bool DiscUntouched;
+            // Beta 4: refused on purpose (an image that would make a useless
+            // disc, like an Xbox 360 game that isn't patched): no other
+            // program should burn it instead either.
+            public bool NoFallback;
             public TimeSpan BurnTime;
             public TimeSpan VerifyTime;
             public bool CdTextWritten;       // BIN/CUE: the album and track names went into the lead-in (beta 4)
@@ -284,7 +288,7 @@ namespace ArchivSector_OD.Burning
                         r.VerifyTime = verifyClock.Elapsed;
                     }
 
-                    string what = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) ? "image" : "ISO";
+                    string what = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) || isoPath.EndsWith(".dvd", StringComparison.OrdinalIgnoreCase) ? "image" : "ISO";
                     r.Message = !r.Burned ? (r.Message.Length > 0 ? r.Message : "The burn didn't complete.")
                         : r.Verified == true ? $"Burned and verified: every byte on the disc matches the {what}" + (r.VerifiedByImgBurn ? " (checked by ImgBurn)." : ".")
                         : r.Verified == false ? (r.Message.Length > 0 ? r.Message : $"Burned, but {r.MismatchedSectors:N0} sector(s) on the disc don't match the {what}. Don't rely on this disc.")

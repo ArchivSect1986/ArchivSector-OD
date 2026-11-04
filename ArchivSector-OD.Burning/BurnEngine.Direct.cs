@@ -61,7 +61,7 @@ namespace ArchivSector_OD.Burning
         /// result as BurnAsync, so the screens treat it alike.
         /// </summary>
         public static Task<Result> BurnDirectAsync(string driveLetter, string isoPath, bool verify,
-            IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, double speedX = 0)
+            IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, double speedX = 0, long layerBreak = 0)
         {
             var letter = Norm(driveLetter);
             if (!Busy.TryAdd(letter, true))
@@ -72,7 +72,7 @@ namespace ArchivSector_OD.Burning
                 var r = new Result();
                 try
                 {
-                    DirectBurn(letter, isoPath, verify, progress, ct, r, log, speedX);
+                    DirectBurn(letter, isoPath, verify, progress, ct, r, log, speedX, layerBreak);
                 }
                 catch (Exception ex)
                 {
@@ -89,7 +89,7 @@ namespace ArchivSector_OD.Burning
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        private static void DirectBurn(string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, double speedX = 0)
+        private static void DirectBurn(string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, double speedX = 0, long layerBreak = 0)
         {
             var iso = new FileInfo(isoPath);
             if (!iso.Exists) { r.Message = "The ISO file isn't there any more."; return; }
@@ -148,7 +148,7 @@ namespace ArchivSector_OD.Burning
                 }
                 else if (isDvdPlusR)
                 {
-                    if (!PrepareDvdPlusR(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
+                    if (!PrepareDvdPlusR(drive, discName, isoPath, isoSectors, iso.Length, r, log, out startLba, out cdTrack, layerBreak)) return;
                 }
                 else if (isDvdPlusRw)
                 {
@@ -442,7 +442,7 @@ namespace ArchivSector_OD.Burning
         }
 
         // ---- DVD+R / DVD+R DL: written straight on; no write settings needed ----
-        private static bool PrepareDvdPlusR(ScsiDrive drive, string discName, long isoSectors, long isoBytes, Result r, Action<string>? log, out long startLba, out int track)
+        private static bool PrepareDvdPlusR(ScsiDrive drive, string discName, string isoPath, long isoSectors, long isoBytes, Result r, Action<string>? log, out long startLba, out int track, long layerBreak = 0)
         {
             startLba = 0;
             track = 1;
@@ -461,12 +461,189 @@ namespace ArchivSector_OD.Burning
             bool nwaValid = (ti[7] & 0x01) != 0;
             startLba = nwaValid ? BE32(ti, 12) : 0;
             long free = BE32(ti, 16);
+            // Beta 4: an Xbox 360 XGD3 game is bigger than a DVD+R DL and needs
+            // its layer change at 2,133,520. That only works once the disc's
+            // capacity has been raised: by Burner Max firmware, or by the
+            // BurnerMAX Payload Tool sent to the drive with the blank in.
+            bool xgd3 = discName == "DVD+R DL" && IsXbox360Xgd3(isoPath, isoBytes);
+            if (xgd3)
+            {
+                string? why = null;
+                if (isoSectors > free)
+                    why = $"This is an Xbox 360 XGD3 game: it needs {isoSectors:N0} sectors and this DVD+R DL has {free:N0}. Raise the disc's capacity first: run the BurnerMAX Payload Tool on this drive with the blank in (each new blank needs it), or use a drive with Burner Max firmware, then burn again.";
+                else if (!StealthPresent(isoPath, Xgd3StealthAt))
+                    why = "This Xbox 360 game image isn't ready to burn: its security data (SS, DMI and PFI) is blank, as in Redump images, so a console would only show \"Play DVD\". Run abgx360 with AutoFix on the ISO first; it patches them in.";
+                else if (!SetLayerBreak(drive, Xgd3LayerBreak, log))
+                    why = $"This is an Xbox 360 XGD3 game, which needs the layer change at sector {Xgd3LayerBreak:N0}, and the drive didn't accept it. Its capacity may not have been raised far enough: send the BurnerMAX payload again, then burn again.";
+                if (why is not null)
+                {
+                    r.Message = why + " Nothing was written.";
+                    r.NoFallback = true;
+                    log?.Invoke("Direct write: " + r.Message);
+                    return false;
+                }
+                log?.Invoke($"Direct write: blank DVD+R DL with raised capacity ({free:N0} sectors free); Xbox 360 XGD3 game image: layer break set at sector {Xgd3LayerBreak:N0}, as a console needs");
+                return true;
+            }
             if (isoSectors > free)
             {
                 r.Message = $"The ISO ({isoSectors:N0} sectors) is bigger than this {discName} ({free:N0} sectors free).";
                 return false;
             }
             log?.Invoke($"Direct write: blank {discName}, track {track} starts at sector {startLba:N0}, {free:N0} sectors free; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes)");
+
+            // Beta 4: an Xbox 360 game (XGD2) has to change layers at an exact
+            // place to work in a console; set it before anything is written.
+            // A layer break from a .dvd file is used as given.
+            bool xgd2 = discName == "DVD+R DL" && IsXbox360Xgd2(isoPath, isoBytes);
+            if (discName == "DVD+R DL" && layerBreak > 0 && !xgd2)
+            {
+                if (!SetLayerBreak(drive, layerBreak, log))
+                {
+                    r.Message = $"The .dvd file asks for the layer change at sector {layerBreak:N0}, and the drive didn't accept it. Nothing was written: try ImgBurn with the .dvd file.";
+                    r.NoFallback = true;
+                    return false;
+                }
+                log?.Invoke($"Direct write: layer break set at sector {layerBreak:N0}, from the .dvd file");
+            }
+            else if (layerBreak > 0 && discName != "DVD+R DL")
+                log?.Invoke($"Direct write: the .dvd file's layer break isn't needed on a single-layer {discName}");
+            if (xgd2)
+            {
+                if (layerBreak > 0 && layerBreak != Xgd2LayerBreak)
+                    log?.Invoke($"Direct write: the .dvd file says {layerBreak:N0}, but an Xbox 360 XGD2 game needs {Xgd2LayerBreak:N0}; using {Xgd2LayerBreak:N0}");
+                // A Redump image keeps the disc's security data (SS, DMI, PFI)
+                // apart; burned without it, a console only offers "Play DVD".
+                if (!StealthPresent(isoPath, Xgd2StealthAt))
+                {
+                    r.Message = "This Xbox 360 game image isn't ready to burn: its security data (SS, DMI and PFI) is blank, as in Redump images, so a console would only show \"Play DVD\". Run abgx360 with AutoFix on the ISO first; it patches them in. Nothing was written.";
+                    r.NoFallback = true;
+                    log?.Invoke("Direct write: " + r.Message);
+                    return false;
+                }
+                if (!SetLayerBreak(drive, Xgd2LayerBreak, log))
+                {
+                    r.Message = $"This is an Xbox 360 game, which needs the layer change at sector {Xgd2LayerBreak:N0}, and the drive didn't accept it. Nothing was written: burn it with ImgBurn instead.";
+                    return false;
+                }
+                log?.Invoke($"Direct write: Xbox 360 game (XGD2) image: layer break set at sector {Xgd2LayerBreak:N0}, as a console needs");
+            }
+            return true;
+        }
+
+        // ---- DVD+R DL layer break (beta 4) ----
+
+        /// <summary>"XGD2" or "XGD3" for an Xbox 360 game image, else null (for the Write panel).</summary>
+        public static string? XboxGameKind(string isoPath)
+        {
+            try
+            {
+                long bytes = new FileInfo(isoPath).Length;
+                return IsXbox360Xgd2(isoPath, bytes) ? "XGD2" : IsXbox360Xgd3(isoPath, bytes) ? "XGD3" : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Sectors an XGD3 game needs on the disc.</summary>
+        public const long Xgd3Sectors = Xgd3Bytes / Sector;
+        /// <summary>
+        /// The sectors the blank in a drive can take, asked straight from the
+        /// drive (so a capacity raised by the BurnerMAX payload shows at once),
+        /// or 0 if the drive is busy or can't say.
+        /// </summary>
+        public static long BlankWritableSectors(string driveLetter)
+        {
+            var letter = Norm(driveLetter);
+            if (IsBusy(letter)) return 0;
+            try
+            {
+                using var drive = ScsiDrive.Open(letter, out _);
+                if (drive is null) return 0;
+                var di = new byte[34];
+                if (!drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10).Ok) return 0;
+                int track = Math.Max(1, di[6] | (di[11] << 8));
+                var ti = new byte[48];
+                if (!drive.Read(new byte[] { 0x52, 0x01, (byte)(track >> 24), (byte)(track >> 16), (byte)(track >> 8), (byte)track, 0, 0, 48, 0 }, ti, 10).Ok) return 0;
+                return BE32(ti, 16);
+            }
+            catch { return 0; }
+        }
+
+        private const long Xgd2Bytes = 7_838_695_424L;   // every Xbox 360 XGD2 game image is this size
+        private const long Xgd2LayerBreak = 1_913_760;
+        private const long Xgd3Bytes = 8_738_846_720L;   // every Xbox 360 XGD3 game image is this size
+        private const long Xgd3LayerBreak = 2_133_520;
+        // Where the security data sits in each kind of image (PFI, DMI, SS; a sector each).
+        private static readonly long[] Xgd2StealthAt = { 0xFD8E800L, 0xFD8F000L, 0xFD8F800L };
+        private static readonly long[] Xgd3StealthAt = { 0x2076800L, 0x2077000L, 0x2077800L };
+
+        // An Xbox 360 XGD3 game: its size, and the game file system's marker
+        // 32 sectors into the game partition, which starts at 0x2080000.
+        private static bool IsXbox360Xgd3(string isoPath, long isoBytes)
+        {
+            if (isoBytes != Xgd3Bytes) return false;
+            try
+            {
+                using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                fs.Position = 0x2080000L + 32 * 2048;
+                var b = new byte[20];
+                if (fs.Read(b, 0, 20) != 20) return false;
+                return System.Text.Encoding.ASCII.GetString(b) == "MICROSOFT*XBOX*MEDIA";
+            }
+            catch { return false; }
+        }
+
+        // An Xbox 360 XGD2 game: its size, and the game file system's marker
+        // ("MICROSOFT*XBOX*MEDIA") 32 sectors into the game partition, which
+        // starts at 0xFD90000 in the image.
+        private static bool IsXbox360Xgd2(string isoPath, long isoBytes)
+        {
+            if (isoBytes != Xgd2Bytes) return false;
+            try
+            {
+                using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                fs.Position = 0xFD90000L + 32 * 2048;
+                var b = new byte[20];
+                if (fs.Read(b, 0, 20) != 20) return false;
+                return System.Text.Encoding.ASCII.GetString(b) == "MICROSOFT*XBOX*MEDIA";
+            }
+            catch { return false; }
+        }
+
+        // The security data a burned Xbox 360 game needs, at fixed places in
+        // the image ("at": PFI, DMI and SS, a sector each): present if none of
+        // the three is all zeros.
+        private static bool StealthPresent(string isoPath, long[] at)
+        {
+            try
+            {
+                using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var b = new byte[2048];
+                foreach (long o in at)
+                {
+                    fs.Position = o;
+                    if (fs.Read(b, 0, 2048) != 2048 || Array.TrueForAll(b, x => x == 0)) return false;
+                }
+                return true;
+            }
+            catch { return true; }   // can't tell: don't stop the burn over it
+        }
+
+        // SEND DVD STRUCTURE, format 20h (layer boundary): layer 0 holds
+        // "sectors" sectors, then the drive goes on in layer 1. Read back
+        // to be sure the drive took it.
+        private static bool SetLayerBreak(ScsiDrive drive, long sectors, Action<string>? log)
+        {
+            var d = new byte[12];
+            d[1] = 10;                                   // data length (the rest)
+            d[8] = (byte)(sectors >> 24); d[9] = (byte)(sectors >> 16); d[10] = (byte)(sectors >> 8); d[11] = (byte)sectors;
+            var rep = drive.Write(new byte[] { 0xBF, 0, 0, 0, 0, 0, 0, 0x20, 0, 12, 0, 0 }, d, 10);
+            if (!rep.Ok) { log?.Invoke("Direct write: the drive didn't accept the layer break: " + rep.Describe()); return false; }
+            var back = new byte[12];
+            rep = drive.Read(new byte[] { 0xAD, 0, 0, 0, 0, 0, 0, 0x20, 0, 12, 0, 0 }, back, 10);
+            if (!rep.Ok) return true;   // set; the drive just doesn't say
+            long got = BE32(back, 8);
+            if (got != sectors) { log?.Invoke($"Direct write: the drive took the layer break as sector {got:N0} instead of {sectors:N0}"); return false; }
             return true;
         }
 
