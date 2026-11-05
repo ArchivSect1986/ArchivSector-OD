@@ -926,80 +926,146 @@ namespace ArchivSector_OD.Burning
             CancellationToken ct, Result r, Action<string>? log, string afterFailure)
         {
             long total = isoSectors + Math.Max(0, padSectors);
-            var zeros = new byte[DirectChunkSectors * Sector];
+            int chunkBytes = DirectChunkSectors * Sector;
             var clock = Stopwatch.StartNew();
-            var buf = new byte[DirectChunkSectors * Sector];
             long done = 0;
             double speed = 0;
             var speedClock = Stopwatch.StartNew();
             long speedFrom = 0;
             var lastReport = TimeSpan.Zero;
-            using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-            while (done < total)
+
+            // Beta 4: the ISO is read ahead into an 80 MiB buffer by its own
+            // thread, as ImgBurn does, and the buffer is filled before the
+            // first write. Reading and writing one after the other left the
+            // drive waiting whenever the hard drive was slow for a moment (a
+            // cold start, another drive reading the same disk); a DVD burner
+            // with a small buffer (512 KB = a tenth of a second at 4x) then
+            // has to stop and restart the laser, and on some discs those
+            // restarts can't be read back.
+            int ring = (int)Math.Min(WriteBufferBytes / chunkBytes, (total + DirectChunkSectors - 1) / DirectChunkSectors);
+            ring = Math.Max(ring, 1);
+            using var free = new System.Collections.Concurrent.BlockingCollection<byte[]>(ring);
+            using var filled = new System.Collections.Concurrent.BlockingCollection<(byte[] Buf, int Bytes)>(ring);
+            for (int i = 0; i < ring; i++) free.Add(new byte[chunkBytes]);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            Exception? readError = null;
+            var reader = Task.Run(() =>
             {
-                if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
-                // The ISO, then (DVD-R/-RW) zeros up to a whole 32 KB block.
-                // The end of the ISO and the first zeros share a chunk, so
-                // every write stays a whole number of 32 KB packets (a DVD-RW
-                // written incrementally or in overwrite mode needs that).
-                int n = (int)Math.Min(DirectChunkSectors, total - done);
-                int bytes = n * Sector;
-                int fromIso = (int)Math.Clamp(isoSectors - done, 0, n);
-                byte[] data;
-                if (fromIso == n)
+                try
                 {
-                    ReadFully(fs, buf, bytes);
-                    data = bytes == buf.Length ? buf : buf.AsSpan(0, bytes).ToArray();
-                }
-                else if (fromIso == 0) data = bytes == zeros.Length ? zeros : new byte[bytes];
-                else
-                {
-                    data = new byte[bytes];
-                    ReadFully(fs, data, fromIso * Sector);   // the rest stays zeros
-                }
-                long lba = startLba + done;
-                var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
-
-                // A drive that's busy (buffer full, or still calibrating the laser /
-                // recording a DVD-R's reservation before the first data, which
-                // can take a minute or more) is asked again for up to 3 minutes.
-                var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
-                if (!rep.Ok)
-                {
-                    if (done == 0 && rep.SenseKey == 5)
+                    using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+                    long queued = 0;
+                    while (queued < total)
                     {
-                        // Refused outright before anything was written.
-                        r.Message = $"The drive refused the first write: {rep.Describe()}";
-                        log?.Invoke("Direct write: " + r.Message);
-                        return WriteRefusedAtStart;
+                        var buf = free.Take(stop.Token);
+                        // The ISO, then (DVD-R/-RW) zeros up to a whole 32 KB block.
+                        // The end of the ISO and the first zeros share a chunk, so
+                        // every write stays a whole number of 32 KB packets (a DVD-RW
+                        // written incrementally or in overwrite mode needs that).
+                        int n = (int)Math.Min(DirectChunkSectors, total - queued);
+                        int fromIso = (int)Math.Clamp(isoSectors - queued, 0, n);
+                        if (fromIso < n) Array.Clear(buf, fromIso * Sector, (n - fromIso) * Sector);
+                        if (fromIso > 0) ReadFully(fs, buf, fromIso * Sector);
+                        filled.Add((buf, n * Sector), stop.Token);
+                        queued += n;
                     }
-                    r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}.{DiscProblemHint(rep)} {afterFailure}";
-                    log?.Invoke("Direct write: " + r.Message);
-                    return -1;
                 }
-                done += n;
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { readError = ex; }
+                finally { filled.CompleteAdding(); }
+            });
 
-                if (speedClock.Elapsed.TotalSeconds >= 1)
+            int waits = 0;
+            long waitedMs = 0, longestWaitMs = 0;
+            try
+            {
+                // Fill the buffer before the first write (or until the reader is done).
+                progress?.Report(new Progress { Phase = "Filling the buffer", Percent = -1 });
+                var fillClock = Stopwatch.StartNew();
+                while (filled.Count < ring && !filled.IsAddingCompleted && !ct.IsCancellationRequested && fillClock.Elapsed < TimeSpan.FromSeconds(60))
+                    Thread.Sleep(20);
+                log?.Invoke($"Direct write: buffer filled ({filled.Count * (long)chunkBytes / (1024 * 1024)} MiB of {ring * (long)chunkBytes / (1024 * 1024)} MiB) in {fillClock.Elapsed.TotalSeconds:0.0} s; writing");
+
+                while (done < total)
                 {
-                    double now = (done - speedFrom) * (double)Sector / speedClock.Elapsed.TotalSeconds;
-                    speed = speed <= 0 ? now : speed * 0.7 + now * 0.3;
-                    speedFrom = done;
-                    speedClock.Restart();
-                }
-                if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= total)
-                {
-                    lastReport = clock.Elapsed;
-                    progress?.Report(new Progress
+                    if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
+                    (byte[] Buf, int Bytes) item;
+                    if (!filled.TryTake(out item))
                     {
-                        Phase = "Writing",
-                        Percent = 100.0 * done / total,
-                        BytesPerSec = speed,
-                        Remaining = speed > 0 ? TimeSpan.FromSeconds((total - done) * (double)Sector / speed) : TimeSpan.Zero,
-                    });
+                        // The buffer ran dry: the drive waits for the hard drive.
+                        var w = Stopwatch.StartNew();
+                        try { item = filled.Take(ct); }
+                        catch (OperationCanceledException) { r.Cancelled = true; break; }
+                        catch (InvalidOperationException) { item = default; }
+                        if (item.Buf is null)
+                        {
+                            r.Message = "The ISO couldn't be read: " + (readError?.Message ?? "it ended early") + " " + afterFailure;
+                            log?.Invoke("Direct write: " + r.Message);
+                            return -1;
+                        }
+                        waits++;
+                        long ms = w.ElapsedMilliseconds;
+                        waitedMs += ms;
+                        if (ms > longestWaitMs) longestWaitMs = ms;
+                    }
+                    int n = item.Bytes / Sector;
+                    var data = item.Bytes == item.Buf.Length ? item.Buf : item.Buf.AsSpan(0, item.Bytes).ToArray();
+                    long lba = startLba + done;
+                    var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
+
+                    // A drive that's busy (buffer full, or still calibrating the laser /
+                    // recording a DVD-R's reservation before the first data, which
+                    // can take a minute or more) is asked again for up to 3 minutes.
+                    var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
+                    if (!free.IsAddingCompleted) free.Add(item.Buf);
+                    if (!rep.Ok)
+                    {
+                        if (done == 0 && rep.SenseKey == 5)
+                        {
+                            // Refused outright before anything was written.
+                            r.Message = $"The drive refused the first write: {rep.Describe()}";
+                            log?.Invoke("Direct write: " + r.Message);
+                            return WriteRefusedAtStart;
+                        }
+                        r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}.{DiscProblemHint(rep)} {afterFailure}";
+                        log?.Invoke("Direct write: " + r.Message);
+                        return -1;
+                    }
+                    done += n;
+
+                    if (speedClock.Elapsed.TotalSeconds >= 1)
+                    {
+                        double now = (done - speedFrom) * (double)Sector / speedClock.Elapsed.TotalSeconds;
+                        speed = speed <= 0 ? now : speed * 0.7 + now * 0.3;
+                        speedFrom = done;
+                        speedClock.Restart();
+                    }
+                    if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= total)
+                    {
+                        lastReport = clock.Elapsed;
+                        progress?.Report(new Progress
+                        {
+                            Phase = "Writing",
+                            Percent = 100.0 * done / total,
+                            BytesPerSec = speed,
+                            Remaining = speed > 0 ? TimeSpan.FromSeconds((total - done) * (double)Sector / speed) : TimeSpan.Zero,
+                        });
+                    }
                 }
             }
+            finally
+            {
+                stop.Cancel();
+                try { reader.Wait(TimeSpan.FromSeconds(10)); } catch { }
+            }
+            log?.Invoke(waits == 0
+                ? "Direct write: the buffer never ran dry (the drive never waited for data)"
+                : $"Direct write: the buffer ran dry {waits:N0} time(s), the drive waited {waitedMs / 1000.0:0.0} s in all (longest {longestWaitMs:N0} ms): the hard drive the ISO is on couldn't keep up for a moment");
             return Math.Min(done, isoSectors);
         }
+
+        // How much of the ISO is read ahead of the drive (as ImgBurn's 80 MiB buffer).
+        private const long WriteBufferBytes = 80L * 1024 * 1024;
 
         // A "medium error" (sense key 3) is the disc itself failing, not our
         // writer or the drive: say what to try next.

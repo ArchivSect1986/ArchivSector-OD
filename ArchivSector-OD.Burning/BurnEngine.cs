@@ -436,7 +436,10 @@ namespace ArchivSector_OD.Burning
             // An ISO must be whole 2 KB sectors. A .cue (BIN/CUE, beta 3: ImgBurn
             // burns the ones our writer can't, like Enhanced CDs) is a small
             // text file pointing at the .bin; ImgBurn checks those itself.
-            bool cue = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+            // A .dvd (layer break file, beta 4) is the same kind of small text
+            // file: its image was checked when it was picked (DvdLayerFile).
+            bool cue = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase)
+                    || isoPath.EndsWith(".dvd", StringComparison.OrdinalIgnoreCase);
             long isoBytes = new FileInfo(isoPath).Length;
             if (!cue && (isoBytes == 0 || isoBytes % Sector != 0))
             {
