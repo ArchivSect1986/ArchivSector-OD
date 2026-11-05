@@ -42,9 +42,16 @@
         <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'>✔ Verify disc</button>
         <button class="nav-btn @(mode == "accuraterip" ? "active" : "")" @onclick='() => mode = "accuraterip"'>🎯 AccurateRip</button>
         <button class="nav-btn @(mode == "info" ? "active" : "")" @onclick='() => mode = "info"'>🔎 Drive info</button>
-        @* Beta 4: today's log, without going back to the drive bays. *@
+        @* Beta 4: today's log, without going back to the drive bays, and the
+           live log (like ImgBurn's log window). *@
+        <button class="nav-btn @(showLiveLog ? "active" : "")" @onclick="() => showLiveLog = !showLiveLog" title="Shows what's happening on every drive as it happens. Everything is still saved to the log file.">📜 Live log</button>
         <button class="nav-btn" @onclick="LogService.OpenToday" title="Opens today's saved log (all drives and TargetFill). Logs are kept for 30 days in %AppData%\ArchivSector-OD\Logs.">📄 Open log</button>
     </nav>
+
+    @if (showLiveLog)
+    {
+        <LiveLogPanel Close="@(() => showLiveLog = false)" />
+    }
 
     <div style="display: @(mode == "build" ? "block" : "none");">
         <BuildPanel AddToQueue="@OnAddToQueue" />
@@ -219,6 +226,8 @@
 </div>
 
 @code {
+    // Beta 4: the 📜 Live log panel is open (remembered while the app runs).
+    private static bool showLiveLog;
     /// <summary>True while the Burn tab is the one showing.</summary>
     [Parameter] public bool Visible { get; set; }
 

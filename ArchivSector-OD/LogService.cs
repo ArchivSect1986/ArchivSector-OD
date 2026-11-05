@@ -21,6 +21,28 @@ namespace ArchivSector_OD
 
         public static string TodayLogPath => Path.Combine(LogFolder, $"ArchivSector-OD_{DateTime.Now:yyyy-MM-dd}.log");
 
+        // ---- Live log (beta 4) ----
+        // Every line written is also kept in memory (the last 1,000) and
+        // announced, so the Burn tab's 📜 Live log shows it as it happens,
+        // like ImgBurn's log window. The log file is written exactly as before.
+        public readonly record struct LiveLine(long Id, DateTime Time, string Source, string Text, char Level);
+        private static readonly object LiveGate = new();
+        private static readonly Queue<LiveLine> Live = new();
+        private static long liveId;
+        private const int LiveKeep = 1000;
+
+        /// <summary>Raised (on the writing thread) after a line is added to the live log.</summary>
+        public static event Action? LiveChanged;
+
+        /// <summary>The last lines written (up to 1,000), oldest first.</summary>
+        public static List<LiveLine> LiveLines()
+        {
+            lock (LiveGate) return Live.ToList();
+        }
+
+        /// <summary>I (information), W (warning) or E (error) for a line.</summary>
+        public static char LevelOf(string text) => Level(text);
+
         public static void Write(string source, string text)
         {
             try
@@ -34,6 +56,21 @@ namespace ArchivSector_OD
                 }
             }
             catch { /* logging must never get in the way */ }
+            AddLive(source, text);
+        }
+
+        private static void AddLive(string source, string text)
+        {
+            try
+            {
+                lock (LiveGate)
+                {
+                    Live.Enqueue(new LiveLine(++liveId, DateTime.Now, source, text, Level(text)));
+                    while (Live.Count > LiveKeep) Live.Dequeue();
+                }
+                LiveChanged?.Invoke();
+            }
+            catch { /* the live view must never get in the way either */ }
         }
 
         private static void RemoveOldLogs()
