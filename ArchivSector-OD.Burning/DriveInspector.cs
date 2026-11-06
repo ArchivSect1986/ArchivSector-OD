@@ -267,6 +267,29 @@ namespace ArchivSector_OD.Burning
                 }
             }
 
+            // Beta 5: a written DVD's book type (what it tells players it is:
+            // a burned DVD+R can say DVD-ROM), layer 0's size on a dual-layer
+            // disc, and whether a DVD+R DL was burned with its capacity raised.
+            if (!blank && family is "DVD" or "DVD+")
+            {
+                var layout = BurnEngine.ReadDvdLayout(drive, 0x00);
+                if (layout is not null)
+                {
+                    string media = ProfileName(rep.CurrentProfile) ?? "DVD";
+                    disc.Add("Book type", layout.BookName == media || media.StartsWith(layout.BookName + " ")
+                        ? layout.BookName
+                        : $"{layout.BookName} (set when it was burned; the disc is a {media})");
+                    if (layout.Layers > 1 && layout.L0Sectors > 0)
+                    {
+                        string l0 = $"{layout.L0Sectors:N0} sectors";
+                        if (family == "DVD+" && BurnEngine.IsOverburnedDvd(drive, out long recL0, out long blankL0))
+                            l0 += $" (raised: the blank was made for {blankL0:N0}, so it was burned with its capacity raised, e.g. an Xbox 360 XGD3 game)";
+                        disc.Add("Layer 0", l0);
+                    }
+                }
+                else rep.Notes.Add("Book type (READ DISC STRUCTURE 00h): the drive didn't say");
+            }
+
             // Maker code
             switch (family)
             {

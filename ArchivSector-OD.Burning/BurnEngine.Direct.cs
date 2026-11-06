@@ -264,10 +264,13 @@ namespace ArchivSector_OD.Burning
                 // Beta 4: the tray is cycled first (like ImgBurn), so the disc is read fresh.
                 if (verify && !ct.IsCancellationRequested && !CycleTray(drive, progress, ct, log, "Direct write"))
                     verify = false;
+                // Beta 5: what a burned DVD+R / DVD+R DL tells players it is (its book type).
+                if (discName.StartsWith("DVD+R", StringComparison.Ordinal) && ReadDvdLayout(drive, 0x00) is { } layout)
+                    log?.Invoke($"Direct write: the disc's book type is {layout.BookName}" + (layout.L0Sectors > 0 ? $"; layer 0 holds {layout.L0Sectors:N0} sectors" : ""));
                 if (verify && !ct.IsCancellationRequested)
                 {
                     var vclock = Stopwatch.StartNew();
-                    DirectVerify(drive, isoPath, startLba, isoSectors, progress, ct, r);
+                    DirectVerify(drive, isoPath, startLba, isoSectors, progress, ct, r, log);
                     r.VerifyTime = vclock.Elapsed;
                     log?.Invoke(r.Verified == true
                         ? $"Direct write: verified, every sector matches ({r.VerifyTime:hh\\:mm\\:ss})"
@@ -1099,35 +1102,26 @@ namespace ArchivSector_OD.Burning
             return rep;
         }
 
-        private static void DirectVerify(ScsiDrive drive, string isoPath, long startLba, long isoSectors, IProgress<Progress>? progress, CancellationToken ct, Result r)
+        // The verify after burning. Beta 5: the same sector check as Verify
+        // disc (CheckChunk), so both count unreadable and different sectors
+        // the same way and list them, and it stops early on a hopeless disc.
+        private static void DirectVerify(ScsiDrive drive, string isoPath, long startLba, long isoSectors, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log = null)
         {
             var disc = new byte[DirectChunkSectors * Sector];
             var file = new byte[DirectChunkSectors * Sector];
-            long lba = 0, mismatched = 0;
+            long lba = 0;
+            var check = new IsoCheck();
             var clock = Stopwatch.StartNew();
             var lastReport = TimeSpan.Zero;
             var window = new Queue<(TimeSpan T, long Lba)>();
             using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-            while (lba < isoSectors)
+            bool goOn = true;
+            while (lba < isoSectors && goOn)
             {
                 if (ct.IsCancellationRequested) { r.Cancelled = true; r.Verified = null; return; }
                 int n = (int)Math.Min(DirectChunkSectors, isoSectors - lba);
-                int bytes = n * Sector;
-                ReadFully(fs, file, bytes);
-                var target = bytes == disc.Length ? disc : new byte[bytes];
-                long at = startLba + lba;
-                var cdb = new byte[] { 0x28, 0, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, (byte)(n >> 8), (byte)n, 0 };
-                var rep = drive.Read(cdb, target, 60);
-                for (int tries = 0; !rep.Ok && rep.IsTryAgain && tries < 100; tries++) { Thread.Sleep(50); rep = drive.Read(cdb, target, 60); }
-                if (!rep.Ok)
-                {
-                    mismatched += n;   // unreadable counts as not matching
-                }
-                else
-                {
-                    for (int s = 0; s < n; s++)
-                        if (!target.AsSpan(s * Sector, Sector).SequenceEqual(file.AsSpan(s * Sector, Sector))) mismatched++;
-                }
+                ReadFully(fs, file, n * Sector);
+                goOn = CheckChunk(drive, startLba + lba, lba, n, file, disc, check, ct);
                 lba += n;
                 if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || lba >= isoSectors)
                 {
@@ -1149,8 +1143,17 @@ namespace ArchivSector_OD.Burning
                     });
                 }
             }
-            r.MismatchedSectors = mismatched;
-            r.Verified = mismatched == 0;
+            check.Finish();
+            r.MismatchedSectors = check.Bad;
+            r.Verified = check.Bad == 0 && check.StoppedEarly is null;
+            if (r.Verified == false)
+            {
+                r.Message = check.StoppedEarly is not null
+                    ? $"Burned, but the check stopped early at {100.0 * lba / isoSectors:0.0}%: {check.StoppedEarly}."
+                    : $"Burned, but {check.Bad:N0} sector(s) on the disc don't match the ISO ({check.Different:N0} differ, {check.Unreadable:N0} can't be read). Don't rely on this disc.";
+                log?.Invoke($"Direct write: {check.Different:N0} sector(s) differ and {check.Unreadable:N0} can't be read" + (check.StoppedEarly is not null ? " (the check stopped early)" : ""));
+                if (check.Ranges.Count > 0) log?.Invoke("Direct write: problem sectors at " + check.RangesText());
+            }
         }
 
         // TEST UNIT READY until the drive is ready (it may still be spinning up).

@@ -4,6 +4,7 @@
    Newest line at the bottom. The list keeps following new lines while
    it's scrolled to the bottom, and stays put when scrolled up to read
    (the box is laid out bottom-up, so the browser does this by itself).
+   A long message wraps at the box's edge, lined up under itself.
    The box is short (about 8 lines) and can be dragged taller by its
    bottom-right corner.
    Filter by drive; Copy puts what's shown on the clipboard; Clear only
@@ -39,17 +40,26 @@
             {
                 var line = l;
                 var parts = line.Text.Split('\n');
-                @* One line per entry: the row itself doesn't keep line breaks (only an opened report below does). *@
-                <div style="color: @Colour(line); overflow-wrap: anywhere;"><span style="opacity: 0.8;">@line.Level @line.Time.ToString("HH:mm:ss")</span>&nbsp; <span style="display: inline-block; min-width: 2.6em; color: var(--text-muted);">@line.Source</span> @parts[0].TrimEnd('\r')
-                    @if (parts.Length > 1)
-                    {
-                        bool open = expanded.Contains(line.Id);
-                        <span style="cursor: pointer; color: var(--text-muted);" @onclick="() => Toggle(line.Id)">@(open ? " ▾ hide" : $" ▸ {parts.Length - 1} more lines")</span>
-                        @if (open)
+                bool open = expanded.Contains(line.Id);
+                string first = parts[0].TrimEnd('\r');
+                @* The level, time and drive on the left; the message beside them wraps
+                   at the box's edge and carries on under itself, never under the time,
+                   so a long message is read in full and the columns stay lined up.
+                   A report's extra lines show when it's opened. *@
+                <div style="display: flex; color: @Colour(line);">
+                    <span style="flex: none; white-space: nowrap; opacity: 0.8;">@line.Level @line.Time.ToString("HH:mm:ss")&nbsp;&nbsp;</span>
+                    <span style="flex: none; width: 3.4em; white-space: nowrap; color: var(--text-muted);">@line.Source</span>
+                    <span style="flex: 1; min-width: 0; overflow-wrap: anywhere;">
+                        @first
+                        @if (parts.Length > 1)
                         {
-                            <div style="color: var(--text-muted); padding-left: 2em; white-space: pre-wrap;">@string.Join("\n", parts.Skip(1).Select(p => p.TrimEnd('\r')))</div>
+                            <span style="cursor: pointer; color: var(--text-muted);" @onclick="() => Toggle(line.Id)">@(open ? " ▾ hide" : $" ▸ {parts.Length - 1} more lines")</span>
+                            @if (open)
+                            {
+                                <div style="color: var(--text-muted); white-space: pre-wrap;">@string.Join("\n", parts.Skip(1).Select(p => p.TrimEnd('\r')))</div>
+                            }
                         }
-                    }
+                    </span>
                 </div>
             }
         </div>
@@ -126,7 +136,7 @@
 
     private async Task Copy()
     {
-        var text = string.Join(Environment.NewLine, Shown.Select(l => $"{l.Level} {l.Time:HH:mm:ss} [{l.Source}] {l.Text.Replace("\n", Environment.NewLine)}"));
+        var text = string.Join(Environment.NewLine, Shown.Select(l => $"{l.Level} {l.Time:HH:mm:ss} [{l.Source}] {l.Text.Replace("\r", "").Replace("\n", Environment.NewLine)}"));
         try { System.Windows.Clipboard.SetText(text.Length == 0 ? " " : text); } catch { return; }
         copied = true;
         StateHasChanged();

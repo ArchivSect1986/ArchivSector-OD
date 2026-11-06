@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace ArchivSector_OD.Burning
 {
@@ -75,19 +75,18 @@ namespace ArchivSector_OD.Burning
             double oneX = iso.Length <= 1_000_000_000L ? 153_600 : iso.Length <= 9_000_000_000L ? 1_385_000 : 4_500_000;
             log?.Invoke($"Verify: {letter}: against {isoPath} ({isoSectors:N0} sectors; the disc holds {discSectors:N0})");
 
+            // Beta 5: a DVD+R DL burned with its capacity raised (an Xbox 360
+            // XGD3 game) is read from the wrong place by some drives once the
+            // blank's original layer 0 is passed. Said up front, and used to
+            // explain the result.
+            bool overburned = IsOverburnedDvd(drive, out long recordedL0, out long blankL0);
+            if (overburned)
+                log?.Invoke($"Verify: this DVD+R DL was burned with its capacity raised (layer 0 holds {recordedL0:N0} sectors; the blank was made for {blankL0:N0}). Some drives read discs like this from the wrong place after sector {blankL0:N0}: if the differences start there, verify it in the drive that burned it.");
+
             var disc = new byte[DirectChunkSectors * Sector];
             var file = new byte[DirectChunkSectors * Sector];
             long lba = 0;
-            long runStart = -1, runCount = 0;
-            void Bad(long s, long n)
-            {
-                if (runStart >= 0 && runStart + runCount == s) runCount += n;
-                else
-                {
-                    if (runStart >= 0) r.BadRanges.Add((runStart, runCount));
-                    runStart = s; runCount = n;
-                }
-            }
+            var check = new IsoCheck();
 
             var clock = Stopwatch.StartNew();
             var lastReport = TimeSpan.Zero;
@@ -97,34 +96,12 @@ namespace ArchivSector_OD.Burning
             {
                 if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
                 int n = (int)Math.Min(DirectChunkSectors, isoSectors - lba);
-                int bytes = n * Sector;
-                ReadFully(fs, file, bytes);
-                var target = bytes == disc.Length ? disc : new byte[bytes];
-                var cdb = new byte[] { 0x28, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
-                rep = RetryWhileBusy(() => drive.Read(cdb, target, 60), 100, 50);
-                if (rep.Ok)
-                {
-                    for (int s = 0; s < n; s++)
-                        if (!target.AsSpan(s * Sector, Sector).SequenceEqual(file.AsSpan(s * Sector, Sector))) { r.Different++; Bad(lba + s, 1); }
-                }
-                else
-                {
-                    // Sector by sector, to find exactly which ones won't read.
-                    var one = new byte[Sector];
-                    for (int s = 0; s < n; s++)
-                    {
-                        if (ct.IsCancellationRequested) break;
-                        long at = lba + s;
-                        var c1 = new byte[] { 0x28, 0, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, 0, 1, 0 };
-                        var r1 = RetryWhileBusy(() => drive.Read(c1, one, 30), 20, 50);
-                        if (!r1.Ok) { r.Unreadable++; Bad(at, 1); }
-                        else if (!one.AsSpan().SequenceEqual(file.AsSpan(s * Sector, Sector))) { r.Different++; Bad(at, 1); }
-                    }
-                }
+                ReadFully(fs, file, n * Sector);
+                bool goOn = CheckChunk(drive, lba, lba, n, file, disc, check, ct);
                 lba += n;
 
                 var now = clock.Elapsed;
-                if (now - lastReport > TimeSpan.FromMilliseconds(250) || lba >= isoSectors)
+                if (now - lastReport > TimeSpan.FromMilliseconds(250) || lba >= isoSectors || !goOn)
                 {
                     lastReport = now;
                     window.Enqueue((now, lba));
@@ -138,26 +115,128 @@ namespace ArchivSector_OD.Burning
                         BytesPerSec = bps,
                         OneX = oneX,
                         Remaining = bps > 0 ? TimeSpan.FromSeconds((isoSectors - lba) * (double)Sector / bps) : TimeSpan.Zero,
-                        Different = r.Different,
-                        Unreadable = r.Unreadable,
+                        Different = check.Different,
+                        Unreadable = check.Unreadable,
                     });
                 }
+                if (!goOn) break;
             }
-            if (runStart >= 0) r.BadRanges.Add((runStart, runCount));
+            check.Finish();
+            r.Different = check.Different;
+            r.Unreadable = check.Unreadable;
+            r.BadRanges = check.Ranges;
             r.Sectors = Math.Min(lba, isoSectors);
             r.Time = clock.Elapsed;
             r.AverageBytesPerSec = r.Time.TotalSeconds > 0 ? r.Sectors * (double)Sector / r.Time.TotalSeconds : 0;
-            long bad = r.Different + r.Unreadable;
-            r.Ok = !r.Cancelled && bad == 0;
+            long bad = check.Bad;
+            r.Ok = !r.Cancelled && check.StoppedEarly is null && bad == 0;
             r.Message = r.Cancelled
-                ? $"Stopped at {100.0 * r.Sectors / isoSectors:0.0}%." + (bad > 0 ? $" {bad:N0} sector(s) didn't match so far." : " Everything checked so far matched.")
+                ? $"Stopped at {100.0 * r.Sectors / isoSectors:0.0}%." + (bad > 0 ? $" {bad:N0} sector(s) didn't match so far ({check.Different:N0} differ, {check.Unreadable:N0} can't be read)." : " Everything checked so far matched.")
+                : check.StoppedEarly is not null ? $"Stopped early at {100.0 * r.Sectors / isoSectors:0.0}%: {check.StoppedEarly}."
                 : bad == 0 ? "The disc matches the ISO: every sector is identical."
-                : $"The disc doesn't match the ISO: {r.Different:N0} sector(s) differ and {r.Unreadable:N0} couldn't be read.";
+                : $"The disc doesn't match the ISO: {check.Different:N0} sector(s) differ and {check.Unreadable:N0} couldn't be read.";
+            if (overburned && bad > 0)
+            {
+                if (Math.Abs(check.FirstBad - blankL0) <= 64)
+                {
+                    // Not a bad disc: this drive misreads raised-capacity discs. Say just that.
+                    string upTo = r.Cancelled ? $"Stopped at {100.0 * r.Sectors / isoSectors:0.0}%."
+                        : check.StoppedEarly is not null ? $"Stopped early at {100.0 * r.Sectors / isoSectors:0.0}%."
+                        : "Checked to the end.";
+                    r.Message = $"{upTo} Every sector matched up to {blankL0:N0}, where the blank's original layer 0 ended; from there on this drive reads the disc from the wrong place ({bad:N0} sector(s) didn't match). It does that with discs burned with their capacity raised, so the disc is probably fine: verify it in the drive that burned it.";
+                }
+                else r.Message += " This disc was burned with its capacity raised: if another drive burned it, verify it there too before giving up on it.";
+            }
             log?.Invoke($"Verify: {r.Message} ({r.Time:hh\\:mm\\:ss})");
-            if (r.BadRanges.Count > 0)
-                log?.Invoke("Verify: problem sectors at " + string.Join(", ", r.BadRanges.Take(20).Select(b => b.Count == 1 ? $"{b.Lba:N0}" : $"{b.Lba:N0}-{b.Lba + b.Count - 1:N0}"))
-                            + (r.BadRanges.Count > 20 ? $" and {r.BadRanges.Count - 20} more ranges" : ""));
+            if (r.BadRanges.Count > 0) log?.Invoke("Verify: problem sectors at " + check.RangesText());
         }
+
+        // ---- Comparing a disc with an ISO (beta 5) ----
+        // One check for Verify disc and the verify after burning, so both
+        // count the same way: sectors that read but differ, and sectors that
+        // can't be read, each listed exactly (a chunk that won't read is
+        // re-read one sector at a time). It gives up early on a hopeless
+        // disc instead of grinding on for an hour: after 10,000 bad sectors,
+        // or 3 minutes spent re-reading sectors that won't read.
+
+        private const long VerifyGiveUpBad = 10_000;
+        private static readonly TimeSpan VerifyGiveUpRereads = TimeSpan.FromMinutes(3);
+
+        private sealed class IsoCheck
+        {
+            public long Different, Unreadable;
+            public long FirstBad = -1;
+            public List<(long Lba, long Count)> Ranges = new();
+            public string? StoppedEarly;
+            public TimeSpan RereadTime;
+            private long runStart = -1, runCount;
+            public long Bad => Different + Unreadable;
+
+            public void Mark(long lba, bool unreadable)
+            {
+                if (unreadable) Unreadable++; else Different++;
+                if (FirstBad < 0) FirstBad = lba;
+                if (runStart >= 0 && runStart + runCount == lba) runCount++;
+                else
+                {
+                    if (runStart >= 0) Ranges.Add((runStart, runCount));
+                    runStart = lba; runCount = 1;
+                }
+            }
+
+            public void Finish()
+            {
+                if (runStart >= 0) Ranges.Add((runStart, runCount));
+                runStart = -1;
+            }
+
+            public string RangesText(int max = 20) =>
+                string.Join(", ", Ranges.Take(max).Select(b => b.Count == 1 ? $"{b.Lba:N0}" : $"{b.Lba:N0}-{b.Lba + b.Count - 1:N0}"))
+                + (Ranges.Count > max ? $" and {Ranges.Count - max} more ranges" : "");
+        }
+
+        // Reads n sectors from the disc at discLba and compares them with
+        // file (the ISO's sectors from isoLba). False: stop, the disc is
+        // hopeless (check.StoppedEarly says why).
+        private static bool CheckChunk(ScsiDrive drive, long discLba, long isoLba, int n, byte[] file, byte[] disc, IsoCheck check, CancellationToken ct)
+        {
+            var target = n * Sector == disc.Length ? disc : new byte[n * Sector];
+            var cdb = new byte[] { 0x28, 0, (byte)(discLba >> 24), (byte)(discLba >> 16), (byte)(discLba >> 8), (byte)discLba, 0, (byte)(n >> 8), (byte)n, 0 };
+            var rep = RetryWhileBusy(() => drive.Read(cdb, target, 60), 100, 50);
+            if (rep.Ok)
+            {
+                for (int s = 0; s < n; s++)
+                    if (!target.AsSpan(s * Sector, Sector).SequenceEqual(file.AsSpan(s * Sector, Sector))) check.Mark(isoLba + s, false);
+            }
+            else
+            {
+                // Sector by sector, to find exactly which ones won't read.
+                var sw = Stopwatch.StartNew();
+                var one = new byte[Sector];
+                for (int s = 0; s < n; s++)
+                {
+                    if (ct.IsCancellationRequested) break;
+                    long at = discLba + s;
+                    var c1 = new byte[] { 0x28, 0, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, 0, 1, 0 };
+                    var r1 = RetryWhileBusy(() => drive.Read(c1, one, 30), 20, 50);
+                    if (!r1.Ok) check.Mark(isoLba + s, true);
+                    else if (!one.AsSpan().SequenceEqual(file.AsSpan(s * Sector, Sector))) check.Mark(isoLba + s, false);
+                }
+                check.RereadTime += sw.Elapsed;
+            }
+            if (check.Bad >= VerifyGiveUpBad)
+            {
+                check.StoppedEarly = $"more than {VerifyGiveUpBad:N0} sectors don't match, from sector {check.FirstBad:N0} on. It's the wrong disc or ISO, a badly written disc, or a drive that reads this disc differently";
+                return false;
+            }
+            if (check.RereadTime > VerifyGiveUpRereads)
+            {
+                check.StoppedEarly = $"{check.Unreadable:N0} sector(s) so far can't be read (the first problem at sector {check.FirstBad:N0}), and checking them one by one was taking too long. The disc has bad spots: don't rely on it";
+                return false;
+            }
+            return true;
+        }
+
         // ---- BIN/CUE (beta 4) ----
 
         public static Task<VerifyResult> VerifyAgainstCueAsync(string driveLetter, string cuePath, IProgress<VerifyProgress>? progress,

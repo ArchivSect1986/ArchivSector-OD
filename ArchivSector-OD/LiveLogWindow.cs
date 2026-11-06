@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -38,7 +38,9 @@ namespace ArchivSector_OD
         public sealed class Row
         {
             public long Id { get; init; }
-            public string Text { get; init; } = "";
+            public string Text { get; init; } = "";      // the whole row, for Copy
+            public string Head { get; init; } = "";      // level, time, drive
+            public string Message { get; init; } = "";
             public string Full { get; init; } = "";
             public Brush Colour { get; init; } = Brushes.White;
         }
@@ -70,7 +72,9 @@ namespace ArchivSector_OD
             catch { }
 
             // Top bar: drive filter, always on top, copy, open log, clear.
-            var bar = new DockPanel { Background = Panel, LastChildFill = false };
+            // The buttons sit on the right and drop to a second row when the
+            // window is too narrow for them (instead of being cut off).
+            var bar = new DockPanel { Background = Panel, LastChildFill = true };
             var title = new TextBlock { Text = "📜 Live log", Foreground = Plain, FontWeight = FontWeights.Bold, FontSize = 13, Margin = new Thickness(10, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
             driveBox = new ComboBox { Width = 120, Margin = new Thickness(0, 6, 8, 6), VerticalAlignment = VerticalAlignment.Center };
             driveBox.Items.Add("All drives");
@@ -90,7 +94,9 @@ namespace ArchivSector_OD
             var clear = MakeButton("🗑 Clear", "Empties this window only. The log file keeps everything.", (_, _) => { clearedThrough = lastId; rebuild = dirty = true; });
             var openLog = MakeButton("📄 Open log", "Opens today's log file, in easy-to-read blocks", (_, _) => LogService.OpenToday());
             var copy = MakeButton("📋 Copy", "Copies the lines shown (with the drive filter) to the clipboard", (_, _) => CopyShown());
-            foreach (var b in new[] { clear, openLog, copy }) { DockPanel.SetDock(b, Dock.Right); bar.Children.Add(b); }
+            var buttons = new WrapPanel { FlowDirection = FlowDirection.RightToLeft, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+            foreach (var b in new[] { clear, openLog, copy }) { b.FlowDirection = FlowDirection.LeftToRight; buttons.Children.Add(b); }
+            bar.Children.Add(buttons);   // last child: fills what's left of the bar
 
             // The lines. A template keeps the list virtualized (only the
             // lines on screen are drawn), so a long session stays quick.
@@ -102,9 +108,15 @@ namespace ArchivSector_OD
                 FontFamily = new FontFamily("Consolas, Cascadia Mono, Courier New"),
                 FontSize = 12,
                 Padding = new Thickness(6, 4, 6, 4),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 ItemTemplate = (DataTemplate)XamlReader.Parse(
                     "<DataTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
-                    "<TextBlock Text=\"{Binding Text}\" Foreground=\"{Binding Colour}\" ToolTip=\"{Binding Full}\" TextTrimming=\"CharacterEllipsis\"/>" +
+                    // Level, time and drive on the left; the message wraps at the
+                    // window's edge and carries on under itself, never under the time.
+                    "<Grid><Grid.ColumnDefinitions><ColumnDefinition Width=\"Auto\"/><ColumnDefinition Width=\"*\"/></Grid.ColumnDefinitions>" +
+                    "<TextBlock Text=\"{Binding Head}\" Foreground=\"{Binding Colour}\"/>" +
+                    "<TextBlock Grid.Column=\"1\" Text=\"{Binding Message}\" Foreground=\"{Binding Colour}\" ToolTip=\"{Binding Full}\" TextWrapping=\"Wrap\"/>" +
+                    "</Grid>" +
                     "</DataTemplate>"),
             };
             VirtualizingPanel.SetIsVirtualizing(list, true);
@@ -166,7 +178,7 @@ namespace ArchivSector_OD
             }
             while (rows.Count > ShowAtMost) rows.RemoveAt(0);
 
-            status.Text = $"{rows.Count:N0} line(s) shown{(filter is null ? "" : " for " + filter)} · the log file keeps everything · hover a line for all of it";
+            status.Text = $"{rows.Count:N0} line(s) shown{(filter is null ? "" : " for " + filter)} · the log file keeps everything · hover a report for all of it";
             if (atBottom && rows.Count > 0) list.ScrollIntoView(rows[^1]);
         }
 
@@ -174,10 +186,13 @@ namespace ArchivSector_OD
         {
             var parts = l.Text.Replace("\r", "").Split('\n');
             string first = parts[0] + (parts.Length > 1 ? $"   (+{parts.Length - 1} lines, hover to see)" : "");
+            string head = $"{l.Level} {l.Time:HH:mm:ss}  {l.Source,-6} ";
             return new Row
             {
                 Id = l.Id,
-                Text = $"{l.Level} {l.Time:HH:mm:ss}  {l.Source,-6} {first}",
+                Text = head + first,
+                Head = head,
+                Message = first,
                 Full = l.Text.Replace("\r", ""),
                 Colour = l.Level == 'E' ? Red
                     : l.Level == 'W' ? Amber
