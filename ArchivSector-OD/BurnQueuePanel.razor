@@ -1,4 +1,4 @@
-@using System.IO
+﻿@using System.IO
 @using System.Windows
 @using ArchivSector_OD.Burning
 @implements IDisposable
@@ -12,9 +12,13 @@
     disc health check on the fresh disc, then ejects it and asks for the
     next blank. The drive is marked busy for the whole queue, so the drive
     bays and the Burn tab's scan leave it alone.
+    Beta 4: ISOs and .cue files (or folders of them) can be dropped onto
+    the queue from Explorer (FileDrop). The list of images still to burn is
+    kept in %AppData%\ArchivSector-OD\burn-queue.txt and put back when the
+    app starts again.
 *@
 
-<div class="bay-card">
+<div class="bay-card" data-file-drop="@(running ? null : "burn-queue")">
     <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
         <h2 style="margin: 0;">📚 Burn queue</h2>
         <div style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -25,11 +29,19 @@
             }
         </div>
     </div>
-    <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs (or BIN/CUE CD images) one after another. After each disc it's ejected, and the next one starts when you put in a blank.</p>
+    <p class="bay-subtitle" style="color: var(--text-secondary); font-size: 12px;">Burn several ISOs (or BIN/CUE CD images) one after another. After each disc it's ejected, and the next one starts when you put in a blank. You can also drag them here from File Explorer.</p>
+    @if (restoredNote is not null)
+    {
+        <p style="margin: 0 0 8px; font-size: 12px; color: var(--text-secondary);">↺ @restoredNote</p>
+    }
+    @if (dropNote is not null)
+    {
+        <p style="margin: 0 0 8px; font-size: 12px; color: var(--amber);">⚠ @dropNote</p>
+    }
 
     @if (items.Count == 0)
     {
-        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add ISOs to start a queue.</p>
+        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">Add ISOs, or drop them here, to start a queue.</p>
     }
     else
     {
@@ -56,7 +68,7 @@
             <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px; margin-top: 12px; color: var(--text-primary);">
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <strong style="min-width: 80px;">Drive</strong>
-                    <select class="settings-input" @bind="driveLetter" style="flex: 1; font-size: 13px;">
+                    <select class="settings-input" @bind="driveLetter" @bind:after="CheckSpeeds" style="flex: 1; font-size: 13px;">
                         @foreach (var d in Drives)
                         {
                             <option value="@Letter(d)" style="background: var(--bg-panel-alt); color: var(--text-primary);">@d.DisplayName</option>
@@ -85,10 +97,12 @@
                 }
                 <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                     <strong style="min-width: 80px;">Speed</strong>
-                    <select class="settings-input" @bind="speedChoice" style="font-size: 13px;">
-                        <option value="Fastest" style="background: var(--bg-panel-alt); color: var(--text-primary);">Fastest</option>
-                        <option value="Middle" style="background: var(--bg-panel-alt); color: var(--text-primary);">Middle</option>
-                        <option value="Slowest" style="background: var(--bg-panel-alt); color: var(--text-primary);">Slowest</option>
+                    <select class="settings-input" @bind="speedChoice" style="font-size: 13px;" disabled="@speedsLoading">
+                        <option value="Fastest" style="background: var(--bg-panel-alt); color: var(--text-primary);">@(speeds.Count > 0 ? $"Fastest ({speeds[0].Label})" : "Fastest")</option>
+                        @foreach (var sp in speeds.Skip(1))
+                        {
+                            <option value="@SpeedKey(sp.X)" style="background: var(--bg-panel-alt); color: var(--text-primary);">@sp.Label</option>
+                        }
                     </select>
                     <span style="font-size: 12px; color: var(--text-secondary);">@SpeedHelp</span>
                 </div>
@@ -133,7 +147,7 @@
         {
             <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;">
                 <button class="bay-btn game" style="width: auto; padding: 0 18px;" @onclick="Start" disabled="@(Todo == 0 || string.IsNullOrEmpty(driveLetter))">
-                    🔥 Burn @(Todo == 1 ? "1 ISO" : Todo + " ISOs")
+                    🔥 Burn @(HowMany(Todo, items.Any(i => i.State == ItemState.Waiting && i.IsCue)))
                 </button>
                 @if (items.Any(i => i.State != ItemState.Waiting))
                 {
@@ -167,6 +181,9 @@
         // BIN/CUE CD image (beta 2): its layout, read when it's added.
         public CueImage? Cue;
         public bool IsCue => Path.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+        // Layer break file (beta 4): an image and where its layer 0 ends.
+        public DvdLayerFile? Dvd;
+        public bool IsDvd => DvdLayerFile.IsDvdFile(Path);
     }
 
     // A queue item from a file: an ISO, or a BIN/CUE CD image (its size is the sectors it fills).
@@ -178,6 +195,11 @@
             it.Cue = CueImage.Load(full);
             if (it.Cue.Problem is null) it.Bytes = (it.Cue.LeadOutLba + 150) * 2048L;
         }
+        else if (it.IsDvd)
+        {
+            it.Dvd = DvdLayerFile.Load(full);
+            if (it.Dvd.Problem is null) it.Bytes = it.Dvd.ImageBytes;
+        }
         else
         {
             try { it.Bytes = new FileInfo(full).Length; } catch { }
@@ -186,6 +208,9 @@
     }
 
     private readonly List<QueueItem> items = new();
+    private string? restoredNote;   // beta 4: what came back from last time
+    private string savedList = "";
+    private string? dropNote;   // what a drop left out (beta 4)
     private string driveLetter = "";
     private string? imgBurnPath;
     private bool useImgBurn, verify = true, healthCheck, deleteIso, settingsLoaded;
@@ -193,9 +218,51 @@
     // v4.0 week 6: write speed, picked for each disc from the speeds the
     // drive offers for it (discs differ, so not one fixed speed).
     private string speedChoice = "Fastest";
-    private string SpeedHelp => speedChoice == "Fastest"
-        ? "The fastest the drive offers for each disc."
-        : "Picked for each disc from the speeds the drive offers for it. A disc with only one speed uses that.";
+    // Beta 4: the speeds the drive offers for the blank in it now, so the
+    // list shows real speeds (16x, 12x, 8x...) instead of fastest / middle /
+    // slowest. Each disc in the queue gets the chosen speed, or the nearest
+    // slower one it offers (discs differ).
+    private List<BurnEngine.WriteSpeed> speeds = new();
+    private bool speedsLoading;
+    private string speedsKey = "", speedsFor = "";
+    private static string SpeedKey(double x) => x.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private string SpeedHelp => speedsLoading ? "Reading the blank disc's speeds…"
+        : speeds.Count == 0 ? (speedChoice == "Fastest" ? $"The fastest the drive offers for each disc. Put a blank disc in Drive {driveLetter}: to choose a speed." : "")
+        : speedChoice == "Fastest" ? $"The fastest the drive offers for each disc (the {speedsFor} in it now: {speeds[0].Label})."
+        : $"Speeds the drive offers for the {speedsFor} in it now. Each disc gets this speed, or the nearest slower one it offers.";
+
+    // The chosen drive's blank changed (or another drive was chosen): read its speeds.
+    private void CheckSpeeds()
+    {
+        if (running) return;
+        var d = Drives.FirstOrDefault(x => Letter(x) == driveLetter);
+        string key = d is null ? "" : $"{driveLetter}|{d.Media.State}|{d.Media.Type}|{d.Media.FreeSectors}|{d.Busy}";
+        if (key == speedsKey) return;
+        speedsKey = key;
+        if (d is null || d.Busy || !d.Media.CanBurnNow)
+        {
+            speeds = new();
+            if (speedChoice != "Fastest" && d?.Busy != true) speedChoice = "Fastest";
+            return;
+        }
+        _ = LoadSpeeds(driveLetter, d.Media.TypeName);
+    }
+
+    private async Task LoadSpeeds(string letter, string mediaName)
+    {
+        speedsLoading = true;
+        StateHasChanged();
+        List<BurnEngine.WriteSpeed> found;
+        try { found = await Task.Run(() => BurnEngine.QueryWriteSpeeds(letter)); }
+        catch { found = new(); }
+        speedsLoading = false;
+        if (letter != driveLetter || disposed) return;
+        speeds = found;
+        speedsFor = mediaName;
+        // Keep the choice if this disc offers it too.
+        if (speedChoice != "Fastest" && !speeds.Skip(1).Any(sp => SpeedKey(sp.X) == speedChoice)) speedChoice = "Fastest";
+        StateHasChanged();
+    }
 
     private bool running, stopAfterCurrent, disposed;
     private CancellationTokenSource? cts;
@@ -210,6 +277,8 @@
     private string SummaryIcon => summaryOk ? "✅" : summaryStopped ? "⏸" : "⚠";
 
     private int Todo => items.Count(i => i.State == ItemState.Waiting);
+    // "2 ISOs", or "2 images" once a BIN/CUE is among them (beta 4).
+    private static string HowMany(int n, bool anyCue) => anyCue ? (n == 1 ? "1 image" : $"{n} images") : (n == 1 ? "1 ISO" : $"{n} ISOs");
 
     // Each disc counts its own steps (burn, verify, health check), so the
     // overall bar only moves forward as a disc goes from one step to the next.
@@ -239,7 +308,9 @@
         _ => "•",
     };
     private static string Line(QueueItem it) => it.Detail
-        ?? (it.Cue is not null
+        ?? (it.Dvd is not null
+            ? (it.Dvd.Problem is null ? "Layer break file: " + it.Dvd.Summary : "Layer break file: " + it.Dvd.Problem)
+            : it.Cue is not null
             ? (it.Cue.Problem is null ? "BIN/CUE CD image: " + it.Cue.Summary : "BIN/CUE: " + it.Cue.Problem)
             : $"{DiscHealthService.FormatBytes(it.Bytes)} ({it.Bytes:N0} bytes)");
 
@@ -258,6 +329,7 @@
         // Keep the chosen drive; pick the first one if none is chosen yet.
         if ((string.IsNullOrEmpty(driveLetter) || !Drives.Any(d => Letter(d) == driveLetter)) && Drives.Count > 0 && !running)
             driveLetter = Letter(Drives[0]);
+        CheckSpeeds();
     }
 
     // A program picked here is remembered (the same setting as the bays' burn screen).
@@ -273,7 +345,7 @@
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Title = "Choose the ISOs (or BIN/CUE CD images) to burn",
-            Filter = "Disc images (*.iso, *.cue)|*.iso;*.cue|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|All files (*.*)|*.*",
+            Filter = "Disc images (*.iso, *.cue, *.dvd)|*.iso;*.cue;*.dvd|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|Layer break files (*.dvd)|*.dvd|All files (*.*)|*.*",
             Multiselect = true,
         };
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
@@ -284,6 +356,107 @@
             items.Add(MakeItem(full));
         }
         summary = null;
+        dropNote = null;
+    }
+
+    protected override void OnInitialized()
+    {
+        FileDrop.Dropped += OnFilesDropped;
+        RestoreQueue();
+    }
+
+    // ---- the list kept between runs of the app (beta 4) ----
+
+    private static string QueueFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ArchivSector-OD", "burn-queue.txt");
+
+    // The images not burned yet, one path per line, in order.
+    private string PendingList() =>
+        string.Join("\n", items.Where(i => i.State != ItemState.Done).Select(i => i.Path));
+
+    private void RestoreQueue()
+    {
+        try
+        {
+            if (!File.Exists(QueueFile)) return;
+            var paths = File.ReadAllLines(QueueFile).Select(l => l.Trim()).Where(l => l.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            int gone = 0;
+            foreach (var p in paths)
+            {
+                if (!File.Exists(p)) { gone++; continue; }
+                if (items.Any(i => string.Equals(i.Path, p, StringComparison.OrdinalIgnoreCase))) continue;
+                items.Add(MakeItem(p));
+            }
+            savedList = PendingList();
+            if (items.Count > 0 || gone > 0)
+                restoredNote = (items.Count > 0 ? $"{HowMany(items.Count, items.Any(i => i.IsCue))} from last time {(items.Count == 1 ? "is" : "are")} back in the queue." : "")
+                    + (gone > 0 ? $" {gone} from last time {(gone == 1 ? "isn't" : "aren't")} there any more and {(gone == 1 ? "was" : "were")} left out." : "");
+            restoredNote = restoredNote?.Trim();
+            if (gone > 0) SaveQueue();
+        }
+        catch { }
+    }
+
+    // Saved whenever the list of images still to burn changes.
+    private void SaveQueue()
+    {
+        var now = PendingList();
+        if (now == savedList) return;
+        savedList = now;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(QueueFile)!);
+            if (now.Length == 0) { if (File.Exists(QueueFile)) File.Delete(QueueFile); }
+            else File.WriteAllText(QueueFile, now);
+        }
+        catch { }
+    }
+
+    protected override void OnAfterRender(bool firstRender) => SaveQueue();
+
+    // Files dropped from Explorer (beta 4): ISOs and .cue files are added in
+    // the order dropped; a folder adds the ISOs and .cue files inside it
+    // (not its subfolders). Anything else is left out and said so.
+    private void OnFilesDropped(string target, IReadOnlyList<string> paths)
+    {
+        if (target != "burn-queue") return;
+        _ = InvokeAsync(() => AddDropped(paths));
+    }
+
+    private static bool IsImageFile(string p) =>
+        p.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) || DvdLayerFile.IsDvdFile(p);
+
+    private void AddDropped(IReadOnlyList<string> paths)
+    {
+        if (running || disposed) return;
+        var files = new List<string>();
+        var skipped = new List<string>();
+        foreach (var p in paths)
+        {
+            try
+            {
+                if (Directory.Exists(p))
+                {
+                    var inside = Directory.EnumerateFiles(p).Where(IsImageFile).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+                    if (inside.Count == 0) skipped.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(p)) + " (no ISOs or .cue files in it)");
+                    files.AddRange(inside);
+                }
+                else if (File.Exists(p) && IsImageFile(p)) files.Add(p);
+                else skipped.Add(Path.GetFileName(p));
+            }
+            catch { skipped.Add(Path.GetFileName(p)); }
+        }
+        int added = 0;
+        foreach (var f in files)
+        {
+            var full = Path.GetFullPath(f);
+            if (items.Any(i => string.Equals(i.Path, full, StringComparison.OrdinalIgnoreCase))) continue;
+            items.Add(MakeItem(full));
+            added++;
+        }
+        if (added > 0) summary = null;
+        dropNote = skipped.Count == 0 ? null
+            : "Only ISOs, .cue and .dvd files can be queued, so this was left out: " + string.Join(", ", skipped.Take(5)) + (skipped.Count > 5 ? $" and {skipped.Count - 5} more" : "") + ".";
+        StateHasChanged();
     }
 
     /// <summary>Adds one ISO to the list (from Build mode). Ignored if it's already there.</summary>
@@ -304,7 +477,7 @@
         items.Insert(i - 1, it);
     }
 
-    private void ClearList() { items.Clear(); summary = null; }
+    private void ClearList() { items.Clear(); summary = null; dropNote = null; restoredNote = null; }
 
     private void ResetList()
     {
@@ -346,7 +519,7 @@
         // The whole queue owns the drive: the bays and the Burn tab's scan leave it alone.
         RipActivity.Set(letter, "queue", true);
         string speedPick = speedChoice;
-        LogService.Write($"{letter}:", $"Burn queue started: {total} ISO(s), {engineName}, speed {speedPick.ToLowerInvariant()}, verify {(doVerify ? "on" : "off")}, health check {(doHealth ? "on" : "off")}");
+        LogService.Write($"{letter}:", $"Burn queue started: {HowMany(total, todo.Any(i => i.IsCue))}, {engineName}, speed {speedPick.ToLowerInvariant()}, verify {(doVerify ? "on" : "off")}, health check {(doHealth ? "on" : "off")}");
         int ok = 0, failed = 0, skipped = 0;
         bool userStopped = false;
 
@@ -402,6 +575,26 @@
                     }
                 }
 
+                // A layer break file (beta 4) needs our own writer or ImgBurn (Windows can't set a layer break).
+                if (it.IsDvd)
+                {
+                    string? dvdSkip = it.Dvd?.Problem is not null ? "Skipped: " + it.Dvd.Problem : null;
+                    if (dvdSkip is null && !direct && !imgBurn)
+                    {
+                        if (BurnEngine.DirectWriteSupports(blank.MediaType)) direct = true;
+                        else if (imgBurnPath is not null) imgBurn = true;
+                        else dvdSkip = "Skipped: Windows can't set a layer break, and neither ArchivSector-OD's own writer nor ImgBurn can burn this disc.";
+                    }
+                    if (dvdSkip is not null)
+                    {
+                        it.State = ItemState.Skipped;
+                        it.Detail = dvdSkip;
+                        skipped++;
+                        LogService.Write($"{letter}:", "Burn queue: skipped " + it.Path + " — " + it.Detail);
+                        continue;
+                    }
+                }
+
                 bool wholeDisc = imgBurn || direct;
                 long limit = wholeDisc ? BurnEngine.FullDiscBytes(blank.MediaType, Math.Max(blank.TotalBytes, blank.FreeBytes)) : blank.FreeBytes;
                 if (it.Bytes > limit)
@@ -414,9 +607,31 @@
                     continue;   // the blank disc stays in for the next ISO
                 }
 
-                // This disc's speed (0 = fastest).
+                // This disc's speed (0 = fastest). An Xbox 360 game left at
+                // "Fastest" gets the slowest the disc offers instead (beta 4):
+                // fast burns are what give "Disc Unrecognizable" on the console.
+                string? xbox = it.IsCue ? null : BurnEngine.XboxGameKind(it.Dvd?.ImagePath ?? it.Path);
+                // Beta 4: an Xbox image with blank security data is skipped, whatever program would burn it.
+                if (xbox is not null && BurnEngine.XboxSecurityDataPresent(it.Dvd?.ImagePath ?? it.Path) == false)
+                {
+                    it.State = ItemState.Skipped;
+                    it.Detail = "Skipped: " + BurnEngine.XboxSecurityDataBlank;
+                    skipped++;
+                    LogService.Write($"{letter}:", "Burn queue: skipped " + it.Path + " — " + it.Detail);
+                    continue;   // the blank disc stays in for the next one
+                }
                 double speedX = speedPick == "Fastest" ? 0 : await Task.Run(() => BurnEngine.PickSpeed(letter, speedPick));
-                if (speedX > 0) LogService.Write($"{letter}:", $"Burn queue: {speedPick.ToLowerInvariant()} speed for this {blank.MediaType} is {BurnEngine.SpeedText(speedX)}");
+                if (xbox is not null && speedPick == "Fastest")
+                {
+                    speedX = await Task.Run(() => BurnEngine.PickSpeed(letter, "Slowest"));
+                    LogService.Write($"{letter}:", speedX > 0
+                        ? $"Burn queue: Xbox 360 {xbox} game, so it's burned at the slowest speed this {blank.MediaType} offers ({BurnEngine.SpeedText(speedX)})"
+                        : $"Burn queue: Xbox 360 {xbox} game; this {blank.MediaType} offers only one speed");
+                }
+                else if (speedPick != "Fastest")
+                    LogService.Write($"{letter}:", speedX > 0
+                        ? $"Burn queue: {speedPick}x asked; this {blank.MediaType} is burned at {BurnEngine.SpeedText(speedX)}"
+                        : $"Burn queue: {speedPick}x asked; this {blank.MediaType} is burned at its fastest (it offers nothing slower that fits, or only one speed)");
 
                 // 2. Burn (and verify).
                 phaseIndex = 0;
@@ -431,7 +646,7 @@
                     stepPercent = p.Percent;
                     Ui();
                 });
-                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete && !it.IsCue, direct, speedX);
+                var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete && !it.IsCue && !it.IsDvd, direct, speedX);
                 stepPercent = -1;
                 LogService.Write($"{letter}:", "Burn queue: " + it.Path + " — " + r.Message);
 
@@ -439,6 +654,8 @@
                 {
                     it.State = ItemState.Failed;
                     it.Detail = r.Message;
+                    // An XGD3 game refused on a drive BurnerMAX hasn't worked on: point to one it has (beta 4).
+                    if (xbox == "XGD3" && r.NoFallback && BurnService.BurnerMaxHint(model) is string hint) it.Detail += " " + hint;
                     failed++;
                     if (r.Cancelled || ct.IsCancellationRequested) break;
                 }
@@ -509,5 +726,9 @@
     }
 
     // Leaving the tab never stops a running queue; it carries on.
-    public void Dispose() => disposed = true;
+    public void Dispose()
+    {
+        disposed = true;
+        FileDrop.Dropped -= OnFilesDropped;
+    }
 }

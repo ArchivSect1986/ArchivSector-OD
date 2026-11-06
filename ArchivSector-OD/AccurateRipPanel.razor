@@ -1,0 +1,176 @@
+﻿@using System.IO
+@using ArchivSector_OD.Burning
+@implements IDisposable
+
+@*
+    AccurateRip mode (v4.0 beta 4): is a music CD's BIN/CUE bit-perfect?
+    Its music tracks are compared with other people's rips of the same CD
+    in the AccurateRip database (AccurateRip in the burning library). Any
+    BIN/CUE: one Read disc just made (its "Check with AccurateRip" button
+    hands it here), a Redumper or EAC rip, or a .cue dropped from File
+    Explorer. Only the image is read; no drive is used.
+*@
+
+<div class="bay-card" data-file-drop="@(running ? null : "accuraterip")" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;">
+        <div>
+            <h2 style="margin: 0;">🎯 AccurateRip check</h2>
+            <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Is a music CD's BIN/CUE bit-perfect? Its music tracks are compared with other people's rips of the same CD (needs the internet). Choose a .cue, or drag one here from File Explorer.</p>
+        </div>
+        <button class="shortcut-btn" @onclick="ChooseCue" disabled="@running">🎯 Check a BIN/CUE…</button>
+    </div>
+
+    @if (dropNote is not null)
+    {
+        <span style="font-size: 12px; color: var(--amber);">⚠ @dropNote</span>
+    }
+
+    @if (running)
+    {
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px;">
+            <span><strong>Checking</strong> @Path.GetFileName(cuePath)…</span>
+            <div class="progress-bar"><div class="progress-fill" style="width: @PercentText%;"></div></div>
+            <button class="bay-btn cancel-btn" style="width: auto; align-self: flex-start; padding: 8px 18px;" @onclick="Cancel">✖ Stop</button>
+        </div>
+    }
+    else if (result is not null)
+    {
+        <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px;">
+            <strong style="color: @ResultColor;">@ResultIcon @result.Message</strong>
+            @if (result.Tracks.Count > 0)
+            {
+                <div style="display: flex; flex-direction: column; gap: 2px; font-size: 12px;">
+                    @foreach (var t in result.Tracks)
+                    {
+                        <span style="color: @(t.Accurate ? "var(--text-primary)" : "var(--amber)");">@TrackLine(t)</span>
+                    }
+                </div>
+            }
+            @if (learnNote is not null)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">💡 @learnNote</span>
+            }
+            else if (result.Offset is int off && off != 0 && result.AccurateCount > 0)
+            {
+                <span style="font-size: 12px; color: var(--text-secondary);">💡 If this image came from your drive with no read offset set, that drive's offset is @off.ToString("+0;-0") samples: set it under Read offset in Read disc, and later rips will match with no shift.</span>
+            }
+            <span style="font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere;">@cuePath@(result.Pressings > 0 ? $" · {result.Pressings} checksum set(s) in the database" : "")</span>
+        </div>
+    }
+    else
+    {
+        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">A CD is in the database once someone has ripped it with EAC, dBpoweramp or another AccurateRip ripper. Most store-bought music CDs are; game discs and burned CDs often aren't.</p>
+    }
+</div>
+
+@code {
+    private bool running, disposed;
+    private double percent;
+    private string? cuePath, dropNote, learnNote;
+    private AccurateRip.Result? result;
+    private CancellationTokenSource? cts;
+    private static string? lastFolder;
+
+    private string PercentText => percent.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+    private bool AllAccurate => result is not null && result.Ok && result.Tracks.Count > 0 && result.AccurateCount == result.Tracks.Count;
+    private string ResultColor => result is null ? "" : AllAccurate ? "var(--success)" : result.Ok && result.InDatabase ? "var(--amber)" : "var(--text-secondary)";
+    private string ResultIcon => result is null ? "" : AllAccurate ? "✅" : result.Cancelled ? "⏸" : result.Ok && !result.InDatabase ? "ℹ" : "⚠";
+
+    private static string TrackLine(AccurateRip.TrackResult t) =>
+        $"Track {t.Number:D2}: " + (t.Accurate ? $"✅ accurate (confidence {t.Confidence})"
+            : t.BestConfidence > 0 ? $"⚠ no match (the database's best has confidence {t.BestConfidence})"
+            : "⚠ not in the database");
+
+    protected override void OnInitialized() => FileDrop.Dropped += OnFilesDropped;
+
+    private async Task ChooseCue()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose the music CD's .cue to check",
+            Filter = "BIN/CUE (*.cue)|*.cue",
+        };
+        if (lastFolder is not null && Directory.Exists(lastFolder)) dlg.InitialDirectory = lastFolder;
+        if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+        await Check(dlg.FileName);
+    }
+
+    // A .cue dropped from Explorer (the first one, if several).
+    private void OnFilesDropped(string target, IReadOnlyList<string> paths)
+    {
+        if (target != "accuraterip") return;
+        _ = InvokeAsync(() => CheckDropped(paths));
+    }
+
+    private async Task CheckDropped(IReadOnlyList<string> paths)
+    {
+        if (disposed || running) return;
+        var cue = paths.FirstOrDefault(p => p.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) && File.Exists(p));
+        dropNote = cue is null ? "Only a .cue can be checked (the .cue of a BIN/CUE, not the .bin)." : null;
+        StateHasChanged();
+        if (cue is not null) await Check(cue);
+    }
+
+    /// <summary>Checks a BIN/CUE (also called by Read disc's "Check with AccurateRip").</summary>
+    public async Task Check(string cue)
+    {
+        if (running) return;
+        running = true;
+        cuePath = cue;
+        lastFolder = Path.GetDirectoryName(cue);
+        percent = 0;
+        result = null;
+        dropNote = null;
+        learnNote = null;
+        cts = new CancellationTokenSource();
+        StateHasChanged();
+        var reporter = new Progress<double>(p => { percent = p; if (!disposed) InvokeAsync(StateHasChanged); });
+        try
+        {
+            result = await AccurateRip.CheckAsync(cue, reporter, cts.Token, line => LogService.Write("AccurateRip:", line.StartsWith("AccurateRip: ") ? line.Substring(13) : line));
+        }
+        catch (Exception ex)
+        {
+            result = new AccurateRip.Result { Message = "The check stopped: " + ex.Message };
+        }
+        finally
+        {
+            cts.Dispose();
+            cts = null;
+            running = false;
+        }
+        Learn(cue);
+        if (!disposed) StateHasChanged();
+    }
+
+    // Beta 4: a check of the CD Read disc just read tells that drive's real
+    // read offset (what it was read with plus the shift found). It's saved
+    // when at least half the tracks are accurate, so a different pressing
+    // or a bad read can't set a wrong one.
+    private void Learn(string cue)
+    {
+        var last = ReadOffsetService.LastRead;
+        if (result is null || !result.Ok || result.Offset is not int shift || last is null) return;
+        if (!string.Equals(Path.GetFullPath(last.Value.Cue), Path.GetFullPath(cue), StringComparison.OrdinalIgnoreCase)) return;
+        if (result.Tracks.Count == 0 || result.AccurateCount * 2 < result.Tracks.Count) return;
+        var (_, model, applied) = last.Value;
+        int real = applied + shift;
+        if (shift == 0)
+        {
+            learnNote = $"The {model}'s read offset ({applied:+0;-0;0} samples) is right: this read matches with no shift.";
+            return;
+        }
+        ReadOffsetService.Save(model, real);
+        learnNote = $"Saved {real:+0;-0;0} samples as the read offset for the {model}, learned from this check: later reads will match with no shift.";
+        LogService.Write("AccurateRip:", $"read offset {real:+0;-0;0} samples saved for the {model} (read with {applied:+0;-0;0}, lined up at {shift:+0;-0})");
+    }
+
+    private void Cancel() => cts?.Cancel();
+
+    // Leaving the tab doesn't stop a check; it carries on.
+    public void Dispose()
+    {
+        disposed = true;
+        FileDrop.Dropped -= OnFilesDropped;
+    }
+}

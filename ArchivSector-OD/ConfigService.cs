@@ -53,6 +53,21 @@ namespace ArchivSector_OD
         // verified (every byte matched). Off by default.
         public bool DeleteIsoAfterBurn { get; set; } = false;
 
+        // v4.0 beta 4: each drive model's read offset for music CDs, in
+        // samples ("ASUS BW-16D1HT" -> 6), set in Read disc. Music read to
+        // BIN/CUE (Read disc, Copy disc) is shifted back by it.
+        public Dictionary<string, int> ReadOffsets { get; set; } = new();
+
+        // v4.0 beta 4: where the BurnerMAX Payload Tool is (asked the first
+        // time the Write panel opens it for an Xbox 360 XGD3 game). Not
+        // shipped with the app: it's someone else's program.
+        public string BurnerMaxPath { get; set; } = "";
+
+        // v4.0 beta 4: drive models BurnerMAX has raised a DVD+R DL's
+        // capacity on (learned when the Write panel sees it raised), so a
+        // drive it doesn't work on can point to one it does.
+        public List<string> BurnerMaxDrives { get; set; } = new();
+
         // v3.4: shortcuts the user said "No" to repointing ("<link>|<target>"),
         // so they aren't asked about again.
         public List<string> IgnoredShortcuts { get; set; } = new();
@@ -61,6 +76,10 @@ namespace ArchivSector_OD
         // offer to install it (Settings -> "Check for updates when the
         // app starts").
         public bool CheckForUpdatesOnStartup { get; set; } = true;
+
+        // v4.0 beta 4: the Burn tab's 📜 Live log opens each time the tab is
+        // shown (Settings -> "Open the Live log whenever the Burn tab is shown").
+        public bool LiveLogOpensWithBurnTab { get; set; } = true;
 
         public bool AutoFetchMetadataArt { get; set; } = true;
         public bool BatchQueueMode { get; set; } = false;

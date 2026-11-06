@@ -35,6 +35,36 @@ else if (state == State.Confirm && isoPath is not null)
         {
             <span style="color: var(--amber); font-size: 12px;">⚠ @CueProblem</span>
         }
+        @if (xboxKind is not null)
+        {
+            <span class="bay-subtitle" style="margin: 0;">🎮 Xbox 360 @xboxKind game: the layer break is set for a console (sector @(xboxKind == "XGD3" ? "2,133,520" : "1,913,760")).@(xboxSlowest ? " The slowest speed is picked: Xbox discs burned slowly read best on the console." : "")</span>
+        }
+        @if (xboxBlank)
+        {
+            <span style="color: var(--danger); font-size: 12px;">⚠ @BurnEngine.XboxSecurityDataBlank</span>
+        }
+        @if (NeedsBurnerMax && !xboxBlank)
+        {
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; border-left: 3px solid var(--amber); padding-left: 10px;">
+                @if (BurnService.BurnerMaxHint(DriveModel) is string hint)
+                {
+                    <span style="color: var(--amber);">💡 @hint</span>
+                }
+                <span>An XGD3 game needs @BurnEngine.Xgd3Sectors.ToString("N0") sectors, and this DVD+R DL takes @(raisedSectors > 0 ? raisedSectors.ToString("N0") : "fewer"). Raise its capacity with the <strong>BurnerMAX Payload Tool</strong>: pick <strong>@DriveLetter:</strong> in its list and click <strong>BurnerMAX</strong> (tick <strong>Auto</strong> there to have it do every blank you put in). Then click Check again.</span>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button class="shortcut-btn" @onclick="OpenBurnerMax">🛠 Open BurnerMAX</button>
+                    <button class="shortcut-btn" @onclick="CheckCapacity" disabled="@checkingCapacity">@(checkingCapacity ? "⏳ Checking…" : "🔄 Check again")</button>
+                </div>
+                @if (burnerMaxNote is not null)
+                {
+                    <span style="color: var(--text-secondary);">@burnerMaxNote</span>
+                }
+            </div>
+        }
+        else if (xboxKind == "XGD3" && raisedSectors >= BurnEngine.Xgd3Sectors)
+        {
+            <span class="bay-subtitle" style="margin: 0; color: var(--success);">✅ Capacity raised to @raisedSectors.ToString("N0") sectors: room for the XGD3 game.</span>
+        }
         <span class="bay-subtitle" style="margin: 0;">
             @DiscHealthService.FormatBytes(isoBytes) of @DiscHealthService.FormatBytes(Limit)
             (@(Limit > 0 ? (100.0 * isoBytes / Limit).ToString("0.0") : "?")% of what @EngineName can write)
@@ -63,8 +93,8 @@ else if (state == State.Confirm && isoPath is not null)
                 <input type="radio" name="engine-@DriveLetter" checked="@(useImgBurn && !useDirect)" disabled="@(imgBurnPath is null)" @onchange="() => Pick(BurnService.Writer.ImgBurn)" />
                 ImgBurn @(imgBurnPath is null ? "(not installed)" : "(opens its own window with its progress)")
             </label>
-            <label style="display: flex; gap: 8px; align-items: center; cursor: @(IsCue ? "default" : "pointer"); opacity: @(IsCue ? "0.5" : "1");">
-                <input type="radio" name="engine-@DriveLetter" checked="@(!useImgBurn && !useDirect)" disabled="@IsCue" @onchange="() => Pick(BurnService.Writer.Windows)" />
+            <label style="display: flex; gap: 8px; align-items: center; cursor: @(NoWindows ? "default" : "pointer"); opacity: @(NoWindows ? "0.5" : "1");">
+                <input type="radio" name="engine-@DriveLetter" checked="@(!useImgBurn && !useDirect)" disabled="@NoWindows" @onchange="() => Pick(BurnService.Writer.Windows)" />
                 Windows @WindowsLabel
             </label>
             @if (engineNote is not null)
@@ -112,7 +142,7 @@ else if (state == State.Confirm && isoPath is not null)
         </label>
         <label style="display: flex; gap: 8px; align-items: center; cursor: @(verify ? "pointer" : "default"); font-size: 13px; opacity: @(verify ? "1" : "0.5");"
                title="Only after the disc was verified and every byte matched. You can restore it from the Recycle Bin.">
-            <input type="checkbox" checked="@(deleteIso && verify && !IsCue)" disabled="@(!verify || IsCue)" @onchange="e => SetDeleteIso((bool)(e.Value ?? false))" />
+            <input type="checkbox" checked="@(deleteIso && verify && !NoWindows)" disabled="@(!verify || NoWindows)" @onchange="e => SetDeleteIso((bool)(e.Value ?? false))" />
             Move the ISO to the Recycle Bin once the disc is burned and verified
         </label>
         <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; font-size: 13px;"
@@ -241,9 +271,15 @@ else if (state == State.Done && result is not null)
     private static string SpeedKey(double x) => x.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
     private string SpeedLog => speedX > 0 ? BurnEngine.SpeedText(speedX) : "fastest";
 
+    // Beta 4: an Xbox 360 game starts at the slowest speed the drive offers
+    // (usually 2.4x on DVD+R DL): fast burns are what give "Disc
+    // Unrecognizable" on the console. The user can still pick another.
+    private bool xboxSlowest;
+
     private void OnSpeedChanged(ChangeEventArgs e)
     {
         speedX = double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var x) ? x : 0;
+        xboxSlowest = false;
     }
 
     private async Task LoadSpeeds()
@@ -251,11 +287,18 @@ else if (state == State.Done && result is not null)
         speedsLoading = true;
         speeds = new();
         speedX = 0;
+        xboxSlowest = false;
         var letter = DriveLetter;
         List<BurnEngine.WriteSpeed> found;
         try { found = await Task.Run(() => BurnEngine.QueryWriteSpeeds(letter)); }
         catch { found = new(); }
         speeds = found;
+        if (xboxKind is not null && found.Count > 1)
+        {
+            speedX = found[^1].X;
+            xboxSlowest = true;
+            LogService.Write($"{DriveLetter}:", $"Burn: Xbox 360 {xboxKind} game, so the slowest speed is picked ({BurnEngine.SpeedText(speedX)})");
+        }
         speedsLoading = false;
         await InvokeAsync(StateHasChanged);
     }
@@ -268,13 +311,19 @@ else if (state == State.Done && result is not null)
     // BIN/CUE CD images (beta 2): our own writer (CD-R/RW) or ImgBurn; Windows can't.
     private CueImage? cue;
     private bool IsCue => isoPath is not null && isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
-    private string CueLine => cue is null ? "" : cue.Problem is null ? "BIN/CUE CD image: " + cue.Summary : "";
-    private string? CueProblem => !IsCue ? null
+    // Beta 4: a .dvd file (ImgBurn's layer break file): our own writer or ImgBurn; Windows can't set a layer break.
+    private DvdLayerFile? dvd;
+    private bool IsDvd => isoPath is not null && DvdLayerFile.IsDvdFile(isoPath);
+    private bool NoWindows => IsCue || IsDvd;
+    private string CueLine => dvd is not null ? (dvd.Problem is null ? "Layer break file: " + dvd.Summary : "")
+        : cue is null ? "" : cue.Problem is null ? "BIN/CUE CD image: " + cue.Summary : "";
+    private string? CueProblem => IsDvd ? (dvd?.Problem ?? (BlankMediaType != "DVD+R DL" ? $"A layer break only matters on a DVD+R DL; on this {BlankMediaType} the image is burned as it is." : null))
+        : !IsCue ? null
         : BlankMediaType is not ("CD-R" or "CD-RW") ? "A BIN/CUE image is a CD image: it needs a blank CD-R or CD-RW, not a " + BlankMediaType + "."
         : cue?.Problem is not null ? cue.Problem + (imgBurnPath is not null ? " ImgBurn is picked for it." : "")
         : null;
     private string BurnButtonText => BlankMediaType is "CD-R" or "CD-RW" ? "🔥 Burn an ISO or BIN/CUE to this disc…" : "🔥 Burn an ISO to this disc…";
-    private string WindowsLabel => IsCue ? "(can't burn BIN/CUE images)" : "(built in, progress shown here)";
+    private string WindowsLabel => IsCue ? "(can't burn BIN/CUE images)" : IsDvd ? "(can't set a layer break)" : "(built in, progress shown here)";
     private string EngineName => useDirect ? "ArchivSector-OD's own writer" : useImgBurn ? "ImgBurn" : "Windows";
     private bool runningDirect;       // the burn running now uses our own writer on a disc where stopping is harmless (BD-RE, DVD+RW)
     private static bool healthCheck;  // health check after burning (remembered for this session)
@@ -287,7 +336,60 @@ else if (state == State.Done && result is not null)
     // The disc's full size, and how much the chosen program can write.
     // On BD-R, Windows' burning engine can report less free space than the
     // disc really has; ImgBurn writes the whole disc.
-    private long DiscBytes => BurnEngine.FullDiscBytes(BlankMediaType, Math.Max(BlankTotalBytes, BlankFreeBytes));
+    private long DiscBytes => Math.Max(BurnEngine.FullDiscBytes(BlankMediaType, Math.Max(BlankTotalBytes, BlankFreeBytes)), raisedSectors * 2048L);
+
+    // Beta 4: Xbox 360 games. An XGD3 game needs the DVD+R DL's capacity
+    // raised first (the BurnerMAX Payload Tool, run by the user: it isn't
+    // shipped with the app); its capacity is then read straight from the drive.
+    private string? xboxKind;
+    private long raisedSectors;          // the blank's capacity as the drive gives it now (0 = not asked)
+    private bool checkingCapacity;
+    private bool xboxBlank;              // an Xbox 360 image whose security data is blank: not burned
+    private string? burnerMaxNote;
+    private bool NeedsBurnerMax => xboxKind == "XGD3" && BlankMediaType == "DVD+R DL" && raisedSectors < BurnEngine.Xgd3Sectors;
+
+    private async Task CheckCapacity()
+    {
+        checkingCapacity = true;
+        burnerMaxNote = null;
+        StateHasChanged();
+        var letter = DriveLetter;
+        long got = await Task.Run(() => BurnEngine.BlankWritableSectors(letter));
+        checkingCapacity = false;
+        if (got > 0) raisedSectors = got;
+        if (got >= BurnEngine.Xgd3Sectors) BurnService.BurnerMaxWorked(DriveModel);   // remembered: BurnerMAX works on this drive
+        burnerMaxNote = got == 0 ? "The drive didn't say its capacity (busy, or no blank in it)."
+            : got >= BurnEngine.Xgd3Sectors ? null
+            : $"Still {got:N0} sectors: the payload hasn't raised it yet. Check that {DriveLetter}: is picked in BurnerMAX, click BurnerMAX there, then Check again.";
+        LogService.Write($"{DriveLetter}:", $"Burn: blank DVD+R DL capacity read again: {got:N0} sectors (an XGD3 game needs {BurnEngine.Xgd3Sectors:N0})");
+        StateHasChanged();
+    }
+
+    // Opens BurnerMAX (found once, then remembered in the settings).
+    private void OpenBurnerMax()
+    {
+        try
+        {
+            var cfg = ConfigService.Load();
+            var exe = cfg.BurnerMaxPath;
+            if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
+            {
+                var dlg = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title = "Where is BurnerMax.exe (the BurnerMAX Payload Tool)?",
+                    Filter = "BurnerMAX (BurnerMax.exe)|BurnerMax.exe|Programs (*.exe)|*.exe",
+                };
+                if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
+                exe = dlg.FileName;
+                cfg.BurnerMaxPath = exe;
+                ConfigService.Save(cfg);
+            }
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe) });
+            burnerMaxNote = $"BurnerMAX is open: pick {DriveLetter}: and click BurnerMAX, then Check again here.";
+            LogService.Write($"{DriveLetter}:", "Burn: opened BurnerMAX for an XGD3 game: " + exe);
+        }
+        catch (Exception ex) { burnerMaxNote = "BurnerMAX couldn't be opened: " + ex.Message; }
+    }
 
     // Windows formats a blank BD-R/BD-RE with spare areas (768 MB on a
     // single-layer disc) and only reports what's left; ImgBurn burns the
@@ -295,7 +397,10 @@ else if (state == State.Done && result is not null)
     private long Limit => useImgBurn || useDirect ? DiscBytes : BlankFreeBytes;
     private bool TooBigForWindows => isoBytes > BlankFreeBytes;
     private bool TooBigForDisc => isoBytes > DiscBytes;
-    private bool CantStart => IsCue
+    private bool CantStart => xboxBlank || CantStartOther;
+    private bool CantStartOther => IsDvd
+        ? dvd?.Problem is not null || (!useDirect && !useImgBurn) || TooBigForDisc
+        : IsCue
         ? (BlankMediaType is not ("CD-R" or "CD-RW")) || (!useDirect && !useImgBurn) || (useDirect && TooBigForDisc)
         : useImgBurn || useDirect ? TooBigForDisc : TooBigForWindows;
 
@@ -322,7 +427,7 @@ else if (state == State.Done && result is not null)
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Title = BlankMediaType is "CD-R" or "CD-RW" ? $"Choose the ISO or BIN/CUE image to burn to the {BlankMediaType}" : $"Choose the ISO to burn to the {BlankMediaType}",
-            Filter = "Disc images (*.iso, *.cue)|*.iso;*.cue|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|All files (*.*)|*.*",
+            Filter = "Disc images (*.iso, *.cue, *.dvd)|*.iso;*.cue;*.dvd|ISO images (*.iso)|*.iso|BIN/CUE CD images (*.cue)|*.cue|Layer break files (*.dvd)|*.dvd|All files (*.*)|*.*",
         };
         if (lastIsoFolder is not null && Directory.Exists(lastIsoFolder)) dlg.InitialDirectory = lastIsoFolder;
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
@@ -332,6 +437,17 @@ else if (state == State.Done && result is not null)
         // A BIN/CUE CD image (beta 2): its size is the sectors it fills.
         cue = IsCue ? CueImage.Load(isoPath) : null;
         if (cue is not null && cue.Problem is null) isoBytes = (cue.LeadOutLba + 150) * 2048L;
+        // A .dvd file (beta 4): its size is its image's.
+        dvd = IsDvd ? DvdLayerFile.Load(isoPath) : null;
+        if (dvd is not null && dvd.Problem is null) isoBytes = dvd.ImageBytes;
+        // An Xbox 360 game (beta 4): an XGD3 one on a DVD+R DL needs its capacity checked.
+        xboxKind = cue is null ? BurnEngine.XboxGameKind(dvd?.ImagePath ?? isoPath) : null;
+        // Beta 4: an Xbox image with blank security data is caught here, whatever program would burn it.
+        xboxBlank = xboxKind is not null && BurnEngine.XboxSecurityDataPresent(dvd?.ImagePath ?? isoPath) == false;
+        if (xboxBlank) LogService.Write($"{DriveLetter}:", "Burn: " + BurnEngine.XboxSecurityDataBlank);
+        raisedSectors = 0;
+        burnerMaxNote = null;
+        if (xboxKind == "XGD3" && BlankMediaType == "DVD+R DL" && !xboxBlank) _ = CheckCapacity();
         if (!engineLoaded)
         {
             imgBurnPath = BurnService.ImgBurnPath();
@@ -352,6 +468,7 @@ else if (state == State.Done && result is not null)
     {
         get
         {
+            if (dvd is not null) return ".dvd file: " + dvd.Summary;
             if (cue is null || cue.Problem is not null) return $"{isoBytes:N0} bytes";
             var files = cue.Pieces.Where(p => p.File is not null).Select(p => p.File!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             long fileBytes = 0;
@@ -370,14 +487,14 @@ else if (state == State.Done && result is not null)
         useImgBurn = false;
         var want = preferred;
         if (want == BurnService.Writer.ImgBurn && imgBurnPath is null) want = BurnService.Writer.Own;
-        if (IsCue && want == BurnService.Writer.Windows) want = DirectAvailable ? BurnService.Writer.Own : BurnService.Writer.ImgBurn;
+        if (NoWindows && want == BurnService.Writer.Windows) want = DirectAvailable ? BurnService.Writer.Own : BurnService.Writer.ImgBurn;
         if (want == BurnService.Writer.Own && !DirectAvailable)
         {
             want = imgBurnPath is not null ? BurnService.Writer.ImgBurn : BurnService.Writer.Windows;
             var instead = imgBurnPath is not null ? "ImgBurn" : "Windows";
             if (!IsCue) engineNote = "ArchivSector-OD's own writer doesn't write " + BlankMediaType + " discs yet, so " + instead + " is picked.";
         }
-        if (IsCue && want == BurnService.Writer.Windows) { useDirect = false; useImgBurn = false; return; }   // nothing can burn it here
+        if (NoWindows && want == BurnService.Writer.Windows) { useDirect = false; useImgBurn = false; return; }   // nothing can burn it here
         useDirect = want == BurnService.Writer.Own;
         useImgBurn = want == BurnService.Writer.ImgBurn;
         // An ISO that only fits on the whole disc (Windows keeps part of a
@@ -394,7 +511,7 @@ else if (state == State.Done && result is not null)
     // A program picked on this screen is remembered for next time.
     private void Pick(BurnService.Writer w)
     {
-        if (IsCue && w == BurnService.Writer.Windows) return;
+        if (NoWindows && w == BurnService.Writer.Windows) return;
         engineNote = null;
         useDirect = w == BurnService.Writer.Own && DirectAvailable;
         useImgBurn = w == BurnService.Writer.ImgBurn && imgBurnPath is not null;
@@ -430,7 +547,7 @@ else if (state == State.Done && result is not null)
         bool direct = useDirect && DirectAvailable;
         runningDirect = direct && BurnEngine.DirectStopIsSafe(BlankMediaType);
         bool imgBurn = useImgBurn && !direct;
-        bool delete = deleteIso && verify && !IsCue;
+        bool delete = deleteIso && verify && !NoWindows;
         string engineName = direct ? "ArchivSector-OD's own writer" : imgBurn ? "ImgBurn" : "Windows";
         double speed = speedX;
         LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {engineName} (speed: {SpeedLog}, verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");

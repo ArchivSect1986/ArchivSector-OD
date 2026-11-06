@@ -1,4 +1,4 @@
-@using System.IO
+﻿@using System.IO
 @using System.Windows
 @using ArchivSector_OD.Burning
 @implements IDisposable
@@ -80,6 +80,13 @@
                 <input type="checkbox" checked="@keepIso" @onchange="e => keepIso = (bool)(e.Value ?? false)" />
                 Keep the image afterwards
             </label>
+            @if (cdCopy)
+            {
+                <label style="display: flex; gap: 8px; align-items: flex-start; cursor: pointer;">
+                    <input type="checkbox" checked="@secureRead" @onchange="e => secureRead = (bool)(e.Value ?? false)" style="margin-top: 3px;" />
+                    <span>Secure read (slower)<br /><span style="font-size: 12px; color: var(--text-secondary);">Reads the original twice and compares; any sector that comes back different is read again until one version clearly wins. About twice as long to read; worth it for a worn or scratched CD.</span></span>
+                </label>
+            }
         </div>
         <div>
             <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(!CanStart)">🔁 Copy</button>
@@ -129,6 +136,7 @@
     private bool checking, wasVisible, disposed;
     private int copies = 1;
     private bool verify = true, keepIso;
+    private bool secureRead;   // beta 4: read the original CD twice and compare (BIN/CUE copies only)
     private string tempFolder = DefaultTempFolder();
 
     private CancellationTokenSource? cts;
@@ -143,7 +151,7 @@
 
     private bool CanStart => !checking && disc is not null && (disc.Ready || cdCopy) && disc.Problem is null && target.Length > 0 && SpaceProblem is null;
 
-    // A CD with music tracks (beta 2): copied as .bin + .cue instead of an ISO.
+    // A CD with music tracks (beta 2) or a mode 2 track (beta 4): copied as .bin + .cue instead of an ISO.
     private CdImageReader.Toc? toc;
     private bool cdCopy;
     private long ImageBytes => cdCopy && toc is not null ? toc.LeadOutLba * 2352L : disc?.Bytes ?? 0;
@@ -156,9 +164,21 @@
         : checking ? "Checking the disc…"
         : disc is null ? ""
         : disc.Problem is not null ? "⚠ " + disc.Problem
-        : cdCopy && toc is not null ? toc.Summary + (disc.Label.Length > 0 ? " · " + disc.Label : "") + " (copied with its music tracks)"
+        : cdCopy && toc is not null ? toc.Summary + (disc.Label.Length > 0 ? " · " + disc.Label : "") + CdTextLine
+            + (toc.HasAudio ? " (copied with its music tracks" + (toc.CdText is not null ? " and CD-Text" : "") + ")" : " (copied as BIN/CUE, every mode 2 sector in full)")
         : $"{disc.Kind} · {disc.Label} · {disc.FileSystem} · {DiscHealthService.FormatBytes(disc.Bytes)}";
     private string DiscColor => disc?.Problem is not null ? "var(--amber)" : "var(--text-secondary)";
+    // CD-Text (beta 4): the album and artist, when the CD carries them.
+    private string CdTextAlbum => toc?.CdText is null ? "" : toc.CdText.Get("TITLE", 0);
+    private string CdTextLine
+    {
+        get
+        {
+            if (toc?.CdText is null) return "";
+            string title = toc.CdText.Get("TITLE", 0), who = toc.CdText.Get("PERFORMER", 0);
+            return title.Length == 0 ? "" : " · " + title + (who.Length > 0 ? " by " + who : "");
+        }
+    }
     private string TargetLabel(string d) => d == source ? $"Drive {d}: (the same drive: swap the discs when asked)" : $"Drive {d}:";
 
     // Room for the temporary ISO?
@@ -249,20 +269,21 @@
         checking = true;
         StateHasChanged();
         var info = await Task.Run(() => DiscReader.DescribeDisc(letter));
-        // A CD: does it have music tracks? Then it's copied as .bin + .cue.
+        // A CD: does it have music tracks, or a mode 2 track (PS1 games,
+        // Video CDs; beta 4)? Then it's copied as .bin + .cue.
         toc = null;
         cdCopy = false;
         if (info.IsAudioCd || info.Kind == "CD" || !info.Ready)
         {
             string? tocProblem = null;
             var t = await Task.Run(() => CdImageReader.ReadToc(letter, out tocProblem));
-            if (t is not null && t.HasAudio)
+            if (t is not null && t.NeedsBinCue)
             {
                 toc = t;
                 cdCopy = true;
                 // An Enhanced CD (beta 3): read here, burned in two sessions.
                 info.Problem = t.Sessions > 1 && !t.SessionLayoutKnown ? "This CD has more than one session, but the drive didn't give where each one starts and ends, so Copy disc can't copy it. ImgBurn or Redumper can."
-                    : t.Tracks[0].StartLba != 0 ? "This CD's first track doesn't start in the usual place (a hidden track?), which Copy disc can't copy yet."
+                    : t.Tracks[0].StartLba != 0 && t.Tracks[0].IsData ? "This CD's first track is a data track that doesn't start in the usual place, which Copy disc can't copy. ImgBurn or Redumper can."
                     : null;
             }
         }
@@ -283,12 +304,13 @@
     private async Task Start()
     {
         if (!CanStart || disc is null) return;
-        string src = source, dst = target, label = disc.Label.Length > 0 ? disc.Label : cdCopy ? "Music CD" : "disc";
+        // A music CD's CD-Text album title beats Windows' generic "Audio CD" label.
+        string src = source, dst = target, label = CdTextAlbum.Length > 0 ? CdTextAlbum : disc.Label.Length > 0 ? disc.Label : cdCopy ? "Music CD" : "disc";
         bool asCue = cdCopy && toc is not null;
         long cdSectors = toc?.LeadOutLba ?? 0;
         bool oneDrive = src == dst;
         int count = copies;
-        bool doVerify = verify, keep = keepIso;
+        bool doVerify = verify, keep = keepIso, secure = secureRead && asCue;
         if (RipActivity.IsDriveBusy(src) || BurnService.IsBusy(src) || RipActivity.IsDriveBusy(dst) || BurnService.IsBusy(dst))
         {
             summary = "A drive is busy (ripping, burning or checking). Try again when it's done.";
@@ -307,7 +329,7 @@
         var ct = cts.Token;
         int ok = 0, failed = 0;
         bool stopped = false, readOk = false, unchecked_ = false;
-        LogService.Write($"{src}:", $"Copy: {label} from {src}: to {dst}:, {count} cop{(count == 1 ? "y" : "ies")}, verify {(doVerify ? "on" : "off")}; temporary image {iso}");
+        LogService.Write($"{src}:", $"Copy: {label} from {src}: to {dst}:, {count} cop{(count == 1 ? "y" : "ies")}, verify {(doVerify ? "on" : "off")}{(secure ? ", secure read" : "")}; temporary image {iso}");
 
         try
         {
@@ -337,10 +359,20 @@
                         stepText = $"{p.Percent:0.0}% · {DiscHealthService.FormatSpeed(p.BytesPerSec, 176_400)} · {Dur(p.Remaining)} left" + (p.BadSectors > 0 ? $" · ⚠ {p.BadSectors:N0} unreadable" : "");
                         Ui();
                     });
-                    var cr = await CdImageReader.ReadToBinCueAsync(src, tempFolder, baseName, cdReporter, ct, line => LogService.Write($"{src}:", line));
-                    readGood = cr.Ok && cr.BadSectors == 0;
+                    // Beta 4: the source drive's read offset (set in Read disc) corrects the music.
+                    int offset = 0;
+                    if (toc?.HasAudio == true)
+                    {
+                        var model = await Task.Run(() => CdImageReader.DriveModel(src));
+                        offset = (await ReadOffsetService.GetAsync(model, line => LogService.Write($"{src}:", line))).Offset;
+                    }
+                    var cr = await CdImageReader.ReadToBinCueAsync(src, tempFolder, baseName, cdReporter, ct, line => LogService.Write($"{src}:", line), secure, offset);
+                    // Secure read: sectors that read differently every time count as not read cleanly too.
+                    readGood = cr.Ok && cr.BadSectors == 0 && cr.SecureUncertain == 0;
                     readCancelled = cr.Cancelled;
-                    readMessage = cr.Ok ? $"{cr.BadSectors:N0} sector(s) couldn't be read." : cr.Message;
+                    readMessage = !cr.Ok ? cr.Message
+                        : cr.BadSectors > 0 ? $"{cr.BadSectors:N0} sector(s) couldn't be read."
+                        : $"{cr.SecureUncertain:N0} sector(s) read differently every time, so the copy couldn't be made bit-perfect (the log lists them).";
                 }
                 else
                 {

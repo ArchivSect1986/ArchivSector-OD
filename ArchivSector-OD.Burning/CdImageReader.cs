@@ -14,6 +14,22 @@ namespace ArchivSector_OD.Burning
     // the next lead-in between them can't be read and aren't needed), and
     // the .cue marks the sessions the way ImgBurn does (REM SESSION,
     // REM LEAD-OUT, REM LEAD-IN, REM PREGAP), so ImgBurn can burn the copy.
+    // Secure read (v4.0 beta 4): the whole CD is read a second time and
+    // compared. A drive can return music slightly wrong without saying so
+    // (a worn edge), and differently each time; a sector that differs is
+    // read again on its own, with the drive's memory cleared first each
+    // time, until one version has a clear majority, and that one is kept.
+    // Sectors that never settle are counted and listed (like EAC's secure
+    // mode, without C2 error pointers, which many drives report badly).
+    // Read offset (v4.0 beta 4): every drive reads music a few samples early
+    // or late. With the drive's offset given (AccurateRip lists it per model;
+    // +6 for an ASUS BW-16D1HT), the music in the .bin is shifted back by it,
+    // so the image holds what's really on the CD, the way EAC saves it, and
+    // matches AccurateRip and other rips with no shift. Data tracks are left
+    // as they are; what would come from outside the music is silence.
+    // Mode 2 data CDs (v4.0 beta 4): PS1 games, Video CDs and other CD-ROM XA
+    // discs keep form 2 sectors (video, XA audio) that an ISO's 2048-byte
+    // sectors can't hold, so they're read here too, even without music.
     public static class CdImageReader
     {
         public sealed class TocTrack
@@ -32,6 +48,7 @@ namespace ArchivSector_OD.Burning
             public long LeadOutLba;
             public int Sessions = 1;
             public List<long> SessionLeadOuts = new();   // where each session ends (full TOC), in order
+            public CdText? CdText;                       // album and track names, if the CD has them (beta 4)
             /// <summary>Several sessions, and the drive gave where each one starts and ends.</summary>
             public bool SessionLayoutKnown => Sessions == 1 || (SessionLeadOuts.Count == Sessions
                 && Enumerable.Range(1, Sessions).All(s => Tracks.Any(t => t.Session == s))
@@ -44,18 +61,27 @@ namespace ArchivSector_OD.Burning
             public long SectorsToRead => Ranges.Sum(r => r.To - r.From);
             public bool HasAudio => Tracks.Any(t => !t.IsData);
             public bool HasData => Tracks.Any(t => t.IsData);
+            /// <summary>A mode 2 (CD-ROM XA) data track: PS1 games, Video CDs.</summary>
+            public bool HasMode2 => Tracks.Any(t => t.IsData && t.Mode == 2);
+            /// <summary>Music or mode 2: only a .bin + .cue holds every sector as it is.</summary>
+            public bool NeedsBinCue => HasAudio || HasMode2;
             public long Sectors => LeadOutLba;
             public string Summary
             {
                 get
                 {
                     int data = Tracks.Count(t => t.IsData), audio = Tracks.Count - data;
-                    var kind = data == 0 ? "Music CD" : audio == 0 ? "Data CD" : "CD with data and music";
+                    var kind = data == 0 ? "Music CD" : audio == 0 ? (HasMode2 ? "Mode 2 data CD (CD-ROM XA)" : "Data CD") : "CD with data and music";
                     var parts = new List<string>();
-                    if (data > 0) parts.Add($"{data} data track{(data == 1 ? "" : "s")}");
+                    if (data > 0) parts.Add($"{data} {(HasMode2 ? "mode 2 " : "")}data track{(data == 1 ? "" : "s")}");
                     if (audio > 0) parts.Add($"{audio} music track{(audio == 1 ? "" : "s")}");
                     long secs = (LeadOutLba + 150) / 75;
                     if (Sessions > 1) kind = data > 0 && audio > 0 ? "Enhanced CD (music + data session)" : $"CD with {Sessions} sessions";
+                    if (Tracks.Count > 0 && Tracks[0].StartLba > 0 && !Tracks[0].IsData)
+                    {
+                        long h = Tracks[0].StartLba / 75;
+                        parts.Add($"a hidden track before track 1 ({h / 60}:{h % 60:D2})");
+                    }
                     return $"{kind} · {string.Join(", ", parts)} · {secs / 60}:{secs % 60:D2}";
                 }
             }
@@ -77,6 +103,262 @@ namespace ArchivSector_OD.Burning
             public string? CuePath, BinPath;
             public long BadSectors;
             public TimeSpan Time;
+            public bool Secure;              // read twice and compared (beta 4)
+            public long SecureDiffered;      // sectors that read differently the second time
+            public long SecureUncertain;     // of those, ones no version won a clear majority for
+            public List<long> UncertainLbas = new();
+        }
+
+        // ---- read offset (beta 4) ----
+
+        /// <summary>The drive's maker and model ("ASUS BW-16D1HT"), or "" if it can't be asked.</summary>
+        public static string DriveModel(string driveLetter)
+        {
+            try
+            {
+                using var drive = ScsiDrive.Open(driveLetter.TrimEnd(':', '\\').ToUpperInvariant(), out _);
+                if (drive is null) return "";
+                var inq = new byte[96];
+                if (!drive.Read(new byte[] { 0x12, 0, 0, 0, 96, 0 }, inq, 10).Ok) return "";
+                string vendor = Encoding.ASCII.GetString(inq, 8, 8).Trim(), product = Encoding.ASCII.GetString(inq, 16, 16).Trim();
+                return (vendor + " " + product).Trim();
+            }
+            catch { return ""; }
+        }
+
+        // The music in the .bin shifted back by the drive's offset: a drive
+        // with offset +N returns each sample N samples early, so what's really
+        // on the CD at a place is what the drive returned N samples later.
+        // Each stretch of music (between data tracks or sessions) is shifted
+        // on its own; anything from outside it becomes silence.
+        private static void ApplyReadOffset(FileStream fs, Toc toc, List<(long From, long To)> ranges, int offsetSamples, Action<string>? log)
+        {
+            long d = offsetSamples * 4L;   // bytes
+            // Music stretches in the .bin, in sectors.
+            long InBinPos(long at)
+            {
+                long before = 0;
+                foreach (var (from, to) in ranges)
+                {
+                    if (at < to) return before + Math.Max(0, at - from);
+                    before += to - from;
+                }
+                return before;
+            }
+            var stretches = new List<(long From, long To)>();
+            for (int i = 0; i < toc.Tracks.Count; i++)
+            {
+                var t = toc.Tracks[i];
+                if (t.IsData) continue;
+                long from = i == 0 ? 0 : t.PregapLba;
+                var next = i + 1 < toc.Tracks.Count ? toc.Tracks[i + 1] : null;
+                long sessionEnd = toc.SessionLeadOuts.Count >= t.Session ? toc.SessionLeadOuts[t.Session - 1] : toc.LeadOutLba;
+                long to = next is not null && next.Session == t.Session ? next.PregapLba : sessionEnd;
+                long b0 = InBinPos(from), b1 = InBinPos(to);
+                if (stretches.Count > 0 && stretches[^1].To == b0) stretches[^1] = (stretches[^1].From, b1);
+                else if (b1 > b0) stretches.Add((b0, b1));
+            }
+            const int Block = 1 << 20;
+            var buf = new byte[Block];
+            foreach (var (s0, s1) in stretches)
+            {
+                long start = s0 * 2352, end = s1 * 2352;
+                // Reads [p, p+len) from the stretch, silence outside it.
+                void ReadOld(long p, byte[] dst, int len)
+                {
+                    Array.Clear(dst, 0, len);
+                    long a = Math.Max(p, start), b = Math.Min(p + len, end);
+                    if (b <= a) return;
+                    fs.Position = a;
+                    int off = (int)(a - p), want = (int)(b - a), got = 0;
+                    while (got < want) { int k = fs.Read(dst, off + got, want - got); if (k <= 0) break; got += k; }
+                }
+                if (d > 0)
+                {
+                    // Forward: each block is read from further on than anything written so far.
+                    for (long p = start; p < end; p += Block)
+                    {
+                        int len = (int)Math.Min(Block, end - p);
+                        ReadOld(p + d, buf, len);
+                        fs.Position = p;
+                        fs.Write(buf, 0, len);
+                    }
+                }
+                else
+                {
+                    // Backward, for the same reason the other way round.
+                    for (long p = end; p > start;)
+                    {
+                        int len = (int)Math.Min(Block, p - start);
+                        p -= len;
+                        ReadOld(p + d, buf, len);
+                        fs.Position = p;
+                        fs.Write(buf, 0, len);
+                    }
+                }
+            }
+            fs.Flush();
+            log?.Invoke($"Read CD: read offset {offsetSamples:+0;-0} samples corrected in the music ({stretches.Count} stretch{(stretches.Count == 1 ? "" : "es")}), so the image holds what's on the CD");
+        }
+
+        // ---- secure read (beta 4) ----
+
+        // The second pass: every sector read again and compared with the
+        // .bin; a sector that differs (or that wouldn't read the first time)
+        // is settled by Settle and the winner written into the .bin.
+        // False if stopped.
+        private static bool SecondPass(ScsiDrive drive, Toc toc, FileStream fs, List<(long From, long To)> ranges, HashSet<long> badLbas,
+            ref long done, long work, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, Stopwatch clock)
+        {
+            const int N = 26;
+            var disc = new byte[N * 2352];
+            var file = new byte[N * 2352];
+            var lastReport = TimeSpan.Zero;
+            var passClock = Stopwatch.StartNew();
+            long passDone = 0, total = ranges.Sum(x => x.To - x.From);
+            log?.Invoke("Read CD: secure read: reading everything a second time to compare");
+            // Start far from the end of the first pass, so nothing comes from the drive's memory.
+            Flush(drive, toc, ranges[0].From + 30_000);
+            long pos = 0;   // sector in the .bin
+            int logged = 0;
+            foreach (var (from, to) in ranges)
+            for (long lba = from; lba < to;)
+            {
+                if (ct.IsCancellationRequested) { r.Cancelled = true; r.Message = "Stopped."; return false; }
+                int n = (int)Math.Min(N, to - lba);
+                long l = lba;
+                var target = n == N ? disc : new byte[n * 2352];
+                var rep = drive.Read(new byte[] { 0xBE, 0x00, (byte)(l >> 24), (byte)(l >> 16), (byte)(l >> 8), (byte)l, 0, 0, (byte)n, 0xF8, 0, 0 }, target, 60);
+                fs.Position = pos * 2352;
+                int got = 0;
+                while (got < n * 2352) { int k = fs.Read(file, got, n * 2352 - got); if (k <= 0) break; got += k; }
+                // The sectors in this chunk that read differently (or wouldn't read the first time).
+                var odd = new List<(int S, bool WasBad, byte[]? First, byte[]? Second)>();
+                for (int s = 0; s < n; s++)
+                {
+                    long at = lba + s;
+                    bool wasBad = badLbas.Contains(at);
+                    bool same = rep.Ok && !wasBad && target.AsSpan(s * 2352, 2352).SequenceEqual(file.AsSpan(s * 2352, 2352));
+                    if (same) continue;
+                    if (!wasBad) r.SecureDiffered++;
+                    odd.Add((s, wasBad, wasBad ? null : file.AsSpan(s * 2352, 2352).ToArray(), rep.Ok ? target.AsSpan(s * 2352, 2352).ToArray() : null));
+                }
+                if (odd.Count > 0)
+                {
+                    // Settled together: one stretch, from the first odd sector to the last.
+                    var results = SettleRun(drive, toc, lba, odd.Select(o => (o.S, o.First, o.Second)).ToList());
+                    for (int k = 0; k < odd.Count; k++)
+                    {
+                        var (s, wasBad, _, _) = odd[k];
+                        var (best, votes, settled) = results[k];
+                        long at = lba + s;
+                        if (best is not null)
+                        {
+                            fs.Position = (pos + s) * 2352;
+                            fs.Write(best, 0, 2352);
+                            if (wasBad) { badLbas.Remove(at); r.BadSectors--; }
+                        }
+                        if (!settled) { r.SecureUncertain++; if (r.UncertainLbas.Count < 200) r.UncertainLbas.Add(at); }
+                        if (++logged <= 20)
+                            log?.Invoke($"Read CD: sector {at:N0} {(wasBad ? "(unreadable the first time) " : "")}" + (best is null ? "still won't read" : settled ? $"settled ({votes} reads agree)" : $"uncertain (best version seen {votes} time(s))"));
+                    }
+                }
+                lba += n;
+                pos += n;
+                done += n;
+                passDone += n;
+                var now = clock.Elapsed;
+                if (now - lastReport > TimeSpan.FromMilliseconds(250) || passDone >= total)
+                {
+                    lastReport = now;
+                    double secs = passClock.Elapsed.TotalSeconds;
+                    double bps = secs > 0.5 ? passDone * 2352.0 / secs : 0;
+                    progress?.Report(new Progress
+                    {
+                        SectorsDone = done, TotalSectors = work, BytesPerSec = bps, BadSectors = r.BadSectors,
+                        Remaining = bps > 0 ? TimeSpan.FromSeconds((work - done) * 2352.0 / bps) : TimeSpan.Zero,
+                    });
+                }
+            }
+            fs.Flush();
+            log?.Invoke($"Read CD: secure read: second pass at {(passClock.Elapsed.TotalSeconds > 0.5 ? passDone / 75.0 / passClock.Elapsed.TotalSeconds : 0):0.0}x; "
+                + (r.SecureDiffered == 0 ? "every sector read the same both times"
+                    : $"{r.SecureDiffered:N0} sector(s) read differently, {r.SecureDiffered - r.SecureUncertain:N0} settled by re-reading, {r.SecureUncertain:N0} still uncertain")
+                + (r.UncertainLbas.Count > 0 ? " (at " + string.Join(", ", r.UncertainLbas.Take(20).Select(x => x.ToString("N0"))) + (r.UncertainLbas.Count > 20 ? " and more" : "") + ")" : ""));
+            return true;
+        }
+
+        // The odd sectors of one chunk (place in the chunk, the version from
+        // each pass), settled together: the stretch from the first to the
+        // last is read again and again, the drive's memory cleared before
+        // each read, until every sector has a version seen 3 times and at
+        // least 2 more times than any other (or 16 reads). One read of the
+        // stretch gives every sector a vote, so a worn patch with thousands of
+        // odd sectors costs a few reads per chunk rather than per sector. A
+        // stretch that won't read as a whole is read a sector at a time.
+        private static List<(byte[]? Best, int Votes, bool Settled)> SettleRun(ScsiDrive drive, Toc toc, long chunkLba, List<(int S, byte[]? First, byte[]? Second)> odd)
+        {
+            var votes = odd.Select(_ => new List<(byte[] Data, int Count)>()).ToList();
+            void Add(int k, byte[] d)
+            {
+                var v = votes[k];
+                for (int i = 0; i < v.Count; i++)
+                    if (v[i].Data.AsSpan().SequenceEqual(d)) { v[i] = (v[i].Data, v[i].Count + 1); return; }
+                v.Add((d, 1));
+            }
+            bool Settled(int k)
+            {
+                var top = votes[k].OrderByDescending(v => v.Count).ToList();
+                return top.Count > 0 && top[0].Count >= 3 && (top.Count == 1 || top[0].Count >= top[1].Count + 2);
+            }
+            for (int k = 0; k < odd.Count; k++)
+            {
+                if (odd[k].First is not null) Add(k, odd[k].First!);
+                if (odd[k].Second is not null) Add(k, odd[k].Second!);
+            }
+            for (int attempt = 0; attempt < 16; attempt++)
+            {
+                var open = Enumerable.Range(0, odd.Count).Where(k => !Settled(k)).ToList();
+                if (open.Count == 0) break;
+                int firstS = odd[open[0]].S, lastS = odd[open[^1]].S;
+                long from = chunkLba + firstS;
+                int count = lastS - firstS + 1;
+                Flush(drive, toc, from);
+                var buf = new byte[count * 2352];
+                var rep = drive.Read(new byte[] { 0xBE, 0x00, (byte)(from >> 24), (byte)(from >> 16), (byte)(from >> 8), (byte)from, 0, 0, (byte)count, 0xF8, 0, 0 }, buf, 60);
+                if (rep.Ok)
+                {
+                    foreach (var k in open) Add(k, buf.AsSpan((odd[k].S - firstS) * 2352, 2352).ToArray());
+                }
+                else
+                {
+                    // Something in the stretch won't read: one sector at a time.
+                    foreach (var k in open)
+                    {
+                        long at = chunkLba + odd[k].S;
+                        Flush(drive, toc, at);
+                        var one = new byte[2352];
+                        if (drive.Read(new byte[] { 0xBE, 0x00, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, 0, 1, 0xF8, 0, 0 }, one, 30).Ok) Add(k, one);
+                    }
+                }
+            }
+            var result = new List<(byte[]? Best, int Votes, bool Settled)>();
+            for (int k = 0; k < odd.Count; k++)
+            {
+                if (votes[k].Count == 0) { result.Add((null, 0, false)); continue; }
+                var top = votes[k].OrderByDescending(v => v.Count).First();
+                result.Add((top.Data, top.Count, Settled(k)));
+            }
+            return result;
+        }
+
+        // Reads sectors far from "at", so the next read of "at" comes from the
+        // disc and not from what the drive kept in its memory.
+        private static void Flush(ScsiDrive drive, Toc toc, long at)
+        {
+            long away = at >= 30_000 ? at - 30_000 : Math.Min(at + 30_000, Math.Max(0, toc.LeadOutLba - 26));
+            var b = new byte[26 * 2352];
+            drive.Read(new byte[] { 0xBE, 0x00, (byte)(away >> 24), (byte)(away >> 16), (byte)(away >> 8), (byte)away, 0, 0, 26, 0xF8, 0, 0 }, b, 30);
         }
 
         private static long BE32(byte[] b, int o) => (long)(int)((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]);
@@ -100,7 +382,7 @@ namespace ArchivSector_OD.Burning
             catch (Exception ex) { problem = "The CD's track list couldn't be read: " + ex.Message; return null; }
         }
 
-        private static Toc? ReadToc(ScsiDrive drive, out string? problem)
+        internal static Toc? ReadToc(ScsiDrive drive, out string? problem)
         {
             problem = null;
             var buf = new byte[4 + 100 * 8];
@@ -150,6 +432,9 @@ namespace ArchivSector_OD.Burning
                 }
             }
 
+            // CD-Text: album and track names (beta 4), kept in the copy's .cue.
+            try { toc.CdText = CdText.Read(drive); } catch { toc.CdText = null; }
+
             // Data tracks: mode 1 or mode 2, from the sector header.
             var raw = new byte[2352];
             foreach (var t in toc.Tracks.Where(t => t.IsData))
@@ -158,6 +443,12 @@ namespace ArchivSector_OD.Burning
                 rep = drive.Read(new byte[] { 0xBE, 0x00, (byte)(l >> 24), (byte)(l >> 16), (byte)(l >> 8), (byte)l, 0, 0, 1, 0xF8, 0, 0 }, raw, 30);
                 t.Mode = rep.Ok && raw[15] == 2 ? 2 : 1;
             }
+
+            // A hidden track before track 1 (beta 4): track 1's music starts later
+            // than sector 0, and what comes before it is track 1's gap, read
+            // and kept from sector 0 (as EAC does; the 2 seconds before sector 0
+            // are standard silence that most drives can't read).
+            if (toc.Tracks[0].StartLba > 0 && !toc.Tracks[0].IsData) toc.Tracks[0].PregapLba = 0;
 
             // Gaps before tracks 2 and up (within a session; the first track of
             // a later session has the standard 2-second gap after the lead-in).
@@ -220,19 +511,21 @@ namespace ArchivSector_OD.Burning
         /// read as fast as it goes; a sector that won't read after a few tries
         /// becomes zeros and is counted.
         /// </summary>
-        public static Task<Result> ReadToBinCueAsync(string driveLetter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null) =>
+        public static Task<Result> ReadToBinCueAsync(string driveLetter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, bool secure = false, int readOffset = 0) =>
             Task.Factory.StartNew(() =>
             {
-                var r = new Result();
+                var r = new Result { Secure = secure };
                 var clock = Stopwatch.StartNew();
-                try { ReadToBinCue(driveLetter.TrimEnd(':', '\\').ToUpperInvariant(), folder, name, progress, ct, r, log); }
+                try { ReadToBinCue(driveLetter.TrimEnd(':', '\\').ToUpperInvariant(), folder, name, progress, ct, r, log, secure, readOffset); }
                 catch (Exception ex) { r.Message = "The read stopped: " + ex.Message; }
                 r.Time = clock.Elapsed;
-                log?.Invoke("Read CD: " + (r.Ok ? $"finished, {r.BadSectors:N0} unreadable sector(s), in {r.Time:hh\\:mm\\:ss}" : r.Message));
+                log?.Invoke("Read CD: " + (r.Ok ? $"finished, {r.BadSectors:N0} unreadable sector(s)"
+                    + (secure ? $", {r.SecureDiffered:N0} read differently the second time ({r.SecureUncertain:N0} still uncertain)" : "")
+                    + $", in {r.Time:hh\\:mm\\:ss}" : r.Message));
                 return r;
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-        private static void ReadToBinCue(string letter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log)
+        private static void ReadToBinCue(string letter, string folder, string name, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, bool secure = false, int readOffset = 0)
         {
             using var drive = ScsiDrive.Open(letter, out var problem);
             if (drive is null) { r.Message = problem ?? "The drive couldn't be opened."; return; }
@@ -242,7 +535,8 @@ namespace ArchivSector_OD.Burning
             log?.Invoke($"Read CD: {letter}: {toc.Summary}; " + string.Join(", ", toc.Tracks.Select(t =>
                 (toc.Sessions > 1 ? $"S{t.Session} " : "") +
                 $"T{t.Number} {(t.IsData ? "MODE" + t.Mode : "AUDIO")} @{t.StartLba}" + (t.PregapLba < t.StartLba ? $" (gap {t.StartLba - t.PregapLba})" : "")))
-                + (toc.Sessions > 1 ? "; sessions end at " + string.Join(", ", toc.SessionLeadOuts) : ""));
+                + (toc.Sessions > 1 ? "; sessions end at " + string.Join(", ", toc.SessionLeadOuts) : "")
+                + (toc.CdText is not null ? "; CD-Text: " + string.Join(" | ", toc.CdText.Lines().Select(l => $"{l.Label}: {l.Value}")) : ""));
 
             // Full speed: the drive's own defaults back first (a slower write
             // speed set earlier by a burn, ours or another program's, can
@@ -252,6 +546,8 @@ namespace ArchivSector_OD.Burning
             string bin = Path.Combine(folder, name + ".bin"), cue = Path.Combine(folder, name + ".cue");
             var ranges = toc.Ranges;
             long total = toc.SectorsToRead;
+            long work = secure ? total * 2 : total;   // progress: a secure read reads everything twice
+            var badLbas = new HashSet<long>();
             const int N = 26;
             var buf = new byte[N * 2352];
             var one = new byte[2352];
@@ -270,7 +566,7 @@ namespace ArchivSector_OD.Burning
             string KindAt(long at) => toc.Tracks.LastOrDefault(t => t.PregapLba <= at)?.IsData == true ? "data" : "music";
             long done = 0;
             static string X(long sectors, TimeSpan t) => t.TotalSeconds > 0.5 ? $"{sectors / 75.0 / t.TotalSeconds:0.0}x" : "?";
-            using (var fs = new FileStream(bin, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 20))
+            using (var fs = new FileStream(bin, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 1 << 20))
             {
                 foreach (var (from, to) in ranges)
                 for (long lba = from; lba < to;)
@@ -290,7 +586,7 @@ namespace ArchivSector_OD.Burning
                             bool ok = false;
                             for (int attempt = 0; attempt < 4 && !ok; attempt++)
                                 ok = drive.Read(new byte[] { 0xBE, 0x00, (byte)(at >> 24), (byte)(at >> 16), (byte)(at >> 8), (byte)at, 0, 0, 1, 0xF8, 0, 0 }, one, 30).Ok;
-                            if (!ok) { Array.Clear(one); r.BadSectors++; }
+                            if (!ok) { Array.Clear(one); r.BadSectors++; badLbas.Add(at); }
                             fs.Write(one, 0, 2352);
                         }
                     }
@@ -320,14 +616,25 @@ namespace ArchivSector_OD.Burning
                         double bps = secs > 0.2 ? (done - first.Done) * 2352.0 / secs : 0;
                         progress?.Report(new Progress
                         {
-                            SectorsDone = done, TotalSectors = total, BytesPerSec = bps, BadSectors = r.BadSectors,
-                            Remaining = bps > 0 ? TimeSpan.FromSeconds((total - done) * 2352.0 / bps) : TimeSpan.Zero,
+                            SectorsDone = done, TotalSectors = work, BytesPerSec = bps, BadSectors = r.BadSectors,
+                            Remaining = bps > 0 ? TimeSpan.FromSeconds((work - done) * 2352.0 / bps) : TimeSpan.Zero,
                         });
                     }
                 }
+
+                if (secure)
+                {
+                    if (partLog && inAudio && toc.LeadOutLba > firstAudio)
+                        log?.Invoke($"Read CD: music part ({toc.LeadOutLba - firstAudio:N0} sectors) read at {X(toc.LeadOutLba - firstAudio, partClock.Elapsed)} on average");
+                    partLog = false;
+                    if (!SecondPass(drive, toc, fs, ranges, badLbas, ref done, work, progress, ct, r, log, clock)) return;
+                }
+
+                if (readOffset != 0 && toc.HasAudio)
+                    ApplyReadOffset(fs, toc, ranges, readOffset, log);
             }
 
-            if (partLog && inAudio && toc.LeadOutLba > firstAudio)
+            if (!secure && partLog && inAudio && toc.LeadOutLba > firstAudio)
                 log?.Invoke($"Read CD: music part ({toc.LeadOutLba - firstAudio:N0} sectors) read at {X(toc.LeadOutLba - firstAudio, partClock.Elapsed)} on average");
 
             // The .cue: one .bin; times are sectors from the start of the .bin (LBA 0).
@@ -346,6 +653,27 @@ namespace ArchivSector_OD.Burning
             }
             var sb = new StringBuilder();
             sb.AppendLine($"REM Copied by ArchivSector-OD");
+            // CD-Text, the .cue way (TITLE / PERFORMER / SONGWRITER, the album's
+            // before the first FILE, each track's under its TRACK line).
+            static string Q(string s) => "\"" + s.Replace('"', '\'') + "\"";
+            var text = toc.CdText;
+            void TextLines(int track, string indent)
+            {
+                if (text is null) return;
+                foreach (var field in new[] { "TITLE", "PERFORMER", "SONGWRITER" })
+                {
+                    var v = text.Get(field, track);
+                    if (v.Length > 0) sb.AppendLine($"{indent}{field} {Q(v)}");
+                }
+                foreach (var field in new[] { "COMPOSER", "ARRANGER", "MESSAGE" })
+                {
+                    var v = text.Get(field, track);
+                    if (v.Length > 0) sb.AppendLine($"{indent}REM {field} {Q(v)}");
+                }
+            }
+            if (text is not null && text.Codes.TryGetValue(0, out var upc) && upc.All(char.IsDigit) && upc.Length is 12 or 13)
+                sb.AppendLine($"CATALOG {upc.PadLeft(13, '0')}");
+            TextLines(0, "");
             if (toc.Sessions > 1) sb.AppendLine("REM SESSION 01");
             sb.AppendLine($"FILE \"{Path.GetFileName(bin)}\" BINARY");
             for (int i = 0; i < toc.Tracks.Count; i++)
@@ -367,7 +695,9 @@ namespace ArchivSector_OD.Burning
                     if (pregap > 0) sb.AppendLine($"REM PREGAP {Msf(pregap)}");
                 }
                 sb.AppendLine($"  TRACK {t.Number:D2} {(t.IsData ? $"MODE{t.Mode}/2352" : "AUDIO")}");
-                if (t.Number > 1 && t.PregapLba < t.StartLba) sb.AppendLine($"    INDEX 00 {Msf(InBin(t.PregapLba))}");
+                TextLines(t.Number, "    ");
+                if (text is not null && text.Codes.TryGetValue(t.Number, out var isrc) && isrc.Length == 12) sb.AppendLine($"    ISRC {isrc}");
+                if (t.PregapLba < t.StartLba) sb.AppendLine($"    INDEX 00 {Msf(InBin(t.PregapLba))}");   // track 1's: a hidden track
                 sb.AppendLine($"    INDEX 01 {Msf(InBin(t.StartLba))}");
             }
             File.WriteAllText(cue, sb.ToString());

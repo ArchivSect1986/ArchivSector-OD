@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace ArchivSector_OD.Burning
 {
@@ -61,7 +61,7 @@ namespace ArchivSector_OD.Burning
         /// result as BurnAsync, so the screens treat it alike.
         /// </summary>
         public static Task<Result> BurnDirectAsync(string driveLetter, string isoPath, bool verify,
-            IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, double speedX = 0)
+            IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null, double speedX = 0, long layerBreak = 0)
         {
             var letter = Norm(driveLetter);
             if (!Busy.TryAdd(letter, true))
@@ -72,7 +72,7 @@ namespace ArchivSector_OD.Burning
                 var r = new Result();
                 try
                 {
-                    DirectBurn(letter, isoPath, verify, progress, ct, r, log, speedX);
+                    DirectBurn(letter, isoPath, verify, progress, ct, r, log, speedX, layerBreak);
                 }
                 catch (Exception ex)
                 {
@@ -89,7 +89,7 @@ namespace ArchivSector_OD.Burning
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
-        private static void DirectBurn(string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, double speedX = 0)
+        private static void DirectBurn(string letter, string isoPath, bool verify, IProgress<Progress>? progress, CancellationToken ct, Result r, Action<string>? log, double speedX = 0, long layerBreak = 0)
         {
             var iso = new FileInfo(isoPath);
             if (!iso.Exists) { r.Message = "The ISO file isn't there any more."; return; }
@@ -148,7 +148,7 @@ namespace ArchivSector_OD.Burning
                 }
                 else if (isDvdPlusR)
                 {
-                    if (!PrepareDvdPlusR(drive, discName, isoSectors, iso.Length, r, log, out startLba, out cdTrack)) return;
+                    if (!PrepareDvdPlusR(drive, discName, isoPath, isoSectors, iso.Length, r, log, out startLba, out cdTrack, layerBreak)) return;
                 }
                 else if (isDvdPlusRw)
                 {
@@ -261,6 +261,9 @@ namespace ArchivSector_OD.Burning
 
                 // 7. Verify: read every sector back straight from the disc
                 // (not through Windows, so nothing cached is compared).
+                // Beta 4: the tray is cycled first (like ImgBurn), so the disc is read fresh.
+                if (verify && !ct.IsCancellationRequested && !CycleTray(drive, progress, ct, log, "Direct write"))
+                    verify = false;
                 if (verify && !ct.IsCancellationRequested)
                 {
                     var vclock = Stopwatch.StartNew();
@@ -439,7 +442,7 @@ namespace ArchivSector_OD.Burning
         }
 
         // ---- DVD+R / DVD+R DL: written straight on; no write settings needed ----
-        private static bool PrepareDvdPlusR(ScsiDrive drive, string discName, long isoSectors, long isoBytes, Result r, Action<string>? log, out long startLba, out int track)
+        private static bool PrepareDvdPlusR(ScsiDrive drive, string discName, string isoPath, long isoSectors, long isoBytes, Result r, Action<string>? log, out long startLba, out int track, long layerBreak = 0)
         {
             startLba = 0;
             track = 1;
@@ -458,12 +461,211 @@ namespace ArchivSector_OD.Burning
             bool nwaValid = (ti[7] & 0x01) != 0;
             startLba = nwaValid ? BE32(ti, 12) : 0;
             long free = BE32(ti, 16);
+            // Beta 4: an Xbox 360 XGD3 game is bigger than a DVD+R DL and needs
+            // its layer change at 2,133,520. That only works once the disc's
+            // capacity has been raised: by Burner Max firmware, or by the
+            // BurnerMAX Payload Tool sent to the drive with the blank in.
+            bool xgd3 = discName == "DVD+R DL" && IsXbox360Xgd3(isoPath, isoBytes);
+            if (xgd3)
+            {
+                string? why = null;
+                if (isoSectors > free)
+                    why = $"This is an Xbox 360 XGD3 game: it needs {isoSectors:N0} sectors and this DVD+R DL has {free:N0}. Raise the disc's capacity first: run the BurnerMAX Payload Tool on this drive with the blank in (each new blank needs it), or use a drive with Burner Max firmware, then burn again.";
+                else if (!StealthPresent(isoPath, Xgd3StealthAt))
+                    why = XboxSecurityDataBlank;
+                else if (!SetLayerBreak(drive, Xgd3LayerBreak, log))
+                    why = $"This is an Xbox 360 XGD3 game, which needs the layer change at sector {Xgd3LayerBreak:N0}, and the drive didn't accept it. Its capacity may not have been raised far enough: send the BurnerMAX payload again, then burn again.";
+                if (why is not null)
+                {
+                    r.Message = why + " Nothing was written.";
+                    r.NoFallback = true;
+                    log?.Invoke("Direct write: " + r.Message);
+                    return false;
+                }
+                log?.Invoke($"Direct write: blank DVD+R DL with raised capacity ({free:N0} sectors free); Xbox 360 XGD3 game image: layer break set at sector {Xgd3LayerBreak:N0}, as a console needs");
+                return true;
+            }
             if (isoSectors > free)
             {
                 r.Message = $"The ISO ({isoSectors:N0} sectors) is bigger than this {discName} ({free:N0} sectors free).";
                 return false;
             }
             log?.Invoke($"Direct write: blank {discName}, track {track} starts at sector {startLba:N0}, {free:N0} sectors free; ISO {isoSectors:N0} sectors ({isoBytes:N0} bytes)");
+
+            // Beta 4: an Xbox 360 game (XGD2) has to change layers at an exact
+            // place to work in a console; set it before anything is written.
+            // A layer break from a .dvd file is used as given.
+            bool xgd2 = discName == "DVD+R DL" && IsXbox360Xgd2(isoPath, isoBytes);
+            if (discName == "DVD+R DL" && layerBreak > 0 && !xgd2)
+            {
+                if (!SetLayerBreak(drive, layerBreak, log))
+                {
+                    r.Message = $"The .dvd file asks for the layer change at sector {layerBreak:N0}, and the drive didn't accept it. Nothing was written: try ImgBurn with the .dvd file.";
+                    r.NoFallback = true;
+                    return false;
+                }
+                log?.Invoke($"Direct write: layer break set at sector {layerBreak:N0}, from the .dvd file");
+            }
+            else if (layerBreak > 0 && discName != "DVD+R DL")
+                log?.Invoke($"Direct write: the .dvd file's layer break isn't needed on a single-layer {discName}");
+            if (xgd2)
+            {
+                if (layerBreak > 0 && layerBreak != Xgd2LayerBreak)
+                    log?.Invoke($"Direct write: the .dvd file says {layerBreak:N0}, but an Xbox 360 XGD2 game needs {Xgd2LayerBreak:N0}; using {Xgd2LayerBreak:N0}");
+                // A Redump image keeps the disc's security data (SS, DMI, PFI)
+                // apart; burned without it, a console only offers "Play DVD".
+                if (!StealthPresent(isoPath, Xgd2StealthAt))
+                {
+                    r.Message = XboxSecurityDataBlank + " Nothing was written.";
+                    r.NoFallback = true;
+                    log?.Invoke("Direct write: " + r.Message);
+                    return false;
+                }
+                if (!SetLayerBreak(drive, Xgd2LayerBreak, log))
+                {
+                    r.Message = $"This is an Xbox 360 game, which needs the layer change at sector {Xgd2LayerBreak:N0}, and the drive didn't accept it. Nothing was written: burn it with ImgBurn instead.";
+                    return false;
+                }
+                log?.Invoke($"Direct write: Xbox 360 game (XGD2) image: layer break set at sector {Xgd2LayerBreak:N0}, as a console needs");
+            }
+            return true;
+        }
+
+        // ---- DVD+R DL layer break (beta 4) ----
+
+        /// <summary>"XGD2" or "XGD3" for an Xbox 360 game image, else null (for the Write panel).</summary>
+        public static string? XboxGameKind(string isoPath)
+        {
+            try
+            {
+                long bytes = new FileInfo(isoPath).Length;
+                return IsXbox360Xgd2(isoPath, bytes) ? "XGD2" : IsXbox360Xgd3(isoPath, bytes) ? "XGD3" : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// For an Xbox 360 game image: true if its security data (PFI, DMI,
+        /// SS) is in place, false if it's blank or couldn't be read (a disc
+        /// burned from it would only show "Play DVD"). Null if it isn't an
+        /// Xbox 360 game. For the Write panel and the burn queue, so a bad
+        /// image is caught when it's picked, whatever program would burn it.
+        /// </summary>
+        public static bool? XboxSecurityDataPresent(string isoPath)
+        {
+            try
+            {
+                long bytes = new FileInfo(isoPath).Length;
+                if (IsXbox360Xgd2(isoPath, bytes)) return StealthPresent(isoPath, Xgd2StealthAt);
+                if (IsXbox360Xgd3(isoPath, bytes)) return StealthPresent(isoPath, Xgd3StealthAt);
+                return null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Why an Xbox 360 image with blank security data isn't burned (shown on the Write panel and in the queue).</summary>
+        public const string XboxSecurityDataBlank = "This Xbox 360 game image's security data (SS, DMI and PFI) is blank or couldn't be read, so a console would only show \"Play DVD\". Run abgx360 with AutoFix on the ISO first; it patches them in.";
+
+        /// <summary>Sectors an XGD3 game needs on the disc.</summary>
+        public const long Xgd3Sectors = Xgd3Bytes / Sector;
+        /// <summary>
+        /// The sectors the blank in a drive can take, asked straight from the
+        /// drive (so a capacity raised by the BurnerMAX payload shows at once),
+        /// or 0 if the drive is busy or can't say.
+        /// </summary>
+        public static long BlankWritableSectors(string driveLetter)
+        {
+            var letter = Norm(driveLetter);
+            if (IsBusy(letter)) return 0;
+            try
+            {
+                using var drive = ScsiDrive.Open(letter, out _);
+                if (drive is null) return 0;
+                var di = new byte[34];
+                if (!drive.Read(new byte[] { 0x51, 0, 0, 0, 0, 0, 0, 0, 34, 0 }, di, 10).Ok) return 0;
+                int track = Math.Max(1, di[6] | (di[11] << 8));
+                var ti = new byte[48];
+                if (!drive.Read(new byte[] { 0x52, 0x01, (byte)(track >> 24), (byte)(track >> 16), (byte)(track >> 8), (byte)track, 0, 0, 48, 0 }, ti, 10).Ok) return 0;
+                return BE32(ti, 16);
+            }
+            catch { return 0; }
+        }
+
+        private const long Xgd2Bytes = 7_838_695_424L;   // every Xbox 360 XGD2 game image is this size
+        private const long Xgd2LayerBreak = 1_913_760;
+        private const long Xgd3Bytes = 8_738_846_720L;   // every Xbox 360 XGD3 game image is this size
+        private const long Xgd3LayerBreak = 2_133_520;
+        // Where the security data sits in each kind of image (PFI, DMI, SS; a sector each).
+        private static readonly long[] Xgd2StealthAt = { 0xFD8E800L, 0xFD8F000L, 0xFD8F800L };
+        private static readonly long[] Xgd3StealthAt = { 0x2076800L, 0x2077000L, 0x2077800L };
+
+        // An Xbox 360 XGD3 game: its size, and the game file system's marker
+        // 32 sectors into the game partition, which starts at 0x2080000.
+        private static bool IsXbox360Xgd3(string isoPath, long isoBytes)
+        {
+            if (isoBytes != Xgd3Bytes) return false;
+            try
+            {
+                using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                fs.Position = 0x2080000L + 32 * 2048;
+                var b = new byte[20];
+                if (fs.Read(b, 0, 20) != 20) return false;
+                return System.Text.Encoding.ASCII.GetString(b) == "MICROSOFT*XBOX*MEDIA";
+            }
+            catch { return false; }
+        }
+
+        // An Xbox 360 XGD2 game: its size, and the game file system's marker
+        // ("MICROSOFT*XBOX*MEDIA") 32 sectors into the game partition, which
+        // starts at 0xFD90000 in the image.
+        private static bool IsXbox360Xgd2(string isoPath, long isoBytes)
+        {
+            if (isoBytes != Xgd2Bytes) return false;
+            try
+            {
+                using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                fs.Position = 0xFD90000L + 32 * 2048;
+                var b = new byte[20];
+                if (fs.Read(b, 0, 20) != 20) return false;
+                return System.Text.Encoding.ASCII.GetString(b) == "MICROSOFT*XBOX*MEDIA";
+            }
+            catch { return false; }
+        }
+
+        // The security data a burned Xbox 360 game needs, at fixed places in
+        // the image ("at": PFI, DMI and SS, a sector each): present if none of
+        // the three is all zeros.
+        private static bool StealthPresent(string isoPath, long[] at)
+        {
+            try
+            {
+                using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var b = new byte[2048];
+                foreach (long o in at)
+                {
+                    fs.Position = o;
+                    if (fs.Read(b, 0, 2048) != 2048 || Array.TrueForAll(b, x => x == 0)) return false;
+                }
+                return true;
+            }
+            catch { return false; }   // beta 4: can't read it, so it can't be checked: don't burn it
+        }
+
+        // SEND DVD STRUCTURE, format 20h (layer boundary): layer 0 holds
+        // "sectors" sectors, then the drive goes on in layer 1. Read back
+        // to be sure the drive took it.
+        private static bool SetLayerBreak(ScsiDrive drive, long sectors, Action<string>? log)
+        {
+            var d = new byte[12];
+            d[1] = 10;                                   // data length (the rest)
+            d[8] = (byte)(sectors >> 24); d[9] = (byte)(sectors >> 16); d[10] = (byte)(sectors >> 8); d[11] = (byte)sectors;
+            var rep = drive.Write(new byte[] { 0xBF, 0, 0, 0, 0, 0, 0, 0x20, 0, 12, 0, 0 }, d, 10);
+            if (!rep.Ok) { log?.Invoke("Direct write: the drive didn't accept the layer break: " + rep.Describe()); return false; }
+            var back = new byte[12];
+            rep = drive.Read(new byte[] { 0xAD, 0, 0, 0, 0, 0, 0, 0x20, 0, 12, 0, 0 }, back, 10);
+            if (!rep.Ok) return true;   // set; the drive just doesn't say
+            long got = BE32(back, 8);
+            if (got != sectors) { log?.Invoke($"Direct write: the drive took the layer break as sector {got:N0} instead of {sectors:N0}"); return false; }
             return true;
         }
 
@@ -623,10 +825,16 @@ namespace ArchivSector_OD.Burning
             var rep = drive.Read(new byte[] { 0x23, 0, 0, 0, 0, 0, 0, 0, 252, 0 }, fc, 10);
             if (!rep.Ok) { r.Message = "The drive didn't say how big the DVD-RW is: " + rep.Describe(); return false; }
             long capacity = BE32(fc, 4);
-            bool formatted = (fc[8] & 3) == 2;
+            int descType = fc[8] & 3;   // 1 = unformatted, 2 = formatted, 3 = no disc
+            bool formatted = descType == 2;
+            log?.Invoke($"Direct write: DVD-RW in overwrite mode: format capacity {capacity:N0} sectors, descriptor type {descType} ({(descType == 2 ? "formatted" : descType == 1 ? "not fully formatted" : "unknown")})");
             if (!formatted || capacity <= 0)
             {
-                r.Message = "This DVD-RW is in \"overwrite\" mode but isn't fully formatted. Erase it (🧽 Erase this disc… → Quick erase) and burn again.";
+                // Beta 4: Windows' "Like a USB flash drive" quick format leaves
+                // a DVD-RW like this. The fix is an erase, which ImgBurn can't
+                // do for us either, so it doesn't take over.
+                r.Message = "This DVD-RW is in \"overwrite\" mode but isn't fully formatted (Windows' quick format leaves it like that). Erase it (🧽 Erase this disc… → Quick erase, about a minute) and burn again.";
+                r.NoFallback = true;
                 return false;
             }
             long blocks = (isoSectors + 15) / 16 * 16;
@@ -718,80 +926,146 @@ namespace ArchivSector_OD.Burning
             CancellationToken ct, Result r, Action<string>? log, string afterFailure)
         {
             long total = isoSectors + Math.Max(0, padSectors);
-            var zeros = new byte[DirectChunkSectors * Sector];
+            int chunkBytes = DirectChunkSectors * Sector;
             var clock = Stopwatch.StartNew();
-            var buf = new byte[DirectChunkSectors * Sector];
             long done = 0;
             double speed = 0;
             var speedClock = Stopwatch.StartNew();
             long speedFrom = 0;
             var lastReport = TimeSpan.Zero;
-            using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
-            while (done < total)
+
+            // Beta 4: the ISO is read ahead into an 80 MiB buffer by its own
+            // thread, as ImgBurn does, and the buffer is filled before the
+            // first write. Reading and writing one after the other left the
+            // drive waiting whenever the hard drive was slow for a moment (a
+            // cold start, another drive reading the same disk); a DVD burner
+            // with a small buffer (512 KB = a tenth of a second at 4x) then
+            // has to stop and restart the laser, and on some discs those
+            // restarts can't be read back.
+            int ring = (int)Math.Min(WriteBufferBytes / chunkBytes, (total + DirectChunkSectors - 1) / DirectChunkSectors);
+            ring = Math.Max(ring, 1);
+            using var free = new System.Collections.Concurrent.BlockingCollection<byte[]>(ring);
+            using var filled = new System.Collections.Concurrent.BlockingCollection<(byte[] Buf, int Bytes)>(ring);
+            for (int i = 0; i < ring; i++) free.Add(new byte[chunkBytes]);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            Exception? readError = null;
+            var reader = Task.Run(() =>
             {
-                if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
-                // The ISO, then (DVD-R/-RW) zeros up to a whole 32 KB block.
-                // The end of the ISO and the first zeros share a chunk, so
-                // every write stays a whole number of 32 KB packets (a DVD-RW
-                // written incrementally or in overwrite mode needs that).
-                int n = (int)Math.Min(DirectChunkSectors, total - done);
-                int bytes = n * Sector;
-                int fromIso = (int)Math.Clamp(isoSectors - done, 0, n);
-                byte[] data;
-                if (fromIso == n)
+                try
                 {
-                    ReadFully(fs, buf, bytes);
-                    data = bytes == buf.Length ? buf : buf.AsSpan(0, bytes).ToArray();
-                }
-                else if (fromIso == 0) data = bytes == zeros.Length ? zeros : new byte[bytes];
-                else
-                {
-                    data = new byte[bytes];
-                    ReadFully(fs, data, fromIso * Sector);   // the rest stays zeros
-                }
-                long lba = startLba + done;
-                var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
-
-                // A drive that's busy (buffer full, or still calibrating the laser /
-                // recording a DVD-R's reservation before the first data, which
-                // can take a minute or more) is asked again for up to 3 minutes.
-                var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
-                if (!rep.Ok)
-                {
-                    if (done == 0 && rep.SenseKey == 5)
+                    using var fs = new FileStream(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.SequentialScan);
+                    long queued = 0;
+                    while (queued < total)
                     {
-                        // Refused outright before anything was written.
-                        r.Message = $"The drive refused the first write: {rep.Describe()}";
-                        log?.Invoke("Direct write: " + r.Message);
-                        return WriteRefusedAtStart;
+                        var buf = free.Take(stop.Token);
+                        // The ISO, then (DVD-R/-RW) zeros up to a whole 32 KB block.
+                        // The end of the ISO and the first zeros share a chunk, so
+                        // every write stays a whole number of 32 KB packets (a DVD-RW
+                        // written incrementally or in overwrite mode needs that).
+                        int n = (int)Math.Min(DirectChunkSectors, total - queued);
+                        int fromIso = (int)Math.Clamp(isoSectors - queued, 0, n);
+                        if (fromIso < n) Array.Clear(buf, fromIso * Sector, (n - fromIso) * Sector);
+                        if (fromIso > 0) ReadFully(fs, buf, fromIso * Sector);
+                        filled.Add((buf, n * Sector), stop.Token);
+                        queued += n;
                     }
-                    r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}.{DiscProblemHint(rep)} {afterFailure}";
-                    log?.Invoke("Direct write: " + r.Message);
-                    return -1;
                 }
-                done += n;
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { readError = ex; }
+                finally { filled.CompleteAdding(); }
+            });
 
-                if (speedClock.Elapsed.TotalSeconds >= 1)
+            int waits = 0;
+            long waitedMs = 0, longestWaitMs = 0;
+            try
+            {
+                // Fill the buffer before the first write (or until the reader is done).
+                progress?.Report(new Progress { Phase = "Filling the buffer", Percent = -1 });
+                var fillClock = Stopwatch.StartNew();
+                while (filled.Count < ring && !filled.IsAddingCompleted && !ct.IsCancellationRequested && fillClock.Elapsed < TimeSpan.FromSeconds(60))
+                    Thread.Sleep(20);
+                log?.Invoke($"Direct write: buffer filled ({filled.Count * (long)chunkBytes / (1024 * 1024)} MiB of {ring * (long)chunkBytes / (1024 * 1024)} MiB) in {fillClock.Elapsed.TotalSeconds:0.0} s; writing");
+
+                while (done < total)
                 {
-                    double now = (done - speedFrom) * (double)Sector / speedClock.Elapsed.TotalSeconds;
-                    speed = speed <= 0 ? now : speed * 0.7 + now * 0.3;
-                    speedFrom = done;
-                    speedClock.Restart();
-                }
-                if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= total)
-                {
-                    lastReport = clock.Elapsed;
-                    progress?.Report(new Progress
+                    if (ct.IsCancellationRequested) { r.Cancelled = true; break; }
+                    (byte[] Buf, int Bytes) item;
+                    if (!filled.TryTake(out item))
                     {
-                        Phase = "Writing",
-                        Percent = 100.0 * done / total,
-                        BytesPerSec = speed,
-                        Remaining = speed > 0 ? TimeSpan.FromSeconds((total - done) * (double)Sector / speed) : TimeSpan.Zero,
-                    });
+                        // The buffer ran dry: the drive waits for the hard drive.
+                        var w = Stopwatch.StartNew();
+                        try { item = filled.Take(ct); }
+                        catch (OperationCanceledException) { r.Cancelled = true; break; }
+                        catch (InvalidOperationException) { item = default; }
+                        if (item.Buf is null)
+                        {
+                            r.Message = "The ISO couldn't be read: " + (readError?.Message ?? "it ended early") + " " + afterFailure;
+                            log?.Invoke("Direct write: " + r.Message);
+                            return -1;
+                        }
+                        waits++;
+                        long ms = w.ElapsedMilliseconds;
+                        waitedMs += ms;
+                        if (ms > longestWaitMs) longestWaitMs = ms;
+                    }
+                    int n = item.Bytes / Sector;
+                    var data = item.Bytes == item.Buf.Length ? item.Buf : item.Buf.AsSpan(0, item.Bytes).ToArray();
+                    long lba = startLba + done;
+                    var cdb = new byte[] { 0x2A, 0, (byte)(lba >> 24), (byte)(lba >> 16), (byte)(lba >> 8), (byte)lba, 0, (byte)(n >> 8), (byte)n, 0 };
+
+                    // A drive that's busy (buffer full, or still calibrating the laser /
+                    // recording a DVD-R's reservation before the first data, which
+                    // can take a minute or more) is asked again for up to 3 minutes.
+                    var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
+                    if (!free.IsAddingCompleted) free.Add(item.Buf);
+                    if (!rep.Ok)
+                    {
+                        if (done == 0 && rep.SenseKey == 5)
+                        {
+                            // Refused outright before anything was written.
+                            r.Message = $"The drive refused the first write: {rep.Describe()}";
+                            log?.Invoke("Direct write: " + r.Message);
+                            return WriteRefusedAtStart;
+                        }
+                        r.Message = $"The write failed at sector {lba:N0} ({100.0 * done / total:0.0}%): {rep.Describe()}.{DiscProblemHint(rep)} {afterFailure}";
+                        log?.Invoke("Direct write: " + r.Message);
+                        return -1;
+                    }
+                    done += n;
+
+                    if (speedClock.Elapsed.TotalSeconds >= 1)
+                    {
+                        double now = (done - speedFrom) * (double)Sector / speedClock.Elapsed.TotalSeconds;
+                        speed = speed <= 0 ? now : speed * 0.7 + now * 0.3;
+                        speedFrom = done;
+                        speedClock.Restart();
+                    }
+                    if (clock.Elapsed - lastReport > TimeSpan.FromMilliseconds(250) || done >= total)
+                    {
+                        lastReport = clock.Elapsed;
+                        progress?.Report(new Progress
+                        {
+                            Phase = "Writing",
+                            Percent = 100.0 * done / total,
+                            BytesPerSec = speed,
+                            Remaining = speed > 0 ? TimeSpan.FromSeconds((total - done) * (double)Sector / speed) : TimeSpan.Zero,
+                        });
+                    }
                 }
             }
+            finally
+            {
+                stop.Cancel();
+                try { reader.Wait(TimeSpan.FromSeconds(10)); } catch { }
+            }
+            log?.Invoke(waits == 0
+                ? "Direct write: the buffer never ran dry (the drive never waited for data)"
+                : $"Direct write: the buffer ran dry {waits:N0} time(s), the drive waited {waitedMs / 1000.0:0.0} s in all (longest {longestWaitMs:N0} ms): the hard drive the ISO is on couldn't keep up for a moment");
             return Math.Min(done, isoSectors);
         }
+
+        // How much of the ISO is read ahead of the drive (as ImgBurn's 80 MiB buffer).
+        private const long WriteBufferBytes = 80L * 1024 * 1024;
 
         // A "medium error" (sense key 3) is the disc itself failing, not our
         // writer or the drive: say what to try next.

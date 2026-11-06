@@ -36,18 +36,33 @@
     <nav class="app-nav" aria-label="Burn modes" style="justify-self: start;">
         <button class="nav-btn @(mode == "write" ? "active" : "")" @onclick='() => mode = "write"'>🔥 Write</button>
         <button class="nav-btn @(mode == "build" ? "active" : "")" @onclick='() => mode = "build"'>📦 Build ISO</button>
+        <button class="nav-btn @(mode == "music" ? "active" : "")" @onclick='() => mode = "music"'>🎵 Music CD</button>
         <button class="nav-btn @(mode == "read" ? "active" : "")" @onclick='() => mode = "read"'>📀 Read disc</button>
         <button class="nav-btn @(mode == "copy" ? "active" : "")" @onclick='() => mode = "copy"'>🔁 Copy disc</button>
         <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'>✔ Verify disc</button>
+        <button class="nav-btn @(mode == "accuraterip" ? "active" : "")" @onclick='() => mode = "accuraterip"'>🎯 AccurateRip</button>
         <button class="nav-btn @(mode == "info" ? "active" : "")" @onclick='() => mode = "info"'>🔎 Drive info</button>
+        @* Beta 4: today's log, without going back to the drive bays, and the
+           live log (like ImgBurn's log window). *@
+        <button class="nav-btn @(showLiveLog ? "active" : "")" @onclick="() => showLiveLog = !showLiveLog" title="Shows what's happening on every drive as it happens. Everything is still saved to the log file.">📜 Live log</button>
+        <button class="nav-btn" @onclick="LogService.OpenToday" title="Opens today's saved log (all drives and TargetFill). Logs are kept for 30 days in %AppData%\ArchivSector-OD\Logs.">📄 Open log</button>
     </nav>
+
+    @if (showLiveLog)
+    {
+        <LiveLogPanel Close="@(() => showLiveLog = false)" />
+    }
 
     <div style="display: @(mode == "build" ? "block" : "none");">
         <BuildPanel AddToQueue="@OnAddToQueue" />
     </div>
 
+    <div style="display: @(mode == "music" ? "block" : "none");">
+        <MusicCdPanel AddToQueue="@OnMusicCdToQueue" />
+    </div>
+
     <div style="display: @(mode == "read" ? "block" : "none");">
-        <ReadPanel AddToQueue="@OnAddToQueue" Visible="@(Visible && mode == "read")" />
+        <ReadPanel AddToQueue="@OnAddToQueue" CheckWithAccurateRip="@OnCheckWithAccurateRip" Visible="@(Visible && mode == "read")" />
     </div>
 
     <div style="display: @(mode == "copy" ? "block" : "none");">
@@ -56,6 +71,10 @@
 
     <div style="display: @(mode == "verify" ? "block" : "none");">
         <VerifyPanel Visible="@(Visible && mode == "verify")" />
+    </div>
+
+    <div style="display: @(mode == "accuraterip" ? "block" : "none");">
+        <AccurateRipPanel @ref="accurateRip" />
     </div>
 
     <div style="display: @(mode == "info" ? "block" : "none");">
@@ -207,6 +226,11 @@
 </div>
 
 @code {
+    // Beta 4: the 📜 Live log panel is open. It opens each time the tab is
+    // shown, unless that's turned off in Settings ("Open the Live log
+    // whenever the Burn tab is shown"); ✕ hides it until the next time.
+    private bool showLiveLog;
+    private bool wasVisible;
     /// <summary>True while the Burn tab is the one showing.</summary>
     [Parameter] public bool Visible { get; set; }
 
@@ -216,6 +240,20 @@
 
     // Build mode finished an ISO and wants it in the queue.
     private void OnAddToQueue(string isoPath) => queue?.AddIso(isoPath);
+    // Music CD mode (beta 4) made a .cue: into the queue, and show it there.
+    // Read disc (beta 4) read a music CD and wants it checked: AccurateRip mode does it.
+    private AccurateRipPanel? accurateRip;
+    private void OnCheckWithAccurateRip(string cuePath)
+    {
+        mode = "accuraterip";
+        if (accurateRip is not null) _ = accurateRip.Check(cuePath);
+    }
+
+    private void OnMusicCdToQueue(string cuePath)
+    {
+        queue?.AddIso(cuePath);
+        mode = "write";
+    }
     // Recorders the queue can use: writers, plus busy drives (a busy drive
     // isn't asked what it writes, and may be the one the queue is using).
     private IReadOnlyList<BurnerDrive> queueDrives = Array.Empty<BurnerDrive>();
@@ -389,6 +427,13 @@
     // (v4.0 week 6), so "Refresh drives" is only needed now and then.
     protected override async Task OnParametersSetAsync()
     {
+        // The tab has just been shown: open the live log (Settings can turn this off).
+        if (Visible && !wasVisible)
+        {
+            try { if (ConfigService.Load().LiveLogOpensWithBurnTab) showLiveLog = true; } catch { }
+        }
+        wasVisible = Visible;
+
         if (Visible && !scannedOnce)
         {
             scannedOnce = true;

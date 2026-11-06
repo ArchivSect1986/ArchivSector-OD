@@ -4,8 +4,10 @@ namespace ArchivSector_OD
 {
     public partial class TitlePickerWindow : Window
     {
-        private readonly TaskCompletionSource<MakeMkvService.TitleInfo?> tcs = new();
-        public Task<MakeMkvService.TitleInfo?> ResultTask => tcs.Task;
+        // The titles ticked, longest first (v4.0 beta 4: several, for a disc with
+        // more than one film); null if cancelled.
+        private readonly TaskCompletionSource<List<MakeMkvService.TitleInfo>?> tcs = new();
+        public Task<List<MakeMkvService.TitleInfo>?> ResultTask => tcs.Task;
 
         private class TitleRow
         {
@@ -28,7 +30,17 @@ namespace ArchivSector_OD
             }).ToList();
 
             TitleList.ItemsSource = rows;
-            if (rows.Count > 0) TitleList.SelectedIndex = 0;
+            if (rows.Count > 0) TitleList.SelectedItems.Add(rows[0]);   // the longest, ticked to start with
+            UpdateButton();
+        }
+
+        private void TitleList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) => UpdateButton();
+
+        private void UpdateButton()
+        {
+            int n = TitleList.SelectedItems.Count;
+            ExtractButton.Content = n <= 1 ? "Extract 1 Title" : $"Extract {n} Titles";
+            ExtractButton.IsEnabled = n > 0;
         }
 
         private static string FormatDuration(int totalSeconds)
@@ -39,8 +51,10 @@ namespace ArchivSector_OD
 
         private void ExtractButton_Click(object sender, RoutedEventArgs e)
         {
-            var selected = (TitleList.SelectedItem as TitleRow)?.Title;
-            tcs.TrySetResult(selected);
+            // In the list's order (longest first), not the order they were ticked.
+            var picked = TitleList.Items.OfType<TitleRow>().Where(r => TitleList.SelectedItems.Contains(r)).Select(r => r.Title).ToList();
+            if (picked.Count == 0) return;
+            tcs.TrySetResult(picked);
             Close();
         }
 

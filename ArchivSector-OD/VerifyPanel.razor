@@ -6,12 +6,14 @@
     Verify mode (v4.0 week 5): compares the disc in a drive with an ISO,
     sector by sector (BurnEngine.VerifyAgainstIsoAsync), like ImgBurn's
     Verify mode. Read-only. The drive is marked busy while it checks.
+    Beta 4: a CD can also be checked against a BIN/CUE (music, mixed and
+    Enhanced CDs), with BurnEngine.VerifyAgainstCueAsync.
 *@
 
 <div class="bay-card" style="display: flex; flex-direction: column; gap: 14px; color: var(--text-primary);">
     <div>
         <h2 style="margin: 0;">✔ Verify a disc</h2>
-        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Compare a disc with its ISO, sector by sector: for discs burned earlier, burned by another program, or re-checked after time on the shelf. Nothing is written.</p>
+        <p class="bay-subtitle" style="margin: 4px 0 0; color: var(--text-secondary); font-size: 12px;">Compare a disc with its ISO or BIN/CUE, sector by sector: for discs burned earlier, burned by another program, or re-checked after time on the shelf. Nothing is written.</p>
     </div>
 
     @if (running)
@@ -46,17 +48,17 @@
                 </select>
             </div>
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <strong style="min-width: 70px;">ISO</strong>
-                <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; color: @(isoPath is null ? "var(--text-secondary)" : "var(--text-primary)");">@(isoPath ?? "No ISO chosen")</span>
-                <button class="shortcut-btn" @onclick="ChooseIso">📂 Choose ISO…</button>
+                <strong style="min-width: 70px;">Image</strong>
+                <span style="flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; color: @(isoPath is null ? "var(--text-secondary)" : "var(--text-primary)");">@(isoPath ?? "No ISO or BIN/CUE chosen")</span>
+                <button class="shortcut-btn" @onclick="ChooseIso">📂 Choose image…</button>
             </div>
             @if (isoPath is not null)
             {
-                <span style="font-size: 12px; color: var(--text-secondary); margin-left: 80px;">@IsoLine</span>
+                <span style="font-size: 12px; color: @(cueProblem is null ? "var(--text-secondary)" : "var(--amber)"); margin-left: 80px;">@IsoLine</span>
             }
         </div>
         <div>
-            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(isoPath is null || driveLetter.Length == 0)">✔ Verify</button>
+            <button class="bay-btn game" style="width: auto; padding: 0 20px; min-height: 40px;" @onclick="Start" disabled="@(isoPath is null || cueProblem is not null || driveLetter.Length == 0)">✔ Verify</button>
         </div>
         @if (message is not null)
         {
@@ -68,7 +70,7 @@
     {
         <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px;">
             <strong style="color: @(result.Ok ? "var(--success)" : result.Cancelled ? "var(--text-secondary)" : "var(--danger)");">@(result.Ok ? "✅" : result.Cancelled ? "⏸" : "⚠") @result.Message</strong>
-            <span style="font-size: 12px; color: var(--text-secondary);">@result.Sectors.ToString("N0") sectors checked in @Dur(result.Time) · average @DiscHealthService.FormatSpeed(result.AverageBytesPerSec, OneX(result.Sectors * 2048))</span>
+            <span style="font-size: 12px; color: var(--text-secondary);">@result.Sectors.ToString("N0") sectors checked in @Dur(result.Time) · average @DiscHealthService.FormatSpeed(result.AverageBytesPerSec, resultIsCue ? 176_400 : OneX(result.Sectors * 2048))</span>
             @if (result.BadRanges.Count > 0)
             {
                 <span style="font-size: 12px; color: var(--text-secondary);">Problem sectors: @BadText</span>
@@ -84,6 +86,8 @@
     private List<string> drives = new();
     private string driveLetter = "";
     private string? isoPath;
+    private bool isCue, resultIsCue;           // a .cue (BIN/CUE) rather than an ISO
+    private string? cueSummary, cueProblem;
     private bool running, cancelRequested, wasVisible, disposed;
     private string runLetter = "";
     private string? message;
@@ -96,6 +100,7 @@
     {
         get
         {
+            if (isCue) return cueProblem is not null ? "⚠ " + cueProblem : $"BIN/CUE · {cueSummary} · the disc has to be a CD";
             try { var len = new FileInfo(isoPath!).Length; return $"{DiscHealthService.FormatBytes(len)} ({len:N0} bytes)"; }
             catch { return "The ISO can't be opened."; }
         }
@@ -136,20 +141,28 @@
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Choose the ISO the disc should match",
-            Filter = "Disc images (*.iso)|*.iso|All files (*.*)|*.*",
+            Title = "Choose the ISO or BIN/CUE the disc should match",
+            Filter = "Disc images (*.iso;*.cue)|*.iso;*.cue|ISO (*.iso)|*.iso|BIN/CUE (*.cue)|*.cue|All files (*.*)|*.*",
         };
         if (lastFolder is not null && Directory.Exists(lastFolder)) dlg.InitialDirectory = lastFolder;
         if (dlg.ShowDialog(System.Windows.Application.Current.MainWindow) != true) return;
         isoPath = dlg.FileName;
         lastFolder = Path.GetDirectoryName(isoPath);
+        isCue = string.Equals(Path.GetExtension(isoPath), ".cue", StringComparison.OrdinalIgnoreCase);
+        cueSummary = cueProblem = null;
+        if (isCue)
+        {
+            var img = CueImage.Load(isoPath);
+            if (img.Problem is not null) cueProblem = img.Problem;
+            else cueSummary = img.Summary;
+        }
         result = null;
         message = null;
     }
 
     private async Task Start()
     {
-        if (isoPath is null || driveLetter.Length == 0) return;
+        if (isoPath is null || cueProblem is not null || driveLetter.Length == 0) return;
         var letter = driveLetter;
         message = null;
         if (RipActivity.IsDriveBusy(letter) || BurnService.IsBusy(letter))
@@ -162,12 +175,16 @@
         cancelRequested = false;
         progress = null;
         result = null;
+        resultIsCue = isCue;
         cts = new CancellationTokenSource();
         var reporter = new Progress<BurnEngine.VerifyProgress>(p => { progress = p; if (!disposed) InvokeAsync(StateHasChanged); });
         RipActivity.Set(letter, "verify-disc", true);
         try
         {
-            result = await BurnEngine.VerifyAgainstIsoAsync(letter, isoPath, reporter, cts.Token, line => LogService.Write($"{letter}:", line));
+            Action<string> log = line => LogService.Write($"{letter}:", line);
+            result = isCue
+                ? await BurnEngine.VerifyAgainstCueAsync(letter, isoPath, reporter, cts.Token, log)
+                : await BurnEngine.VerifyAgainstIsoAsync(letter, isoPath, reporter, cts.Token, log);
         }
         catch (Exception ex)
         {

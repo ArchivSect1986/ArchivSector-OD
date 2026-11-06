@@ -7,6 +7,9 @@ namespace ArchivSector_OD.Burning
     // earlier, by any program, or re-checked after time on the shelf.
     // Reads straight from the drive (ScsiDrive), so nothing Windows has
     // cached is compared. Read-only: nothing is written.
+    // BIN/CUE (v4.0 beta 4): a CD is compared with its .cue the same way the
+    // own writer checks a BIN/CUE after burning (VerifyCue): data tracks
+    // exactly, music tracks after lining up the drive's read offset.
     public static partial class BurnEngine
     {
         public sealed class VerifyProgress
@@ -154,6 +157,99 @@ namespace ArchivSector_OD.Burning
             if (r.BadRanges.Count > 0)
                 log?.Invoke("Verify: problem sectors at " + string.Join(", ", r.BadRanges.Take(20).Select(b => b.Count == 1 ? $"{b.Lba:N0}" : $"{b.Lba:N0}-{b.Lba + b.Count - 1:N0}"))
                             + (r.BadRanges.Count > 20 ? $" and {r.BadRanges.Count - 20} more ranges" : ""));
+        }
+        // ---- BIN/CUE (beta 4) ----
+
+        public static Task<VerifyResult> VerifyAgainstCueAsync(string driveLetter, string cuePath, IProgress<VerifyProgress>? progress,
+            CancellationToken ct, Action<string>? log = null)
+        {
+            var letter = Norm(driveLetter);
+            if (!Busy.TryAdd(letter, true))
+                return Task.FromResult(new VerifyResult { Message = "This drive is busy burning or checking." });
+            return Task.Factory.StartNew(() =>
+            {
+                var r = new VerifyResult();
+                try { VerifyAgainstCue(letter, cuePath, progress, ct, r, log); }
+                catch (Exception ex) { r.Message = "The check stopped: " + ex.Message; log?.Invoke("Verify: " + r.Message); }
+                finally { Busy.TryRemove(letter, out _); }
+                return r;
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        }
+
+        private static void VerifyAgainstCue(string letter, string cuePath, IProgress<VerifyProgress>? progress, CancellationToken ct, VerifyResult r, Action<string>? log)
+        {
+            if (!File.Exists(cuePath)) { r.Message = "The .cue file isn't there any more."; return; }
+            var img = CueImage.Load(cuePath);
+            if (img.Problem is not null) { r.Message = img.Problem; return; }
+
+            using var drive = ScsiDrive.Open(letter, out var problem);
+            if (drive is null) { r.Message = problem ?? "The drive couldn't be opened."; return; }
+            if (!WaitReady(drive, ct, TimeSpan.FromSeconds(30))) { r.Message = "There's no readable disc in the drive."; return; }
+
+            // The disc's tracks have to be where the .cue puts them, or every
+            // sector would be compared with the wrong part of the .bin.
+            var toc = CdImageReader.ReadToc(drive, out problem);
+            if (toc is null) { r.Message = (problem ?? "The disc's track list couldn't be read.") + " A BIN/CUE can only be checked against a CD."; return; }
+            string? layout = null;
+            if (toc.Tracks.Count != img.Tracks.Count)
+                layout = $"The CD has {toc.Tracks.Count} track(s) but the .cue has {img.Tracks.Count}, so they can't be the same.";
+            else
+                for (int i = 0; i < img.Tracks.Count && layout is null; i++)
+                {
+                    var want = img.Tracks[i];
+                    var got = toc.Tracks[i];
+                    if (got.IsData == want.IsAudio)
+                        layout = $"Track {want.Number} is {(want.IsAudio ? "music" : "data")} in the .cue but {(got.IsData ? "data" : "music")} on the CD.";
+                    else if (got.StartLba != want.Index1Lba)
+                        layout = $"Track {want.Number} starts at sector {got.StartLba:N0} on the CD but at {want.Index1Lba:N0} in the .cue.";
+                }
+            if (layout is null && toc.LeadOutLba != img.LeadOutLba)
+                layout = $"The CD ends at sector {toc.LeadOutLba:N0} but the .cue at {img.LeadOutLba:N0}.";
+            if (layout is not null)
+            {
+                r.Message = layout + " (Is it the right disc and .cue?)";
+                log?.Invoke("Verify: " + r.Message);
+                return;
+            }
+            FullDriveSpeed(drive);   // read at full speed, even if a slower one was set when burning
+
+            long sectors = img.Pieces.Where(x => x.File is not null).Sum(x => x.Count);
+            log?.Invoke($"Verify: {letter}: against {cuePath} ({img.Summary}; {sectors:N0} sectors to compare)");
+            var clock = Stopwatch.StartNew();
+            var inner = new SyncProgress<Progress>(p =>
+            {
+                if (p.Phase != "Verifying") return;
+                progress?.Report(new VerifyProgress
+                {
+                    Percent = Math.Max(0, p.Percent),
+                    BytesPerSec = p.BytesPerSec,
+                    OneX = 176_400,
+                    Remaining = p.Remaining,
+                });
+            });
+            var br = new Result();
+            string audioNote = VerifyCue(drive, img, inner, ct, br, log);
+
+            r.Time = clock.Elapsed;
+            r.Cancelled = br.Cancelled || ct.IsCancellationRequested;
+            r.Sectors = r.Cancelled ? 0 : sectors;
+            r.Different = br.MismatchedSectors;
+            r.BadRanges = ToRanges(br.BadSectorLbas);
+            r.AverageBytesPerSec = r.Time.TotalSeconds > 0 && r.Sectors > 0 ? r.Sectors * 2352.0 / r.Time.TotalSeconds : 0;
+            r.Ok = !r.Cancelled && br.Verified == true;
+            r.Message = r.Cancelled ? "Stopped before the end, so the disc wasn't fully checked."
+                : r.Ok ? $"The disc matches the BIN/CUE{audioNote}."
+                : $"The disc doesn't match the BIN/CUE: {br.MismatchedSectors:N0} sector(s) differ or couldn't be read.";
+            log?.Invoke("Verify: " + r.Message);
+        }
+
+        // Progress<T> posts to the thread that made it; this one just calls
+        // straight through (the panel's own Progress does the hand-over).
+        private sealed class SyncProgress<T> : IProgress<T>
+        {
+            private readonly Action<T> report;
+            public SyncProgress(Action<T> report) => this.report = report;
+            public void Report(T value) => report(value);
         }
     }
 }

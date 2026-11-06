@@ -355,6 +355,19 @@ namespace ArchivSector_OD.Burning
                 }
                 else rep.Notes.Add("Write speeds (GET PERFORMANCE): " + r.Describe());
             }
+
+            // CD-Text (beta 4): album and track names in a CD's lead-in.
+            if (family == "CD" && !blank)
+            {
+                var text = CdText.Read(drive);
+                if (text is not null)
+                {
+                    var sec = new Section("CD-Text");
+                    foreach (var (label, value) in text.Lines()) sec.Add(label, value);
+                    if (text.BadPacks > 0) sec.Add("Unreadable", $"{text.BadPacks} part(s) failed their check and were skipped");
+                    if (sec.Rows.Count > 0) rep.Sections.Add(sec);
+                }
+            }
             return rep;
         }
 

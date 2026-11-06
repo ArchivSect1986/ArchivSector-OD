@@ -1,0 +1,130 @@
+﻿@* 📜 Live log (v4.0 beta 4): what every drive is doing, as it happens.
+   It shows the lines LogService writes (the last
+   1,000 kept in memory); the log file is written exactly as before.
+   Newest line at the bottom. The list keeps following new lines while
+   it's scrolled to the bottom, and stays put when scrolled up to read
+   (the box is laid out bottom-up, so the browser does this by itself).
+   The box is short (about 8 lines) and can be dragged taller by its
+   bottom-right corner.
+   Filter by drive; Copy puts what's shown on the clipboard; Clear only
+   empties this box. Errors are red, warnings amber, a passed verify
+   green, in the theme's own colours. *@
+
+@implements IDisposable
+
+<div style="border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel-alt); display: flex; flex-direction: column; overflow: hidden;">
+    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--border);">
+        <strong style="margin-right: 4px;">📜 Live log</strong>
+        <button class="shortcut-btn" style="@ChipStyle(null)" @onclick="() => filter = null">All drives</button>
+        @foreach (var src in Sources)
+        {
+            var s = src;
+            <button class="shortcut-btn" style="@ChipStyle(s)" @onclick="() => filter = s">@s</button>
+        }
+        <span style="flex: 1;"></span>
+        <button class="shortcut-btn" @onclick="Copy" title="Copies the lines shown (with the drive filter) to the clipboard">@(copied ? "✓ Copied" : "📋 Copy")</button>
+        <button class="shortcut-btn" @onclick="LogService.OpenToday" title="Opens today's log file, in easy-to-read blocks">📄 Open log</button>
+        <button class="shortcut-btn" @onclick="Clear" title="Empties this box only. The log file keeps everything.">🗑 Clear</button>
+        <button class="shortcut-btn" @onclick="() => Close.InvokeAsync()" title="Hide the live log">✕</button>
+    </div>
+
+    <div style="height: 170px; min-height: 80px; resize: vertical; overflow-y: auto; display: flex; flex-direction: column-reverse; padding: 6px 10px; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 12px; line-height: 1.45;">
+        <div>
+            @if (Shown.Count == 0)
+            {
+                <div style="color: var(--text-muted);">Nothing yet@(filter is null ? "" : " for " + filter). Lines appear here as soon as anything happens: a burn, a verify, an erase, a dump…</div>
+            }
+            @foreach (var l in Shown)
+            {
+                var line = l;
+                var parts = line.Text.Split('\n');
+                @* One line per entry: the row itself doesn't keep line breaks (only an opened report below does). *@
+                <div style="color: @Colour(line); overflow-wrap: anywhere;"><span style="opacity: 0.8;">@line.Level @line.Time.ToString("HH:mm:ss")</span>&nbsp; <span style="display: inline-block; min-width: 2.6em; color: var(--text-muted);">@line.Source</span> @parts[0].TrimEnd('\r')
+                    @if (parts.Length > 1)
+                    {
+                        bool open = expanded.Contains(line.Id);
+                        <span style="cursor: pointer; color: var(--text-muted);" @onclick="() => Toggle(line.Id)">@(open ? " ▾ hide" : $" ▸ {parts.Length - 1} more lines")</span>
+                        @if (open)
+                        {
+                            <div style="color: var(--text-muted); padding-left: 2em; white-space: pre-wrap;">@string.Join("\n", parts.Skip(1).Select(p => p.TrimEnd('\r')))</div>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback Close { get; set; }
+
+    private string? filter;                 // a drive ("E:") or null for all
+    private long clearedThrough;            // lines up to this Id were cleared from the box
+    private readonly HashSet<long> expanded = new();
+    private bool refreshQueued, copied;
+    private const int ShowAtMost = 500;     // keeps the box quick during long sessions
+
+    private List<LogService.LiveLine> All => LogService.LiveLines().Where(l => l.Id > clearedThrough).ToList();
+    private List<LogService.LiveLine> Shown
+    {
+        get
+        {
+            var lines = All.Where(l => filter is null || string.Equals(l.Source, filter, StringComparison.OrdinalIgnoreCase)).ToList();
+            return lines.Count > ShowAtMost ? lines.GetRange(lines.Count - ShowAtMost, ShowAtMost) : lines;
+        }
+    }
+    private IEnumerable<string> Sources => All.Select(l => l.Source).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(s => s, StringComparer.OrdinalIgnoreCase);
+
+    protected override void OnInitialized() => LogService.LiveChanged += OnLive;
+    public void Dispose() => LogService.LiveChanged -= OnLive;
+
+    // Lines can arrive many times a second (a verify's progress): redraw at
+    // most four times a second.
+    private void OnLive()
+    {
+        if (refreshQueued) return;
+        refreshQueued = true;
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Delay(250);
+            refreshQueued = false;
+            StateHasChanged();
+        });
+    }
+
+    private static string Colour(LogService.LiveLine l) =>
+        l.Level == 'E' ? "var(--danger)"
+        : l.Level == 'W' ? "var(--amber)"
+        : l.Text.Contains("every sector matches", StringComparison.OrdinalIgnoreCase)
+          || l.Text.Contains("verified", StringComparison.OrdinalIgnoreCase) && l.Text.Contains("match", StringComparison.OrdinalIgnoreCase)
+          ? "var(--success)"
+        : "var(--text-primary)";
+
+    private string ChipStyle(string? s) =>
+        string.Equals(filter, s, StringComparison.OrdinalIgnoreCase)
+            ? "font-size: 12px; padding: 2px 10px; border-color: var(--accent, var(--success)); font-weight: 600;"
+            : "font-size: 12px; padding: 2px 10px; opacity: 0.75;";
+
+    private void Toggle(long id)
+    {
+        if (!expanded.Remove(id)) expanded.Add(id);
+    }
+
+    private void Clear()
+    {
+        var all = LogService.LiveLines();
+        clearedThrough = all.Count > 0 ? all[^1].Id : clearedThrough;
+        expanded.Clear();
+    }
+
+    private async Task Copy()
+    {
+        var text = string.Join(Environment.NewLine, Shown.Select(l => $"{l.Level} {l.Time:HH:mm:ss} [{l.Source}] {l.Text.Replace("\n", Environment.NewLine)}"));
+        try { System.Windows.Clipboard.SetText(text.Length == 0 ? " " : text); } catch { return; }
+        copied = true;
+        StateHasChanged();
+        await Task.Delay(1500);
+        copied = false;
+        StateHasChanged();
+    }
+}

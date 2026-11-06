@@ -61,6 +61,44 @@ namespace ArchivSector_OD
         /// <summary>The program used when our own writer can't burn a disc: ImgBurn if it's installed, otherwise Windows.</summary>
         public static string FallbackName() => ImgBurnPath() is not null ? "ImgBurn" : "Windows";
 
+        // ---- BurnerMAX drives (beta 4) ----
+        // BurnerMAX only works on some drives. When a drive's DVD+R DL shows
+        // the raised capacity, its model is saved; a drive it hasn't worked
+        // on yet then points to the ones it has.
+        private static string ModelKey(string model) => string.Join(' ', model.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+        /// <summary>Saves that BurnerMAX raised the capacity on this drive model.</summary>
+        public static void BurnerMaxWorked(string model)
+        {
+            var key = ModelKey(model);
+            if (key.Length == 0) return;
+            try
+            {
+                var cfg = ConfigService.Load();
+                if (cfg.BurnerMaxDrives.Any(m => string.Equals(ModelKey(m), key, StringComparison.OrdinalIgnoreCase))) return;
+                cfg.BurnerMaxDrives.Add(key);
+                ConfigService.Save(cfg);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// For a drive BurnerMAX hasn't worked on yet: "BurnerMAX has worked
+        /// on your ASUS DRW-24F1ST…". Null if it has worked on this one, or
+        /// on none yet.
+        /// </summary>
+        public static string? BurnerMaxHint(string model)
+        {
+            try
+            {
+                var key = ModelKey(model);
+                var worked = ConfigService.Load().BurnerMaxDrives.Select(ModelKey).Where(m => m.Length > 0).ToList();
+                if (worked.Count == 0 || worked.Any(m => string.Equals(m, key, StringComparison.OrdinalIgnoreCase))) return null;
+                return "BurnerMAX has worked on your " + string.Join(" and ", worked) + " but not yet on this drive: if it doesn't raise the capacity here, burn this game in that drive.";
+            }
+            catch { return null; }
+        }
+
         public static async Task<BurnEngine.Result> BurnAsync(string driveLetter, string isoPath, bool verify, string discTitle, string driveModel,
             IProgress<BurnEngine.Progress>? progress, CancellationToken ct, bool useImgBurn = false, bool deleteIsoAfter = false,
             bool direct = false, double speedX = 0)
@@ -72,6 +110,24 @@ namespace ArchivSector_OD
                 imgBurn = ImgBurnPath();
                 if (imgBurn is null)
                     return new BurnEngine.Result { Message = "ImgBurn isn't installed (or wasn't found). Install it, set its location in Settings, or burn with Windows instead." };
+            }
+
+            // Beta 4: a .dvd file (ImgBurn's layer break file) names an image
+            // and where its layer 0 ends. Our writer burns the image with that
+            // layer break; ImgBurn takes the .dvd file itself; Windows' engine
+            // can't set a layer break.
+            string burnPath = isoPath;
+            long layerBreak = 0;
+            bool dvdFile = DvdLayerFile.IsDvdFile(isoPath);
+            if (dvdFile)
+            {
+                var d = DvdLayerFile.Load(isoPath);
+                if (d.Problem is not null) return new BurnEngine.Result { Message = d.Problem, DiscUntouched = true, NoFallback = true };
+                if (!direct && imgBurn is null)
+                    return new BurnEngine.Result { Message = "Windows' burning engine can't set a layer break. Burn .dvd files with ArchivSector-OD's own writer or ImgBurn.", DiscUntouched = true };
+                burnPath = d.ImagePath;
+                layerBreak = d.LayerBreak;
+                deleteIsoAfter = false;   // the .dvd file and its image stay
             }
 
             RipActivity.Set(letter, "burn", true);
@@ -87,18 +143,24 @@ namespace ArchivSector_OD
                 r = direct && cue
                     ? await BurnEngine.BurnCueAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line), speedX)
                     : direct
-                    ? await BurnEngine.BurnDirectAsync(letter, isoPath, verify, progress, ct, line => LogService.Write($"{letter}:", line), speedX)
+                    ? await BurnEngine.BurnDirectAsync(letter, burnPath, verify, progress, ct, line => LogService.Write($"{letter}:", line), speedX, layerBreak)
                     : await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, imgBurn,
                         line => LogService.Write($"{letter}:", line), speedX);
 
                 // Our own writer couldn't start (the drive couldn't be opened,
                 // the disc isn't one it handles, ...) and nothing on the disc
                 // was changed: ImgBurn burns it instead, or Windows without it.
-                if (direct && !r.Burned && !r.Cancelled && r.DiscUntouched && !ct.IsCancellationRequested)
+                if (direct && !r.Burned && !r.Cancelled && r.DiscUntouched && !r.NoFallback && !ct.IsCancellationRequested)
                 {
                     var why = r.Message.TrimEnd('.', ' ');
                     var fallback = ImgBurnPath();
                     string name = fallback is not null ? "ImgBurn" : "Windows";
+                    if (dvdFile && fallback is null)
+                    {
+                        r.Message = $"ArchivSector-OD's own writer couldn't burn this ({why}), and Windows' burning engine can't set a layer break. Install ImgBurn to burn the .dvd file.";
+                        RecordHistory(r, letter, isoPath, discTitle, driveModel, direct);
+                        return r;
+                    }
                     if (cue && fallback is null)
                     {
                         r.Message = $"ArchivSector-OD's own writer couldn't burn this BIN/CUE image ({why}), and Windows' burning engine can't burn BIN/CUE. Install ImgBurn to burn it.";
@@ -109,7 +171,10 @@ namespace ArchivSector_OD
                     progress?.Report(new BurnEngine.Progress { Phase = "Switching to " + name, Percent = -1 });
                     r = await BurnEngine.BurnAsync(letter, isoPath, verify, progress, ct, fallback,
                         line => LogService.Write($"{letter}:", line), speedX);
-                    r.Message = $"ArchivSector-OD's own writer couldn't start ({why}), so {name} burned this disc instead. " + r.Message;
+                    // Beta 4: only say the other program burned it if it did.
+                    r.Message = r.Burned
+                        ? $"ArchivSector-OD's own writer couldn't start ({why}), so {name} burned this disc instead. " + r.Message
+                        : $"ArchivSector-OD's own writer couldn't start ({why}), and {name} couldn't burn it either: " + r.Message;
                     direct = false;
                 }
             }

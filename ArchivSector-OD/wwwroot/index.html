@@ -17,6 +17,40 @@
     <script src="_framework/blazor.webview.js" autostart="false"></script>
     <script>
         Blazor.start();
+
+        // v4.0 beta 4: files dropped from Explorer. Over an element with
+        // data-file-drop="name" the drop is shown (file-drop-over) and the
+        // files go to the app, which gets their paths from WebView2.
+        // Anywhere else a drop does nothing (the page would otherwise open
+        // the file in place of the app).
+        (function () {
+            var over = null;
+            function zone(e) { return e.target && e.target.closest ? e.target.closest('[data-file-drop]') : null; }
+            function hasFiles(e) { return !!e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0; }
+            function mark(z) {
+                if (over && over !== z) over.classList.remove('file-drop-over');
+                if (z) z.classList.add('file-drop-over');
+                over = z;
+            }
+            window.addEventListener('dragover', function (e) {
+                if (!hasFiles(e)) return;
+                e.preventDefault();
+                var z = zone(e);
+                e.dataTransfer.dropEffect = z ? 'copy' : 'none';
+                mark(z);
+            });
+            window.addEventListener('dragleave', function (e) { if (!e.relatedTarget) mark(null); });
+            window.addEventListener('drop', function (e) {
+                if (!hasFiles(e)) return;
+                e.preventDefault();
+                var z = zone(e);
+                mark(null);
+                if (!z || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+                var wv = window.chrome && window.chrome.webview;
+                if (wv && wv.postMessageWithAdditionalObjects)
+                    wv.postMessageWithAdditionalObjects('archivsector-drop:' + z.getAttribute('data-file-drop'), e.dataTransfer.files);
+            });
+        })();
     </script>
 </body>
 </html>

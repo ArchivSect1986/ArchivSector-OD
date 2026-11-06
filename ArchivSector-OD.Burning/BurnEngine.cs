@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -52,6 +52,7 @@ namespace ArchivSector_OD.Burning
             public bool Cancelled;
             public bool? Verified;          // null = not verified
             public long MismatchedSectors;
+            public List<long> BadSectorLbas = new();   // BIN/CUE verify: which sectors (beta 4)
             public bool VerifiedByImgBurn;   // ImgBurn did the check (its "Exact Match")
             public bool IsoDeleted;          // the ISO went to the Recycle Bin afterwards
             public string Message = "";
@@ -59,8 +60,14 @@ namespace ArchivSector_OD.Burning
             // (drive couldn't be opened, disc type not handled, ...), so
             // another program can safely burn the same disc instead.
             public bool DiscUntouched;
+            // Beta 4: refused on purpose (an image that would make a useless
+            // disc, like an Xbox 360 game that isn't patched): no other
+            // program should burn it instead either.
+            public bool NoFallback;
             public TimeSpan BurnTime;
             public TimeSpan VerifyTime;
+            public bool CdTextWritten;       // BIN/CUE: the album and track names went into the lead-in (beta 4)
+            public string CdTextNote = "";   // BIN/CUE: why there's no CD-Text, or that it reads back differently
         }
 
         // Drives currently burning or verifying (the bay polling leaves them alone).
@@ -281,7 +288,7 @@ namespace ArchivSector_OD.Burning
                         r.VerifyTime = verifyClock.Elapsed;
                     }
 
-                    string what = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) ? "image" : "ISO";
+                    string what = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase) || isoPath.EndsWith(".dvd", StringComparison.OrdinalIgnoreCase) ? "image" : "ISO";
                     r.Message = !r.Burned ? (r.Message.Length > 0 ? r.Message : "The burn didn't complete.")
                         : r.Verified == true ? $"Burned and verified: every byte on the disc matches the {what}" + (r.VerifiedByImgBurn ? " (checked by ImgBurn)." : ".")
                         : r.Verified == false ? (r.Message.Length > 0 ? r.Message : $"Burned, but {r.MismatchedSectors:N0} sector(s) on the disc don't match the {what}. Don't rely on this disc.")
@@ -429,7 +436,10 @@ namespace ArchivSector_OD.Burning
             // An ISO must be whole 2 KB sectors. A .cue (BIN/CUE, beta 3: ImgBurn
             // burns the ones our writer can't, like Enhanced CDs) is a small
             // text file pointing at the .bin; ImgBurn checks those itself.
-            bool cue = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase);
+            // A .dvd (layer break file, beta 4) is the same kind of small text
+            // file: its image was checked when it was picked (DvdLayerFile).
+            bool cue = isoPath.EndsWith(".cue", StringComparison.OrdinalIgnoreCase)
+                    || isoPath.EndsWith(".dvd", StringComparison.OrdinalIgnoreCase);
             long isoBytes = new FileInfo(isoPath).Length;
             if (!cue && (isoBytes == 0 || isoBytes % Sector != 0))
             {
