@@ -18,7 +18,7 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 * 🖼️ **Metadata & Artwork:** Automatic lookup of movie titles/artwork on disc insertion via TMDB, plus manual search for movies (TMDB) and games (RAWG). Add a year in brackets to pick the right version of a film. Both use free API keys.
 * 💡 **LibreDrive Detection:** Drive bays show OmniDrive-compatible drive models, and automatically confirm LibreDrive mode when MakeMKV reports it during a rip.
 * 🎯 **TargetFill Built In:** Everything from TargetFill Pro, in its own tab. Fill a CD, DVD, Blu-ray or USB drive to exactly 100% with your data protected in the middle tracks. Build ready-to-burn ISOs (split across several discs when needed) with a SHA-256 manifest, an on-disc verifier, optional PAR2 recovery files and printable disc labels, or send any finished rip straight to TargetFill to burn an archival backup copy. Also available from the right-click menu of any folder, with a batch mode for building many folders' ISOs in one go, and a tool that pads ISOs you already have to 100% of a disc.
-* 🔥 **Disc Burning:** A Burn tab with ArchivSector-OD's own writer, which talks to the drive directly and uses the whole disc: CD-R/RW, DVD±R, DVD±RW, DVD+R DL, BD-R and BD-RE, at the speed you choose, then verified byte for byte against the ISO. Burn one ISO or a queue of them (drag and drop, kept between runs), burn BIN/CUE CD images (data and music, like Redumper dumps, two-session Enhanced CDs, CD-Text and hidden tracks), make a music CD from WAV, FLAC, MP3, M4A/AAC or WMA files, copy a disc (data discs, music CDs, games with music tracks, and Enhanced CDs) with one drive or two, build an ISO from a folder, read a disc to an ISO or BIN/CUE (with an optional secure read and automatic read offset for music), check a music CD against AccurateRip, verify a disc burned earlier, erase rewritable discs, and see exactly what your drive and disc report (including who made the disc). Xbox 360 game backups of games you own can be burned too: ImgBurn .dvd layer break files, the right XGD2/XGD3 layer break set automatically, a check of the game's security data before burning, and help raising a disc's capacity for XGD3 games with your own copy of BurnerMAX. ImgBurn or Windows' built-in burning engine can be used instead, and ImgBurn takes over automatically for a disc the own writer can't burn.
+* 🔥 **Disc Burning:** A Burn tab with ArchivSector-OD's own writer, which talks to the drive directly and uses the whole disc: CD-R/RW, DVD±R, DVD±RW, DVD+R DL, BD-R and BD-RE, at the speed you choose, then verified byte for byte against the ISO. Burn one ISO or a queue of them, burn BIN/CUE CD images (data and music, like Redumper dumps, and two-session Enhanced CDs), copy a disc (data discs, music CDs, games with music tracks, and Enhanced CDs) with one drive or two, build an ISO from a folder, read a data disc to an ISO, verify a disc burned earlier, erase rewritable discs, and see exactly what your drive and disc report (including who made the disc). ImgBurn or Windows' built-in burning engine can be used instead, and ImgBurn takes over automatically for a disc the own writer can't burn.
 * 🔬 **Disc Health Check:** Reads every sector of a disc (Blu-ray, DVD or CD, including music CDs) and shows a live map of slow or unreadable areas from the inner to the outer edge, so you can spot a disc starting to fail and back it up in time. Saves a report and records the result in History. Read-only.
 * ⚡ **Smart Workflow Automation:** Duplicate-output warnings, a completion sound and Windows notification, and physical optical tray auto-ejection upon completion.
 * 🔄 **One-Click Updates:** Checks GitHub for a new version at startup (can be turned off in Settings). With one click it downloads the update, verifies it, installs it and restarts, keeping your settings and history. It never updates in the middle of a rip, and it offers to fix shortcuts that still open an older copy.
@@ -29,7 +29,6 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 
 * **No Bundled Software:** This repository contains only original source code written for **ArchivSector-OD**. It does not host, mirror, package, or distribute any third-party binaries or proprietary executables.
 * **No Circumvention Keys:** This software does not contain decryption keys or digital rights management (DRM) circumvention tools.
-* **Console Game Burning:** Xbox 360 burning is for backups of games you own. ArchivSector-OD burns the image you give it as it is: it doesn't download, patch or supply game files or security data, and it doesn't modify consoles or drive firmware. The BurnerMAX Payload Tool is a separate third-party program that isn't included or linked; using it is your choice.
 * **Compliance with Local Laws:** The author does not condone, promote, or facilitate copyright infringement. Digital Millennium Copyright Act (DMCA) regulations and copyright laws regarding private format-shifting vary by country.
 * **User Responsibility:** The end-user assumes all legal responsibility for installing external dependencies, maintaining valid software licenses, and ensuring their physical media archiving workflows comply with local jurisdictions.
 * **No Warranty:** This software is distributed for free under the MIT License "as-is", without any express or implied warranties regarding its functionality or interoperability.
@@ -58,15 +57,11 @@ To use **ArchivSector-OD**, you must independently download the following third-
 * **Purpose:** A backup for burning: ArchivSector-OD's own writer burns most discs itself, and ImgBurn takes over automatically for a disc it can't (such as dual-layer DVD-R DL and BD-R DL). Also used as a fallback for DVD raw ISO dumps when Redumper isn't set up, as an optional stage 2 that turns a decrypted Blu-ray/UHD backup into a single-file ISO, and by TargetFill's ImgBurn button.
 * **Source:** Download from the official ImgBurn repository.
 
-### 5. BurnerMAX Payload Tool *(Optional)*
-* **Purpose:** Only for burning Xbox 360 XGD3 game backups, which need a DVD+R DL's capacity raised first. ArchivSector-OD opens it for you when it's needed, and asks where it is the first time. It only works on some drives.
-* **Source:** A third-party community tool; it isn't included with or linked from ArchivSector-OD.
-
-### 6. par2cmdline *(Optional)*
+### 5. par2cmdline *(Optional)*
 * **Purpose:** Only for TargetFill's PAR2 recovery files option. Put `par2.exe` next to `ArchivSector-OD.exe`.
 * **Source:** [par2cmdline releases on GitHub](https://github.com/Parchive/par2cmdline/releases).
 
-### 7. API Keys *(Optional, free)*
+### 6. API Keys *(Optional, free)*
 * **TMDB** ([themoviedb.org](https://www.themoviedb.org)) for movie titles and artwork.
 * **RAWG** ([rawg.io/apidocs](https://rawg.io/apidocs)) for game titles and artwork.
 

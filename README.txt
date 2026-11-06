@@ -1,8 +1,8 @@
-﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 4 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 3 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v4.0 Beta 4**, a test version of v4.0! ⚠️ It's
+Welcome to **ArchivSector-OD v4.0 Beta 3**, a test version of v4.0! ⚠️ It's
 a pre-release: everything should work, but this is the version where you
 help find what doesn't. If you'd rather stay on a finished version, keep
 v3.4.
@@ -32,57 +32,7 @@ you want to go back). Your settings, history, and cached artwork are kept
 -- they're stored separately in your AppData folder. When v4.0 itself is
 released, the beta offers it to you by itself.
 
-Already on Beta 1, 2 or 3? Replace that folder with this one.
-
-========================================================================
-🎵 NEW IN V4.0 BETA 4 — MUSIC CDs, ACCURATERIP & XBOX 360 GAMES
-========================================================================
-
-• 🎵 Music CD (new Burn mode): make a music CD from WAV, FLAC, MP3,
-  M4A/AAC or WMA files. Drop them in, reorder them, edit the track
-  names (read from the tags), and burn with CD-Text. Files that aren't
-  CD audio are converted by Windows itself, nothing to install.
-• 🎯 AccurateRip (new Burn mode): check a music CD you've read against
-  the AccurateRip database, track by track. The drive's offset is
-  found automatically.
-• 🛡 Secure read (Read disc and Copy disc): the CD is read twice and
-  any sector that differs is re-read until one version clearly wins.
-  It fixed two tracks on a worn test CD that read differently every
-  time.
-• 🎚 Read offset set automatically: music read to BIN/CUE is corrected
-  for your drive's offset (looked up in AccurateRip's drive list, or
-  learned), so it matches AccurateRip exactly.
-• 🎮 Xbox 360 games (backups of games you own):
-  - Burns .dvd layer break files, on the burn screen and in
-    the queue.
-  - Recognises Xbox 360 images by itself and sets the right layer
-    break (XGD2 and XGD3).
-  - Checks the game's security data before burning, so a bad download
-    or unzip is caught instead of wasting a disc.
-  - XGD3 games: opens your own copy of the BurnerMAX Payload Tool (not
-    included) to raise the disc's capacity, then 🔄 Check again. It
-    remembers which of your drives BurnerMAX works on.
-  - Burns at the slowest speed the disc offers by default.
-• 💿 CD-Text: shown in Drive info and on the drive card (the rip is
-  named "Artist - Album"), kept by Copy disc, and burned from a .cue.
-• Hidden tracks before track 1 are burned and copied.
-• 🎞 Movie-Only extracts several films from one disc, each as its own
-  MKV.
-• Read disc saves music and mixed CDs as .bin + .cue, and PS1 games and
-  Video CDs as .bin + .cue too (an ISO can't hold their video and XA
-  audio).
-• Verify disc accepts a .cue as well as an ISO.
-• 📚 Burn queue: drag and drop files from Explorer, real speeds (16x,
-  12x, 8x...) instead of Fastest/Middle/Slowest, and the queue is kept
-  when you close the app.
-• The tray is opened and closed before verifying, so
-  the disc is read back fresh.
-• 📜 Live log in the Burn tab: every drive's activity as it happens,
-  with errors in red and a drive filter (it opens with the Burn tab;
-  Settings can turn that off). 📄 Open log now shows the
-  day's log in easy-to-read blocks, newest job first.
-• The own writer reads ahead into an 80 MiB buffer, so a burner with
-  a small buffer never waits for the hard drive.
+Already on Beta 1 or Beta 2? Replace that folder with this one.
 
 ========================================================================
 📀 NEW IN V4.0 BETA 3 — DVD-RW, ENHANCED CDs & FASTER CD COPYING
@@ -150,8 +100,8 @@ Already on Beta 1, 2 or 3? Replace that folder with this one.
   and the CD-R size is now exactly what a blank 80-minute CD-R holds.
 
 ⚠ Known issues: dual-layer DVD-R DL and BD-R DL go to ImgBurn for now.
-  XGD3 Xbox 360 games haven't been tested on a console yet (XGD2 games
-  have), and BurnerMAX only works on some drives.
+  Copy disc doesn't copy a hidden track before track 1, or CD-Text
+  (album and track names), yet.
 
 🙏 Please report what you find, good or bad, on GitHub (Issues → Bug
   report). Include Burn → Drive info → 📋 Copy report (your drive and
@@ -582,9 +532,6 @@ Blank discs it burns (own writer, whole disc):
   (anything else, e.g. DVD-R DL and BD-R DL, goes to ImgBurn)
 • ISO images on any of those, and BIN/CUE images (.bin or .wav) on
   CD-R/CD-RW
-• Music CDs from WAV, FLAC, MP3, M4A/AAC or WMA files (Music CD mode)
-• ImgBurn .dvd layer break files and Xbox 360 game images on DVD+R DL
-  (XGD3 games need the disc's capacity raised with BurnerMAX first)
 
 ========================================================================
 🔮 PLANNED — NOT YET BUILT
