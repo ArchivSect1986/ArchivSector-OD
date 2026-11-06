@@ -7,7 +7,7 @@
    The box is short (about 8 lines) and can be dragged taller by its
    bottom-right corner.
    Filter by drive; Copy puts what's shown on the clipboard; Clear only
-   empties this box. Errors are red, warnings amber, a passed verify
+   empties this box. ⧉ Pop out opens it in its own window. Errors are red, warnings amber, a passed verify
    green, in the theme's own colours. *@
 
 @implements IDisposable
@@ -22,6 +22,7 @@
             <button class="shortcut-btn" style="@ChipStyle(s)" @onclick="() => filter = s">@s</button>
         }
         <span style="flex: 1;"></span>
+        <button class="shortcut-btn" @onclick="PopOut" title="Opens the live log in its own window, to watch it from another tab, over other programs or on a second monitor">⧉ Pop out</button>
         <button class="shortcut-btn" @onclick="Copy" title="Copies the lines shown (with the drive filter) to the clipboard">@(copied ? "✓ Copied" : "📋 Copy")</button>
         <button class="shortcut-btn" @onclick="LogService.OpenToday" title="Opens today's log file, in easy-to-read blocks">📄 Open log</button>
         <button class="shortcut-btn" @onclick="Clear" title="Empties this box only. The log file keeps everything.">🗑 Clear</button>
@@ -104,6 +105,12 @@
         string.Equals(filter, s, StringComparison.OrdinalIgnoreCase)
             ? "font-size: 12px; padding: 2px 10px; border-color: var(--accent, var(--success)); font-weight: 600;"
             : "font-size: 12px; padding: 2px 10px; opacity: 0.75;";
+
+    // Beta 5: the same live log in its own window (LiveLogWindow).
+    private void PopOut()
+    {
+        try { LiveLogWindow.ShowWindow(); } catch { }
+    }
 
     private void Toggle(long id)
     {
