@@ -1,5 +1,5 @@
-@* 📜 Live log (v4.0 beta 4): what every drive is doing, as it happens, like
-   ImgBurn's log window. It shows the lines LogService writes (the last
+﻿@* 📜 Live log (v4.0 beta 4): what every drive is doing, as it happens.
+   It shows the lines LogService writes (the last
    1,000 kept in memory); the log file is written exactly as before.
    Newest line at the bottom. The list keeps following new lines while
    it's scrolled to the bottom, and stays put when scrolled up to read
@@ -23,7 +23,7 @@
         }
         <span style="flex: 1;"></span>
         <button class="shortcut-btn" @onclick="Copy" title="Copies the lines shown (with the drive filter) to the clipboard">@(copied ? "✓ Copied" : "📋 Copy")</button>
-        <button class="shortcut-btn" @onclick="LogService.OpenToday" title="Opens today's log file, laid out like ImgBurn's">📄 Open log</button>
+        <button class="shortcut-btn" @onclick="LogService.OpenToday" title="Opens today's log file, in easy-to-read blocks">📄 Open log</button>
         <button class="shortcut-btn" @onclick="Clear" title="Empties this box only. The log file keeps everything.">🗑 Clear</button>
         <button class="shortcut-btn" @onclick="() => Close.InvokeAsync()" title="Hide the live log">✕</button>
     </div>

@@ -117,7 +117,8 @@
                 <CheckBox x:Name="AutoEjectCheck" Content="Auto-eject physical optical tray on completion" Foreground="#e5e9f5" Margin="0,0,0,4"/>
                 <CheckBox x:Name="ToastCheck" Content="Show a Windows notification when a rip completes" Foreground="#e5e9f5" Margin="0,0,0,4"/>
                 <CheckBox x:Name="SoundCheck" Content="Play a sound when a rip completes" Foreground="#e5e9f5" Margin="0,0,0,4"/>
-                <CheckBox x:Name="StartupUpdateCheck" Content="Check for updates when the app starts" Foreground="#e5e9f5" Margin="0,0,0,8"/>
+                <CheckBox x:Name="StartupUpdateCheck" Content="Check for updates when the app starts" Foreground="#e5e9f5" Margin="0,0,0,4"/>
+                <CheckBox x:Name="LiveLogCheck" Content="Open the Live log whenever the Burn tab is shown" Foreground="#e5e9f5" Margin="0,0,0,8"/>
 
                 <!-- Extra Features -->
                 <Expander Header="Extra Features" Foreground="#f59e0b" Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1" Padding="10" Margin="0,4,0,0">

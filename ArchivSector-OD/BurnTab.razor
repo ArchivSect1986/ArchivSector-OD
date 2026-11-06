@@ -226,8 +226,11 @@
 </div>
 
 @code {
-    // Beta 4: the 📜 Live log panel is open (remembered while the app runs).
-    private static bool showLiveLog;
+    // Beta 4: the 📜 Live log panel is open. It opens each time the tab is
+    // shown, unless that's turned off in Settings ("Open the Live log
+    // whenever the Burn tab is shown"); ✕ hides it until the next time.
+    private bool showLiveLog;
+    private bool wasVisible;
     /// <summary>True while the Burn tab is the one showing.</summary>
     [Parameter] public bool Visible { get; set; }
 
@@ -424,6 +427,13 @@
     // (v4.0 week 6), so "Refresh drives" is only needed now and then.
     protected override async Task OnParametersSetAsync()
     {
+        // The tab has just been shown: open the live log (Settings can turn this off).
+        if (Visible && !wasVisible)
+        {
+            try { if (ConfigService.Load().LiveLogOpensWithBurnTab) showLiveLog = true; } catch { }
+        }
+        wasVisible = Visible;
+
         if (Visible && !scannedOnce)
         {
             scannedOnce = true;

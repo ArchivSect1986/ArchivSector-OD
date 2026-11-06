@@ -77,6 +77,10 @@ namespace ArchivSector_OD
         // app starts").
         public bool CheckForUpdatesOnStartup { get; set; } = true;
 
+        // v4.0 beta 4: the Burn tab's 📜 Live log opens each time the tab is
+        // shown (Settings -> "Open the Live log whenever the Burn tab is shown").
+        public bool LiveLogOpensWithBurnTab { get; set; } = true;
+
         public bool AutoFetchMetadataArt { get; set; } = true;
         public bool BatchQueueMode { get; set; } = false;
         public bool MultiDriveBatchSync { get; set; } = false;

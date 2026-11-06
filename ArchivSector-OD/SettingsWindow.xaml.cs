@@ -35,6 +35,7 @@ namespace ArchivSector_OD
             ToastCheck.IsChecked = config.ToastNotifications;
             SoundCheck.IsChecked = config.SoundAlerts;
             StartupUpdateCheck.IsChecked = config.CheckForUpdatesOnStartup;
+            LiveLogCheck.IsChecked = config.LiveLogOpensWithBurnTab;
 
             AutoFetchArtCheck.IsChecked = config.AutoFetchMetadataArt;
             BatchQueueCheck.IsChecked = config.BatchQueueMode;
@@ -191,6 +192,7 @@ namespace ArchivSector_OD
             config.ToastNotifications = ToastCheck.IsChecked ?? true;
             config.SoundAlerts = SoundCheck.IsChecked ?? true;
             config.CheckForUpdatesOnStartup = StartupUpdateCheck.IsChecked ?? true;
+            config.LiveLogOpensWithBurnTab = LiveLogCheck.IsChecked ?? true;
 
             config.AutoFetchMetadataArt = AutoFetchArtCheck.IsChecked ?? true;
             config.BatchQueueMode = BatchQueueCheck.IsChecked ?? false;
