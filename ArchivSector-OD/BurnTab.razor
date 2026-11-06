@@ -109,7 +109,9 @@
             {
                 <div class="bay-card">
                     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
-                        <h2>@drive.DisplayName</h2>
+                        @* Beta 5: a long drive name stays on one line (ending in … if it
+                           doesn't fit in the theme's font); the drive's full name shows on hover. *@
+                        <h2 style="flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="@($"{drive.Vendor} {drive.Model}".Trim())">@drive.DisplayName</h2>
                         @if (drive.DriveLetter.Length > 0)
                         {
                             <button class="icon-btn" style="flex: 0 0 auto; width: auto; padding: 0 10px; font-size: 13px; font-weight: 600;"

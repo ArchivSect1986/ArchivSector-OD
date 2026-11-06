@@ -171,7 +171,12 @@ public sealed class BurnerDrive
     {
         get
         {
-            var name = $"{Vendor} {Model}".Trim();
+            // Beta 5: the drive's own padding squeezed out, and a lone letter
+            // some drives add after the model (ASUS "DRW-24F1ST   d", a
+            // hardware revision) left off, so "ASUS DRW-24F1ST" fits on one line.
+            var parts = $"{Vendor} {Model}".Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+            if (parts.Count > 2 && parts[^1].Length == 1) parts.RemoveAt(parts.Count - 1);
+            var name = string.Join(' ', parts);
             if (name.Length == 0) name = "Optical drive";
             return DriveLetter.Length > 0 ? $"({DriveLetter}) {name}" : name;
         }
