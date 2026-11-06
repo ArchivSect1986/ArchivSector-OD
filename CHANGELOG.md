@@ -4,6 +4,61 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v4.0.0-beta4 - 2026-11-06 (pre-release)
+
+The fourth test version of v4.0. Everything below is new since Beta 3. This one is mostly about **music CDs** (reading them exactly, checking them against AccurateRip, making them from your own music files) and **Xbox 360 game discs**.
+
+### ✨ Added
+* **🎵 Music CD**, a new Burn mode: make a music CD from **WAV, FLAC, MP3, M4A/AAC or WMA** files. Add them or drop them (or a folder) in, reorder or remove tracks, and edit the names (read from the files' tags, or their file names). Files that aren't CD audio are converted by Windows itself, nothing extra to install. Choose 2-second gaps or none, CD-Text on or off, and the length is checked against 80 minutes. The CD goes to the burn queue (burned and verified there), or you can save its .cue.
+* **🎯 AccurateRip**, a new Burn mode: check a music CD you've read against the AccurateRip database, track by track, with how many other people got the same result. The drive's offset is found automatically, both kinds of AccurateRip checksums are used, and CDs with a data track are looked up every way rippers list them. **Read disc** hands a fresh read straight to it.
+* **🛡 Secure read** (optional) in **Read disc** and **Copy disc**: the CD is read twice and compared, and any sector that differs is re-read (with the drive's memory cleared) until one version wins a clear majority. Sectors that never settle are counted, listed in the log and shown in amber; in Copy disc they stop the copy, like unreadable ones. On a worn test CD it fixed two tracks that read differently every time.
+* **🎚 Read offset for music CDs, set automatically.** Every drive shifts music by a few samples when reading. ArchivSector-OD now corrects it, so a CD read to BIN/CUE matches AccurateRip exactly. The offset is looked up for your drive model in AccurateRip's drive list, learned from an AccurateRip check if your drive isn't listed, or typed in Read disc. Data tracks are never shifted.
+* **🎮 Xbox 360 games** (backups of games you own):
+  * **.dvd layer break files** (the small file that names a dual-layer image and where its layer change goes, as made by ImgBurn and other tools) can be burned, on the burn screen and in the burn queue.
+  * An Xbox 360 game image is **recognised by itself** and gets the right layer break: sector 1,913,760 for XGD2 games, 2,133,520 for XGD3.
+  * **The game's security data (SS, DMI, PFI) is checked as soon as the image is picked.** An image with blank security data (a Redump image not yet run through abgx360, or a bad download or unzip) makes a disc the console only plays as a DVD video, so it isn't burned, by any writer, and the burn queue skips it with the reason.
+  * **XGD3 games** need more room than a DVD+R DL normally gives. The burn screen checks the disc's capacity, opens **your own copy of the BurnerMAX Payload Tool** (it isn't included with ArchivSector-OD) to raise it, and **🔄 Check again** reads the new capacity. It remembers which of your drives BurnerMAX works on and points you to them.
+  * Xbox games are **burned at the slowest speed the disc offers** by default (fast burns are what give "Disc Unrecognizable" on the console). You can still pick another speed.
+* **💿 CD-Text** (album, artist and track names on a music CD): **Drive info** shows it, the **drive card** shows it and names the rip "Artist - Album", **Copy disc** keeps it, and the **own writer burns it** from a .cue's TITLE, PERFORMER and SONGWRITER lines, then reads it back and checks it.
+* **Hidden tracks before track 1** (the "rewind past the start" bonus track on some CDs) are burned from a .cue (the layout EAC and ImgBurn use) and kept by **Copy disc**.
+* **🎞 Movie-Only extracts several films from one disc**, each as its own MKV (double features, collections).
+* **Verify disc accepts a .cue** as well as an ISO: it checks the CD's track list against the .cue, compares data exactly, and lines up the music before comparing it (the same check as after a burn).
+* **Drag and drop on the burn queue:** drop ISOs, .cue files, .dvd files or a folder of them from Explorer. Other files are skipped and listed.
+* **The burn queue is kept between runs:** the images still to burn come back when the app starts. Images that were moved or deleted are left out and noted.
+* **📜 Live log** in the Burn tab: every drive's log lines as they happen, marked I/W/E (errors red, warnings amber, a passed verify green), with a drive filter, Copy and Clear. It opens whenever the Burn tab is shown; **Settings → "Open the Live log whenever the Burn tab is shown"** turns that off.
+* **📄 Open log** button in the Burn tab, and the log now opens **easier to read**: one block per job (a burn, a queue, a verify, an erase…), newest job first, with I/W/E marks. The saved log file itself is unchanged.
+
+### 🔧 Changed
+* **Read disc saves music, mixed-mode and Enhanced CDs as .bin + .cue**, with CD-Text and sessions, named from the CD-Text.
+* **PS1 games and Video CDs** (CDs with a "mode 2" data track) are read and copied as **.bin + .cue** instead of an ISO, so the video and XA audio sectors an ISO can't hold are kept.
+* **The burn queue's speed list shows real speeds** (16x, 12x, 8x…) offered by the blank in the chosen drive, instead of Fastest / Middle / Slowest. Each disc gets the chosen speed, or the nearest slower one it offers.
+* **ArchivSector-OD's own writer reads the ISO ahead into an 80 MiB buffer**, filled before the first write, so a burner with a small buffer never has to wait for the hard drive and stop the laser mid-burn. The log says whether the buffer ever ran dry.
+* **The tray is opened and closed before verifying**, so the disc is read back fresh instead of from the drive's memory. A tray that won't close by itself is waited for.
+* **The BIN/CUE verify is sturdier:** a sector that doesn't match is re-read on its own, after clearing the drive's memory and then at 8x, before it's counted as bad. The log and Verify disc list which sectors are bad.
+* The burn queue says "images" instead of "ISOs" when it holds BIN/CUE or .dvd files.
+
+### 🐛 Fixed
+* **A file dropped on the window** (outside the burn queue) opened in place of the app.
+* **The CD-Text check after burning** reported a difference for a long dash or curly quotes, which a CD can't hold. It now compares the text as it's actually written to the disc.
+* **A white or navy flash** when the app started.
+* **When the own writer couldn't start and ImgBurn couldn't burn the disc either**, the message still said ImgBurn had burned it. It now says neither could, and why.
+* **A .dvd layer break file handed to ImgBurn** was refused ("isn't a disc image made of whole 2 KB sectors") before ImgBurn even opened.
+* **A DVD-RW quick-formatted by Windows** ("Like a USB flash drive") now gets the erase advice straight away, instead of a pointless ImgBurn attempt.
+
+### ✅ Resolved from Beta 3
+* **Copy disc now keeps CD-Text and hidden tracks before track 1**, both listed as known issues in Beta 3.
+
+### ⚠ Known issues
+* **Dual-layer DVD-R DL and BD-R DL** aren't written by the own writer yet: ImgBurn takes over for those. (DVD+R DL is written by the own writer, Xbox games included.)
+* **BurnerMAX only works on some drives**, and it has to be run by you. XGD2 and XGD3 games burned by the own writer have been tested on a console. For XGD3 discs, Verbatim-quality media and letting the verify finish are recommended: a cheaper disc that boots can still have a few unreadable spots later on.
+* **An XGD3 disc (burned with its capacity raised) can't be verified in every drive.** An ASUS BW-16D1HT reads it with the blank disc's original layer size, so from sector 2,086,912 on it returns the wrong part of the disc and the verify reports millions of differences, even on a good disc. The drive that burned it (a DRW-24F1ST here) reads it correctly, and so does the verify straight after burning.
+* **A DVD-RW in "overwrite" mode** (formatted that way by another program) needs a quick erase before burning. Windows' "Like a USB flash drive" format leaves it only partly formatted, and writing over a fully formatted one directly hasn't been tested on a real disc yet.
+
+### Reporting a problem
+Same as before: open an issue on GitHub with **Burn → Drive info → 📋 Copy report**, the disc type and brand, and that day's log from `%AppData%\ArchivSector-OD\Logs`.
+
+---
+
 ## v4.0.0-beta3 - 2026-10-30 (pre-release)
 
 The third test version of v4.0. Everything below is new since Beta 2.
