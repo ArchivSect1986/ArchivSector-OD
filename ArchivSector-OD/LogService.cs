@@ -248,6 +248,9 @@ namespace ArchivSector_OD
         {
             bool Has(string w) => text.Contains(w, StringComparison.OrdinalIgnoreCase);
             if (Has("lookup failed") || Has("timed out")) return 'W';
+            // Beta 5: a raised-capacity disc this drive misreads isn't a bad
+            // disc (Verify disc says so), so it's a warning, not an error.
+            if (Has("probably fine") || Has("read from the wrong place")) return 'W';
             if (Has("failed") || Has("didn't match") || Has("don't match") || Has("doesn't match") || Has("problem sectors") || Has("drive said no") || Has("isn't ready to burn")
                 || Has("couldn't") || Has("can't be") || Has("isn't blank") || Has("too big") || Has("not verified")) return 'E';
             if (Has("stopped") || Has("skipped") || Has("cancel") || Has("wasn't fully verified") || Has("took ") && Has(" to answer")) return 'W';

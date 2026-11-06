@@ -148,7 +148,10 @@ namespace ArchivSector_OD.Burning
                 else r.Message += " This disc was burned with its capacity raised: if another drive burned it, verify it there too before giving up on it.";
             }
             log?.Invoke($"Verify: {r.Message} ({r.Time:hh\\:mm\\:ss})");
-            if (r.BadRanges.Count > 0) log?.Invoke("Verify: problem sectors at " + check.RangesText());
+            if (r.BadRanges.Count > 0)
+                log?.Invoke(overburned && Math.Abs(check.FirstBad - blankL0) <= 64
+                    ? "Verify: sectors this drive read from the wrong place: " + check.RangesText()
+                    : "Verify: problem sectors at " + check.RangesText());
         }
 
         // ---- Comparing a disc with an ISO (beta 5) ----
