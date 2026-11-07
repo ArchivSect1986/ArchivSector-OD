@@ -14,7 +14,12 @@ namespace ArchivSector_OD
         public IsoVerifierWindow()
         {
             InitializeComponent();
+            // Beta 5: the theme picked in the 🎨 menu, followed while open.
+            WpfTheme.Follow(this, WpfTheme.Apply(this));
         }
+
+        // The result line's colour, from the theme (so it changes with it).
+        private void ResultColour(string key) => ResultText.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, key);
 
         private void ResetResultViews()
         {
@@ -96,7 +101,7 @@ namespace ArchivSector_OD
             {
                 StatusText.Text = "";
                 ResultText.Text = $"Error: {ex.Message}";
-                ResultText.Foreground = new SolidColorBrush(Color.FromRgb(0xef, 0x44, 0x44));
+                ResultColour("Danger");
                 return;
             }
 
@@ -104,7 +109,7 @@ namespace ArchivSector_OD
             {
                 StatusText.Text = "";
                 ResultText.Text = "Couldn't compute checksums -- file not found?";
-                ResultText.Foreground = new SolidColorBrush(Color.FromRgb(0xef, 0x44, 0x44));
+                ResultColour("Danger");
                 return;
             }
 
@@ -114,17 +119,17 @@ namespace ArchivSector_OD
             if (match is not null)
             {
                 ResultText.Text = $"✓ Verified: {match.Name}\n(matched against {match.SourceDat})";
-                ResultText.Foreground = new SolidColorBrush(Color.FromRgb(0x10, 0xb9, 0x81));
+                ResultColour("Success");
             }
             else if (!VerificationService.HasAnyDatImported())
             {
                 ResultText.Text = "No DAT files imported -- see Settings to add one.";
-                ResultText.Foreground = new SolidColorBrush(Color.FromRgb(0xf5, 0x9e, 0x0b));
+                ResultColour("Amber");
             }
             else
             {
                 ResultText.Text = "No match found in imported DAT files.\n(doesn't necessarily mean the dump is bad)";
-                ResultText.Foreground = new SolidColorBrush(Color.FromRgb(0xf5, 0x9e, 0x0b));
+                ResultColour("Amber");
             }
         }
 
@@ -168,9 +173,7 @@ namespace ArchivSector_OD
 
             StatusText.Text = "";
             ResultText.Text = $"Done: {matched} matched, {unmatched} no match, {errored} error(s) out of {total} file(s).";
-            ResultText.Foreground = (unmatched == 0 && errored == 0)
-                ? new SolidColorBrush(Color.FromRgb(0x10, 0xb9, 0x81))
-                : new SolidColorBrush(Color.FromRgb(0xf5, 0x9e, 0x0b));
+            ResultColour(unmatched == 0 && errored == 0 ? "Success" : "Amber");
         }
 
         private void CloseButton_Click(object sender, RoutedEventArgs e)

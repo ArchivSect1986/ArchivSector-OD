@@ -14,7 +14,7 @@ namespace ArchivSector_OD
     // (LogService's last 1,000) as they happen, so a burn can be watched
     // from the Drive Bays tab, over another program, or on a second
     // monitor. One window at a time: Pop out again brings it to the front.
-    // Built in code (no XAML file); colours match the app's dark look.
+    // Built in code (no XAML file); colours come from the theme (WpfTheme).
     public sealed class LiveLogWindow : Window
     {
         private static LiveLogWindow? open;
@@ -45,8 +45,8 @@ namespace ArchivSector_OD
             public Brush Colour { get; init; } = Brushes.White;
         }
 
-        private static readonly Brush Back = Frozen("#0f1626"), Panel = Frozen("#141b2d"), Edge = Frozen("#2a3550"),
-            Plain = Frozen("#e5e9f5"), Muted = Frozen("#8b93a8"), Red = Frozen("#ef4444"), Amber = Frozen("#f59e0b"), Green = Frozen("#10b981");
+        // The theme's colours (WpfTheme puts them in this window's resources).
+        private Brush Res(string key) => (Brush)Resources[key];
         private const int ShowAtMost = 1000;
 
         private readonly ObservableCollection<Row> rows = new();
@@ -62,7 +62,9 @@ namespace ArchivSector_OD
         {
             Title = "ArchivSector-OD - Live log";
             Width = 980; Height = 360; MinWidth = 520; MinHeight = 180;
-            Background = Back;
+            // Beta 5: the theme picked in the 🎨 menu (buttons and check box
+            // take its look too), followed while the window is open.
+            string shownTheme = WpfTheme.Apply(this);
             WindowStartupLocation = WindowStartupLocation.CenterOwner;
             try
             {
@@ -74,8 +76,9 @@ namespace ArchivSector_OD
             // Top bar: drive filter, always on top, copy, open log, clear.
             // The buttons sit on the right and drop to a second row when the
             // window is too narrow for them (instead of being cut off).
-            var bar = new DockPanel { Background = Panel, LastChildFill = true };
-            var title = new TextBlock { Text = "📜 Live log", Foreground = Plain, FontWeight = FontWeights.Bold, FontSize = 13, Margin = new Thickness(10, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
+            var bar = new DockPanel { LastChildFill = true };
+            bar.SetResourceReference(DockPanel.BackgroundProperty, "Panel");
+            var title = new TextBlock { Text = "📜 Live log", FontWeight = FontWeights.Bold, FontSize = 13, Margin = new Thickness(10, 0, 12, 0), VerticalAlignment = VerticalAlignment.Center };
             driveBox = new ComboBox { Width = 120, Margin = new Thickness(0, 6, 8, 6), VerticalAlignment = VerticalAlignment.Center };
             driveBox.Items.Add("All drives");
             driveBox.SelectedIndex = 0;
@@ -85,7 +88,7 @@ namespace ArchivSector_OD
                 filter = pick is null || pick == "All drives" ? null : pick;
                 rebuild = dirty = true;
             };
-            var onTop = new CheckBox { Content = "Always on top", Foreground = Plain, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 12, 0) };
+            var onTop = new CheckBox { Content = "Always on top", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 12, 0) };
             onTop.Checked += (_, _) => Topmost = true;
             onTop.Unchecked += (_, _) => Topmost = false;
             DockPanel.SetDock(title, Dock.Left); bar.Children.Add(title);
@@ -103,7 +106,6 @@ namespace ArchivSector_OD
             list = new ListBox
             {
                 ItemsSource = rows,
-                Background = Back,
                 BorderThickness = new Thickness(0),
                 FontFamily = new FontFamily("Consolas, Cascadia Mono, Courier New"),
                 FontSize = 12,
@@ -119,16 +121,19 @@ namespace ArchivSector_OD
                     "</Grid>" +
                     "</DataTemplate>"),
             };
+            list.SetResourceReference(Control.BackgroundProperty, "Bg");
             VirtualizingPanel.SetIsVirtualizing(list, true);
             VirtualizingPanel.SetVirtualizationMode(list, VirtualizationMode.Recycling);
             ScrollViewer.SetHorizontalScrollBarVisibility(list, ScrollBarVisibility.Disabled);
             list.KeyDown += (_, e) => { if (e.Key == Key.C && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { CopyShown(); e.Handled = true; } };
 
-            status = new TextBlock { Foreground = Muted, FontSize = 11, Margin = new Thickness(10, 3, 10, 4) };
+            status = new TextBlock { FontSize = 11, Margin = new Thickness(10, 3, 10, 4) };
+            status.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
 
             var root = new DockPanel();
             DockPanel.SetDock(bar, Dock.Top); root.Children.Add(bar);
-            var line = new Border { Height = 1, Background = Edge };
+            var line = new Border { Height = 1 };
+            line.SetResourceReference(Border.BackgroundProperty, "Edge");
             DockPanel.SetDock(line, Dock.Top); root.Children.Add(line);
             DockPanel.SetDock(status, Dock.Bottom); root.Children.Add(status);
             root.Children.Add(list);
@@ -144,6 +149,8 @@ namespace ArchivSector_OD
                 LogService.LiveChanged -= OnLive;
                 open = null;
             };
+            // A new theme: the lines are drawn again in its colours.
+            WpfTheme.Follow(this, shownTheme, () => { rebuild = dirty = true; Refresh(); });
             Refresh();
         }
 
@@ -182,7 +189,7 @@ namespace ArchivSector_OD
             if (atBottom && rows.Count > 0) list.ScrollIntoView(rows[^1]);
         }
 
-        private static Row MakeRow(LogService.LiveLine l)
+        private Row MakeRow(LogService.LiveLine l)
         {
             var parts = l.Text.Replace("\r", "").Split('\n');
             string first = parts[0] + (parts.Length > 1 ? $"   (+{parts.Length - 1} lines, hover to see)" : "");
@@ -194,12 +201,12 @@ namespace ArchivSector_OD
                 Head = head,
                 Message = first,
                 Full = l.Text.Replace("\r", ""),
-                Colour = l.Level == 'E' ? Red
-                    : l.Level == 'W' ? Amber
+                Colour = l.Level == 'E' ? Res("Danger")
+                    : l.Level == 'W' ? Res("Amber")
                     : l.Text.Contains("every sector matches", StringComparison.OrdinalIgnoreCase)
                       || l.Text.Contains("verified", StringComparison.OrdinalIgnoreCase) && l.Text.Contains("match", StringComparison.OrdinalIgnoreCase)
-                      ? Green
-                    : Plain,
+                      ? Res("Success")
+                    : Res("Text"),
             };
         }
 
@@ -217,7 +224,6 @@ namespace ArchivSector_OD
             {
                 Content = text, ToolTip = tip,
                 Margin = new Thickness(0, 6, 8, 6), Padding = new Thickness(10, 2, 10, 2),
-                Background = Back, Foreground = Plain, BorderBrush = Edge,
             };
             b.Click += click;
             return b;
@@ -232,13 +238,6 @@ namespace ArchivSector_OD
                 if (found is not null) return found;
             }
             return null;
-        }
-
-        private static Brush Frozen(string hex)
-        {
-            var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
-            b.Freeze();
-            return b;
         }
     }
 }

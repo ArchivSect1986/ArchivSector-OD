@@ -1,156 +1,491 @@
 <Window x:Class="ArchivSector_OD.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="System Settings &amp; Archival Preferences"
-        Height="800" Width="760"
-        Background="#141b2d"
+        Title="ArchivSector-OD - Settings"
+        Height="660" Width="920" MinHeight="460" MinWidth="720"
+        Background="{DynamicResource Bg}"
+        FontFamily="Segoe UI" FontSize="12.5"
         WindowStartupLocation="CenterOwner">
-    <Grid Margin="0">
+
+    <!-- ⚙ Settings (v4.0 beta 5): sections down the left, one at a time on
+         the right, a line of help under every setting, a ✓ / ⚠ under every
+         program path saying whether it's found, and the colours and font
+         of the theme picked in the 🎨 menu (read from app.css when the
+         window opens). The colours below are Midnight's, used until then. -->
+    <Window.Resources>
+        <SolidColorBrush x:Key="Bg" Color="#0a1022"/>
+        <SolidColorBrush x:Key="Panel" Color="#121a30"/>
+        <SolidColorBrush x:Key="PanelAlt" Color="#19233d"/>
+        <SolidColorBrush x:Key="Edge" Color="#283456"/>
+        <SolidColorBrush x:Key="Text" Color="#e5e9f5"/>
+        <SolidColorBrush x:Key="TextSec" Color="#a7b0c6"/>
+        <SolidColorBrush x:Key="Muted" Color="#8c96b0"/>
+        <SolidColorBrush x:Key="Accent" Color="#38bdf8"/>
+        <SolidColorBrush x:Key="OnAccent" Color="#03121c"/>
+        <SolidColorBrush x:Key="Success" Color="#10b981"/>
+        <SolidColorBrush x:Key="OnSuccess" Color="#042114"/>
+        <SolidColorBrush x:Key="Danger" Color="#ef4444"/>
+        <SolidColorBrush x:Key="OnDanger" Color="#1f0505"/>
+        <SolidColorBrush x:Key="Amber" Color="#f59e0b"/>
+        <CornerRadius x:Key="Radius">6</CornerRadius>
+
+        <!-- Buttons -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource PanelAlt}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Edge}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="12,5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Box" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{DynamicResource Radius}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Box" Property="Opacity" Value="0.8"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Box" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{DynamicResource Accent}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccent}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+        </Style>
+        <Style x:Key="SaveButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{DynamicResource Success}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnSuccess}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Success}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
+        <!-- Text boxes -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource Bg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Edge}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource Text}"/>
+            <Setter Property="SelectionBrush" Value="{DynamicResource Accent}"/>
+            <Setter Property="Padding" Value="6,5"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Box" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource Radius}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="PasswordBox">
+            <Setter Property="Background" Value="{DynamicResource Bg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Edge}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource Text}"/>
+            <Setter Property="SelectionBrush" Value="{DynamicResource Accent}"/>
+            <Setter Property="Padding" Value="6,5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border x:Name="Box" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="{DynamicResource Radius}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,10,0,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
+        <!-- Text styles -->
+        <Style x:Key="PageTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="PageIntro" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextSec}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,4,0,6"/>
+        </Style>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Margin" Value="0,18,0,0"/>
+        </Style>
+        <Style x:Key="Help" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource Muted}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,2,0,6"/>
+        </Style>
+        <Style x:Key="CheckHelp" TargetType="TextBlock" BasedOn="{StaticResource Help}">
+            <Setter Property="Margin" Value="21,1,0,0"/>
+        </Style>
+        <Style x:Key="Status" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="2,5,0,0"/>
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Panel}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Edge}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="{DynamicResource Radius}"/>
+            <Setter Property="Padding" Value="14,12"/>
+            <Setter Property="Margin" Value="0,14,0,0"/>
+        </Style>
+
+        <!-- The section list on the left -->
+        <Style x:Key="NavItem" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{DynamicResource TextSec}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Box" Background="Transparent" CornerRadius="{DynamicResource Radius}" Margin="8,2" Padding="0,8,10,8">
+                            <DockPanel>
+                                <Border x:Name="Bar" DockPanel.Dock="Left" Width="3" Margin="0,0,10,0" CornerRadius="2" Background="Transparent"/>
+                                <ContentPresenter VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource PanelAlt}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{DynamicResource PanelAlt}"/>
+                                <Setter TargetName="Bar" Property="Background" Value="{DynamicResource Accent}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
 
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="20">
-            <StackPanel>
+        <!-- Left: the sections -->
+        <Border Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Edge}" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="⚙ Settings" Foreground="{DynamicResource Text}" FontSize="16" FontWeight="SemiBold" Margin="20,18,0,12"/>
+                <TextBlock x:Name="SideVersionText" DockPanel.Dock="Bottom" Foreground="{DynamicResource Muted}" FontSize="11" Margin="20,0,10,16" TextWrapping="Wrap"/>
+                <ListBox x:Name="Nav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource NavItem}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="Nav_SelectionChanged">
+                    <ListBoxItem Tag="GeneralPage">📁  General</ListBoxItem>
+                    <ListBoxItem Tag="AppearancePage">🎨  Appearance</ListBoxItem>
+                    <ListBoxItem Tag="ToolsPage">🛠  Programs</ListBoxItem>
+                    <ListBoxItem Tag="BurnPage">🔥  Burning</ListBoxItem>
+                    <ListBoxItem Tag="LookupPage">🌐  Online lookups</ListBoxItem>
+                    <ListBoxItem Tag="BatchPage">📦  Batch &amp; drives</ListBoxItem>
+                    <ListBoxItem Tag="RedumpPage">✅  Redump checks</ListBoxItem>
+                    <ListBoxItem Tag="AboutPage">ℹ  About &amp; updates</ListBoxItem>
+                </ListBox>
+            </DockPanel>
+        </Border>
 
-                <!-- Version + update check + shortcut -->
-                <Border Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1" Padding="10,8" Margin="0,0,0,8">
+        <!-- Right: one section at a time -->
+        <ScrollViewer x:Name="PageScroll" Grid.Row="0" Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="28,20,28,20">
+            <Grid MaxWidth="760" HorizontalAlignment="Left">
+
+                <!-- 📁 General -->
+                <StackPanel x:Name="GeneralPage">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="📁 General"/>
+                    <TextBlock Style="{StaticResource PageIntro}" Text="Where rips are saved, and what happens when one finishes."/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="Output folder"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Every rip is saved in here. Leave it empty to use the folder named below."/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Version: " Foreground="#8b93a8" FontWeight="Bold" FontSize="11"/>
-                                <TextBlock x:Name="VersionText" Foreground="#22d3ee" FontSize="11"/>
+                        <TextBox x:Name="OutputFolderBox"/>
+                        <Button Grid.Column="1" Content="📂 Browse…" Margin="8,0,0,0" Click="BrowseOutputFolderButton_Click"/>
+                    </Grid>
+                    <TextBlock x:Name="OutputFolderStatus" Style="{StaticResource Status}"/>
+
+                    <CheckBox x:Name="AutoCategorizeCheck" Content="Sort rips into sub-folders" Margin="0,22,0,0"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="BluRay__Movies, DVD__Movies and Games inside the output folder."/>
+
+                    <CheckBox x:Name="AutoEjectCheck" Content="Eject the disc when a rip finishes"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="Opens the drive's tray, ready for the next disc."/>
+
+                    <CheckBox x:Name="ToastCheck" Content="Show a Windows notification when a rip finishes"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="Handy when the app is behind other windows."/>
+
+                    <CheckBox x:Name="SoundCheck" Content="Play a sound when a rip finishes"/>
+                </StackPanel>
+
+                <!-- 🎨 Appearance -->
+                <StackPanel x:Name="AppearancePage" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="🎨 Appearance"/>
+                    <TextBlock Style="{StaticResource PageIntro}" Text="Themes are picked with the 🎨 button at the top of the main window: the whole app changes as you click one, so you can see how it looks. This window follows it."/>
+
+                    <Border Style="{StaticResource Card}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="Theme" Foreground="{DynamicResource Muted}" FontSize="11.5"/>
+                                <TextBlock x:Name="ThemeNameText" Foreground="{DynamicResource Text}" FontSize="16" FontWeight="SemiBold" Margin="0,2,0,0"/>
                             </StackPanel>
-                            <TextBlock x:Name="UpdateStatusText" Foreground="#8b93a8" FontSize="10" TextWrapping="Wrap" Margin="0,3,8,0"/>
-                        </StackPanel>
-                        <Button x:Name="CheckUpdatesButton" Grid.Column="1" Content="Check for Updates" Padding="8,3" Margin="0,0,6,0" VerticalAlignment="Center" Click="CheckUpdatesButton_Click"/>
-                        <Button Grid.Column="2" Content="Create Desktop Shortcut" Padding="8,3" VerticalAlignment="Center" Click="CreateShortcutButton_Click"/>
-                    </Grid>
-                </Border>
+                            <!-- The theme's own colours: background, panel, accent, text -->
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Width="26" Height="26" CornerRadius="13" Margin="4,0,0,0" BorderThickness="1" BorderBrush="{DynamicResource Edge}" Background="{DynamicResource Bg}"/>
+                                <Border Width="26" Height="26" CornerRadius="13" Margin="4,0,0,0" BorderThickness="1" BorderBrush="{DynamicResource Edge}" Background="{DynamicResource PanelAlt}"/>
+                                <Border Width="26" Height="26" CornerRadius="13" Margin="4,0,0,0" BorderThickness="1" BorderBrush="{DynamicResource Edge}" Background="{DynamicResource Accent}"/>
+                                <Border Width="26" Height="26" CornerRadius="13" Margin="4,0,0,0" BorderThickness="1" BorderBrush="{DynamicResource Edge}" Background="{DynamicResource Text}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
 
-                <!-- Config folder -->
-                <Border Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1" Padding="10,8" Margin="0,0,0,8">
+                    <CheckBox x:Name="SeasonalCheck" Content="Switch to holiday themes in their week" Margin="0,18,0,0"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="Halloween, Remembrance Day, Christmas, Canada Day and Independence Day, each only around its date. Afterwards the app goes back to your everyday theme. Picking an everyday theme during a holiday's week keeps it instead of that holiday's theme. Takes effect the next time the app starts."/>
+                </StackPanel>
+
+                <!-- 🛠 Programs -->
+                <StackPanel x:Name="ToolsPage" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="🛠 Programs"/>
+                    <TextBlock Style="{StaticResource PageIntro}" Text="Other programs ArchivSector-OD uses. Most are found by themselves: leave a box empty unless the line under it says the program isn't found, or you want a different copy used."/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="MakeMKV (makemkvcon64.exe)"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Rips Blu-ray and DVD movies. Needed for movie rips."/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="MakeMkvPathBox"/>
+                        <Button Grid.Column="1" Content="📂 Browse…" Margin="8,0,0,0" Click="BrowseMakeMkvButton_Click"/>
+                    </Grid>
+                    <TextBlock x:Name="MakeMkvStatus" Style="{StaticResource Status}"/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="Redumper (redumper.exe)"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Dumps game discs exactly, for checking against Redump."/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="Config / Cache Folder: " Foreground="#8b93a8" FontWeight="Bold" FontSize="11"/>
-                            <TextBlock x:Name="ConfigDirText" Foreground="#22d3ee" FontSize="11"/>
-                        </StackPanel>
-                        <Button Grid.Column="1" Content="Run Write Diagnostic" Background="#ef4444" Foreground="White" Padding="8,3" Margin="0,0,6,0" Click="RunDiagnosticButton_Click"/>
-                        <Button Grid.Column="2" Content="Open Folder" Padding="8,3" Click="OpenFolderButton_Click"/>
+                        <TextBox x:Name="RedumperPathBox"/>
+                        <Button Grid.Column="1" Content="📂 Browse…" Margin="8,0,0,0" Click="BrowseRedumperButton_Click"/>
                     </Grid>
-                </Border>
+                    <TextBlock x:Name="RedumperStatus" Style="{StaticResource Status}"/>
 
-                <!-- Redump DAT files -->
-                <Border Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1" Padding="10,8" Margin="0,0,0,8">
-                    <StackPanel>
-                        <TextBlock Text="Redump Verification (DAT files):" Foreground="#8b93a8" FontWeight="Bold" FontSize="11" Margin="0,0,0,4"/>
-                        <TextBlock x:Name="DatListText" Foreground="#22d3ee" FontSize="10" FontFamily="Consolas" TextWrapping="Wrap" Margin="0,0,0,6"/>
-                        <StackPanel Orientation="Horizontal">
-                            <Button Content="Import DAT File..." Padding="8,3" Margin="0,0,6,0" Click="ImportDatButton_Click"/>
-                            <Button Content="Get DAT Files from Redump.org" Background="#22d3ee" Foreground="Black" Padding="8,3" Click="OpenRedumpSiteButton_Click"/>
-                        </StackPanel>
+                    <TextBlock Style="{StaticResource Label}" Text="ImgBurn (ImgBurn.exe), optional"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Builds single-file Blu-ray ISOs, and burns the discs ArchivSector-OD's own writer can't yet (DVD-R DL)."/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="ImgBurnPathBox"/>
+                        <Button Grid.Column="1" Content="📂 Browse…" Margin="8,0,0,0" Click="BrowseImgBurnButton_Click"/>
+                    </Grid>
+                    <TextBlock x:Name="ImgBurnStatus" Style="{StaticResource Status}"/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="mkvmerge (mkvmerge.exe), optional"/>
+                    <TextBlock Style="{StaticResource Help}" Text="From MKVToolNix. Lets Movie-Only keep exactly the audio and subtitle tracks you pick."/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="MkvmergePathBox"/>
+                        <Button Grid.Column="1" Content="📂 Browse…" Margin="8,0,0,0" Click="BrowseMkvmergeButton_Click"/>
+                    </Grid>
+                    <TextBlock x:Name="MkvmergeStatus" Style="{StaticResource Status}"/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="BurnerMAX Payload Tool (BurnerMax.exe), optional"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Your own copy (it isn't included). Raises a DVD+R DL's capacity for Xbox 360 XGD3 games; the Burn tab opens it when one needs it."/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="BurnerMaxPathBox"/>
+                        <Button Grid.Column="1" Content="📂 Browse…" Margin="8,0,0,0" Click="BrowseBurnerMaxButton_Click"/>
+                    </Grid>
+                    <TextBlock x:Name="BurnerMaxStatus" Style="{StaticResource Status}"/>
+                </StackPanel>
+
+                <!-- 🔥 Burning -->
+                <StackPanel x:Name="BurnPage" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="🔥 Burning"/>
+                    <TextBlock Style="{StaticResource PageIntro}" Text="The Burn tab. The speed, writer and verify are chosen on the burn screen itself."/>
+
+                    <CheckBox x:Name="LiveLogCheck" Content="Show the 📜 Live log whenever the Burn tab is opened"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="What every drive is doing, as it happens. It can still be opened with the Live log button when this is off."/>
+
+                    <CheckBox x:Name="DeleteIsoCheck" Content="Delete the image after a burn that verified"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="Frees the space once every sector on the disc is known to match. Off by default: the image is kept. Also on the burn screen."/>
+                </StackPanel>
+
+                <!-- 🌐 Online lookups -->
+                <StackPanel x:Name="LookupPage" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="🌐 Online lookups"/>
+                    <TextBlock Style="{StaticResource PageIntro}" Text="Titles, posters and artwork for your rips. Both services are free: sign up on their sites for a key and paste it here. Keys stay on this PC."/>
+
+                    <CheckBox x:Name="AutoFetchArtCheck" Content="Look up the title and artwork when a movie disc goes in" Margin="0,14,0,0"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="Movies only (not games). Needs a TMDB key."/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="TMDB API key (movies)"/>
+                    <TextBlock Style="{StaticResource Help}" Text="From themoviedb.org: Settings → API, once you have an account."/>
+                    <PasswordBox x:Name="TmdbKeyBox"/>
+                    <TextBlock x:Name="TmdbStatus" Style="{StaticResource Status}"/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="RAWG API key (games)"/>
+                    <TextBlock Style="{StaticResource Help}" Text="From rawg.io/apidocs."/>
+                    <PasswordBox x:Name="RawgKeyBox"/>
+                    <TextBlock x:Name="RawgStatus" Style="{StaticResource Status}"/>
+                </StackPanel>
+
+                <!-- 📦 Batch & drives -->
+                <StackPanel x:Name="BatchPage" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="📦 Batch &amp; drives"/>
+                    <TextBlock Style="{StaticResource PageIntro}" Text="For ripping a stack of discs, in one drive or several."/>
+
+                    <CheckBox x:Name="BatchQueueCheck" Content="Batch mode"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="No question at the end of a rip: put the next disc in and it carries on."/>
+
+                    <CheckBox x:Name="MultiDriveSyncCheck" Content="Limit how many drives rip at once"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="Drives over the limit wait as QUEUED until one is free. Useful when the output disk is the slow part."/>
+                    <StackPanel Orientation="Horizontal" Margin="21,8,0,0">
+                        <TextBlock Text="At most" Foreground="{DynamicResource TextSec}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox x:Name="MaxConcurrentBox" Width="52" TextAlignment="Center"/>
+                        <TextBlock Text="rips at a time" Foreground="{DynamicResource TextSec}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
-                </Border>
+                </StackPanel>
 
-                <!-- Output folder -->
-                <TextBlock Text="Default Output Base Folder:" Foreground="#e5e9f5" FontWeight="Bold" FontSize="12" Margin="0,8,0,4"/>
-                <Grid Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="OutputFolderBox" Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="8"/>
-                    <Button Grid.Column="1" Content="Browse..." Padding="8,3" Margin="6,0,0,0" Click="BrowseOutputFolderButton_Click"/>
-                </Grid>
-
-                <!-- MakeMKV -->
-                <TextBlock Text="MakeMKV executable (makemkvcon64.exe):" Foreground="#e5e9f5" FontWeight="Bold" FontSize="12" Margin="0,4,0,4"/>
-                <TextBox x:Name="MakeMkvPathBox" Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="8" Margin="0,0,0,8"/>
-
-                <!-- Redumper -->
-                <TextBlock Text="Redumper executable (redumper.exe):" Foreground="#e5e9f5" FontWeight="Bold" FontSize="12" Margin="0,4,0,4"/>
-                <TextBox x:Name="RedumperPathBox" Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="8" Margin="0,0,0,8"/>
-
-                <!-- ImgBurn -->
-                <TextBlock Text="ImgBurn executable (optional — builds single-file Blu-ray ISOs):" Foreground="#e5e9f5" FontWeight="Bold" FontSize="12" Margin="0,4,0,4" TextWrapping="Wrap"/>
-                <Grid Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="ImgBurnPathBox" Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="8"/>
-                    <Button Grid.Column="1" Content="Browse..." Padding="8,3" Margin="6,0,0,0" Click="BrowseImgBurnButton_Click"/>
-                </Grid>
-
-                <!-- mkvmerge -->
-                <TextBlock Text="mkvmerge executable (optional — MKVToolNix, exact per-track selection for Movie-Only MKV):" Foreground="#e5e9f5" FontWeight="Bold" FontSize="12" Margin="0,4,0,4" TextWrapping="Wrap"/>
-                <Grid Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="MkvmergePathBox" Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="8"/>
-                    <Button Grid.Column="1" Content="Browse..." Padding="8,3" Margin="6,0,0,0" Click="BrowseMkvmergeButton_Click"/>
-                </Grid>
-
-                <!-- RAWG -->
-                <TextBlock Text="RAWG API key (games metadata &amp; artwork — rawg.io/apidocs):" Foreground="#e5e9f5" FontWeight="Bold" FontSize="12" Margin="0,4,0,4" TextWrapping="Wrap"/>
-                <PasswordBox x:Name="RawgKeyBox" Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="8" Margin="0,0,0,8"/>
-
-                <!-- TMDB -->
-                <TextBlock Text="TMDB API key (movie metadata &amp; artwork — themoviedb.org):" Foreground="#e5e9f5" FontWeight="Bold" FontSize="12" Margin="0,4,0,4" TextWrapping="Wrap"/>
-                <PasswordBox x:Name="TmdbKeyBox" Background="#1b2438" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="8" Margin="0,0,0,8"/>
-
-                <!-- Core toggles -->
-                <CheckBox x:Name="AutoCategorizeCheck" Content="Auto-categorize sub-folders (\BluRay__Movies, \DVD__Movies, and \Games\)" Foreground="#e5e9f5" Margin="0,8,0,4"/>
-                <CheckBox x:Name="AutoEjectCheck" Content="Auto-eject physical optical tray on completion" Foreground="#e5e9f5" Margin="0,0,0,4"/>
-                <CheckBox x:Name="ToastCheck" Content="Show a Windows notification when a rip completes" Foreground="#e5e9f5" Margin="0,0,0,4"/>
-                <CheckBox x:Name="SoundCheck" Content="Play a sound when a rip completes" Foreground="#e5e9f5" Margin="0,0,0,4"/>
-                <CheckBox x:Name="StartupUpdateCheck" Content="Check for updates when the app starts" Foreground="#e5e9f5" Margin="0,0,0,4"/>
-                <CheckBox x:Name="LiveLogCheck" Content="Open the Live log whenever the Burn tab is shown" Foreground="#e5e9f5" Margin="0,0,0,8"/>
-
-                <!-- Extra Features -->
-                <Expander Header="Extra Features" Foreground="#f59e0b" Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1" Padding="10" Margin="0,4,0,0">
-                    <StackPanel Margin="4,8,4,4">
-                        <CheckBox x:Name="AutoFetchArtCheck" Content="Auto-Fetch Metadata &amp; Artwork" Foreground="#e5e9f5" FontWeight="Bold" Margin="0,0,0,2"/>
-                        <TextBlock Text="For movie discs on insertion (not games)." Foreground="#8b93a8" FontSize="10" Margin="18,0,0,10"/>
-
-                        <CheckBox x:Name="BatchQueueCheck" Content="Batch Queue Mode" Foreground="#e5e9f5" FontWeight="Bold" Margin="0,0,0,2"/>
-                        <TextBlock Text="Skip completion prompt; auto-continue on next disc swap." Foreground="#8b93a8" FontSize="10" TextWrapping="Wrap" Margin="18,0,0,10"/>
-
-                        <CheckBox x:Name="MultiDriveSyncCheck" Content="Multi-Drive Batch Sync" Foreground="#e5e9f5" FontWeight="Bold" Margin="0,0,0,2"/>
-                        <TextBlock Text="Caps concurrent rips across all bays. Extras wait as QUEUED for a free slot." Foreground="#8b93a8" FontSize="10" TextWrapping="Wrap" Margin="18,0,0,4"/>
-                        <StackPanel Orientation="Horizontal" Margin="18,0,0,10">
-                            <TextBlock Text="Max concurrent rips:" Foreground="#8b93a8" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                            <TextBox x:Name="MaxConcurrentBox" Width="40" Background="#141b2d" Foreground="#e5e9f5" BorderBrush="#2a3550" Padding="4"/>
+                <!-- ✅ Redump checks -->
+                <StackPanel x:Name="RedumpPage" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="✅ Redump checks"/>
+                    <TextBlock Style="{StaticResource PageIntro}" Text="Redump's lists (DAT files) of known-good game discs. With the list for a system imported, a rip is checked against it and marked verified or not."/>
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Imported lists" Foreground="{DynamicResource Text}" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="DatListText" Foreground="{DynamicResource Accent}" FontFamily="Consolas" FontSize="11.5" TextWrapping="Wrap" Margin="0,6,0,0"/>
                         </StackPanel>
-
-                        <Separator Margin="0,0,0,8"/>
-                        <TextBlock Text="PLANNED — NOT YET BUILT" Foreground="#5b6478" FontWeight="Bold" FontSize="9" Margin="0,0,0,6"/>
-                        <CheckBox Content="Cloud/NAS Mirror [Planned]" Foreground="#5b6478" IsEnabled="False" Margin="0,0,0,2"/>
-                        <TextBlock Text="Auto-sync completed archives to a secondary backup location." Foreground="#5b6478" FontSize="10" TextWrapping="Wrap" Margin="18,0,0,0"/>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Content="🌐 Get DAT files from redump.org" Style="{StaticResource AccentButton}" Margin="0,0,8,0" Click="OpenRedumpSiteButton_Click"/>
+                        <Button Content="📥 Import a DAT file…" Click="ImportDatButton_Click"/>
                     </StackPanel>
-                </Expander>
+                    <TextBlock Style="{StaticResource Help}" Margin="0,8,0,0" Text="Download a system's DAT on redump.org (it comes as a .zip: unzip it first), then import the .dat here."/>
+                </StackPanel>
 
-                <TextBlock x:Name="MessageText" Foreground="#8b93a8" FontSize="11" Margin="0,12,0,0" TextWrapping="Wrap"/>
+                <!-- ℹ About & updates -->
+                <StackPanel x:Name="AboutPage" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource PageTitle}" Text="ℹ About &amp; updates"/>
 
-            </StackPanel>
+                    <!-- About the app -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="ArchivSector-OD" Foreground="{DynamicResource Text}" FontSize="16" FontWeight="SemiBold"/>
+                            <TextBlock Text="Optical disc ripping, archiving and burning" Foreground="{DynamicResource Accent}" Margin="0,2,0,0"/>
+                            <TextBlock Foreground="{DynamicResource TextSec}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Text="Backs up Blu-ray, DVD, CD and game discs, checks them against Redump and AccurateRip, keeps a history of every rip, fills discs to 100% with TargetFill, and burns and verifies discs with its own writer."/>
+                            <TextBlock Foreground="{DynamicResource Muted}" FontSize="11.5" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Text="Made by ArchivSect1986. Free and open source (MIT licence). Uses MakeMKV, Redumper, mkvmerge and ImgBurn when they're installed, and the Redump, AccurateRip, TMDB and RAWG databases. Inspired by MPF (Media Preservation Frontend)."/>
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button Content="🌐 GitHub page" Margin="0,0,8,6" Tag="https://github.com/ArchivSect1986/ArchivSector-OD" Click="Link_Click"/>
+                                <Button Content="📋 What's new" Margin="0,0,8,6" Tag="https://github.com/ArchivSect1986/ArchivSector-OD/blob/master/CHANGELOG.md" Click="Link_Click"/>
+                                <Button Content="🐞 Report a problem" Margin="0,0,8,6" Tag="https://github.com/ArchivSect1986/ArchivSector-OD/issues" Click="Link_Click"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock x:Name="VersionText" Foreground="{DynamicResource Text}" FontWeight="SemiBold" FontSize="13"/>
+                                <TextBlock x:Name="UpdateStatusText" Foreground="{DynamicResource Muted}" FontSize="11.5" TextWrapping="Wrap" Margin="0,4,10,0"/>
+                            </StackPanel>
+                            <Button x:Name="CheckUpdatesButton" Grid.Column="1" Content="🔄 Check for updates" Style="{StaticResource AccentButton}" VerticalAlignment="Center" Click="CheckUpdatesButton_Click"/>
+                        </Grid>
+                    </Border>
+                    <CheckBox x:Name="StartupUpdateCheck" Content="Check for updates when the app starts" Margin="0,14,0,0"/>
+                    <TextBlock Style="{StaticResource CheckHelp}" Text="You're asked before anything is downloaded."/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="Desktop shortcut"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Puts an ArchivSector-OD icon on your desktop."/>
+                    <Button Content="🖥 Create a desktop shortcut" HorizontalAlignment="Left" Click="CreateShortcutButton_Click"/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="Settings and logs folder"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Where these settings, the logs and the cache are kept. A bug report should include that day's log from the Logs folder in here."/>
+                    <Border Style="{StaticResource Card}" Margin="0,4,0,0" Padding="12,8">
+                        <TextBlock x:Name="ConfigDirText" Foreground="{DynamicResource Accent}" FontFamily="Consolas" FontSize="11.5" TextWrapping="Wrap"/>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                        <Button Content="📂 Open the folder" Margin="0,0,8,0" Click="OpenFolderButton_Click"/>
+                        <Button Content="🩺 Test that files can be saved" Click="RunDiagnosticButton_Click"/>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Help}" Margin="0,8,0,0" Text="The test writes a file and has Windows check it's really there. If settings or rips seem to vanish, a security program may be hiding the app's files: this shows it."/>
+                </StackPanel>
+            </Grid>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="20,0,20,16">
-            <Button x:Name="CancelButton" Content="Cancel" Width="90" Height="32" Margin="0,0,8,0" Click="CancelButton_Click"/>
-            <Button x:Name="SaveButton" Content="Save Preferences" Background="#10b981" Foreground="Black" Width="140" Height="32" FontWeight="Bold" Click="SaveButton_Click"/>
-        </StackPanel>
+        <!-- Bottom bar -->
+        <Border Grid.Row="1" Grid.Column="1" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Edge}" BorderThickness="0,1,0,0" Padding="28,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="MessageText" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,12,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="CancelButton" Content="Close" MinWidth="90" Margin="0,0,8,0" Click="CancelButton_Click"/>
+                    <Button x:Name="SaveButton" Content="💾 Save" MinWidth="110" Style="{StaticResource SaveButton}" Click="SaveButton_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

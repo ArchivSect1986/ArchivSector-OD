@@ -40,6 +40,8 @@ namespace ArchivSector_OD
         public HistoryWindow()
         {
             InitializeComponent();
+            // Beta 5: the theme picked in the 🎨 menu, followed while open.
+            WpfTheme.Follow(this, WpfTheme.Apply(this));
             LoadHistory();
         }
 

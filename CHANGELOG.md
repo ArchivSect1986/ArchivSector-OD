@@ -4,6 +4,34 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
+## v4.0.0-beta5 - in progress
+
+The fifth test version of v4.0, being worked on. Everything below is new since Beta 4.
+
+### ✨ Added
+* **⚙ A new Settings window.** Sections down the left (General, Appearance, Programs, Burning, Online lookups, Batch & drives, Redump checks, About & updates), shown one at a time, with a line of help under every setting.
+  * **Every program path says whether it's found:** a green ✓ when the program is found (by itself, or at the path you typed), an amber ⚠ when it isn't, updated as you type. Every path has a Browse button, and **BurnerMAX's** path can now be set here too.
+  * **Appearance** shows the theme you're on and the holiday-theme switch. Themes are still picked with 🎨, where the whole app changes as you click.
+  * **About** says what the app is, with buttons for the GitHub page, what's new and reporting a problem.
+  * Closing with unsaved changes asks whether to save them first.
+* **Settings, History and ISO Verifier follow the theme** picked in 🎨 (colours, font and corners), and change with it while they're open. History's table no longer stays white.
+* **⧉ Pop out the Live log** into its own window, to watch a burn from another tab, over another program or on a second monitor. It follows the theme as well.
+* **Book type in Drive info** (what a burned DVD tells players it is: a DVD+R burned as a DVD-ROM says so), and the size of layer 0 on a dual-layer disc. The burn log records the book type after a DVD+R burn.
+* **Verify disc spots a DVD+R DL burned with its capacity raised** (an Xbox 360 XGD3 game). If the differences start exactly where the blank's original layer 0 ended, it says the drive is reading the disc from the wrong place and the disc is probably fine, shown as a warning instead of an error.
+
+### 🔧 Changed
+* **The verify after burning counts bad sectors the same way as Verify disc:** sectors that read but differ and sectors that can't be read are counted separately and exactly, and the problem ranges are logged. (It used to count a whole 32-sector block as bad when one read failed.)
+* **Both verifies stop early on a hopeless disc** (10,000 bad sectors, or 3 minutes re-reading unreadable ones) and say why, instead of grinding on for an hour.
+* **Live log:** a long message wraps at the edge of the box, lined up under itself, so it can be read in full. The pop-out's buttons move to a second row when the window is narrow.
+* **Tidier drive names** on the drive cards and in the burn screen.
+* **Only one Settings, History or ISO Verifier window** opens at a time: clicking again brings the open one to the front.
+* **Saving Settings no longer overwrites** what the Burn tab changed while Settings was open.
+
+### 🐛 Fixed
+* **Copy in the Live log** doubled the line breaks of a report (Drive info pasted with a blank line between every row).
+
+---
+
 ## v4.0.0-beta4 - 2026-11-06 (pre-release)
 
 The fourth test version of v4.0. Everything below is new since Beta 3. This one is mostly about **music CDs** (reading them exactly, checking them against AccurateRip, making them from your own music files) and **Xbox 360 game discs**.
@@ -49,7 +77,7 @@ The fourth test version of v4.0. Everything below is new since Beta 3. This one 
 * **Copy disc now keeps CD-Text and hidden tracks before track 1**, both listed as known issues in Beta 3.
 
 ### ⚠ Known issues
-* **Dual-layer DVD-R DL and BD-R DL** aren't written by the own writer yet: ImgBurn takes over for those. (DVD+R DL is written by the own writer, Xbox games included.)
+* **DVD-R DL** isn't written by the own writer yet: ImgBurn takes over for it. DVD+R DL is written by the own writer, Xbox games included. **BD-R DL** (50 GB) is written by the own writer like any BD-R, but it hasn't been tested on a real disc yet.
 * **BurnerMAX only works on some drives**, and it has to be run by you. XGD2 and XGD3 games burned by the own writer have been tested on a console. For XGD3 discs, Verbatim-quality media and letting the verify finish are recommended: a cheaper disc that boots can still have a few unreadable spots later on.
 * **An XGD3 disc (burned with its capacity raised) can't be verified in every drive.** An ASUS BW-16D1HT reads it with the blank disc's original layer size, so from sector 2,086,912 on it returns the wrong part of the disc and the verify reports millions of differences, even on a good disc. The drive that burned it (a DRW-24F1ST here) reads it correctly, and so does the verify straight after burning.
 * **A DVD-RW in "overwrite" mode** (formatted that way by another program) needs a quick erase before burning. Windows' "Like a USB flash drive" format leaves it only partly formatted, and writing over a fully formatted one directly hasn't been tested on a real disc yet.

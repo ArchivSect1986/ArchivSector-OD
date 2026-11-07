@@ -391,32 +391,66 @@
         config = fresh;
     }
 
+    // One Settings window at a time: clicking ⚙ again brings the open one
+    // to the front (beta 5; each click used to open another).
+    private SettingsWindow? settingsWindow;
+
     private void OpenSettings()
     {
+        if (settingsWindow is not null)
+        {
+            if (settingsWindow.WindowState == System.Windows.WindowState.Minimized)
+                settingsWindow.WindowState = System.Windows.WindowState.Normal;
+            settingsWindow.Activate();
+            return;
+        }
         config = ConfigService.Load();
-        var window = new SettingsWindow(config)
+        settingsWindow = new SettingsWindow(config)
         {
             Owner = System.Windows.Application.Current.MainWindow
         };
-        window.Show();
+        settingsWindow.Closed += (_, _) => settingsWindow = null;
+        settingsWindow.Show();
     }
+
+    // One History window at a time too.
+    private HistoryWindow? historyWindow;
 
     private void ShowHistory()
     {
-        var window = new HistoryWindow
+        if (historyWindow is not null)
+        {
+            if (historyWindow.WindowState == System.Windows.WindowState.Minimized)
+                historyWindow.WindowState = System.Windows.WindowState.Normal;
+            historyWindow.Activate();
+            return;
+        }
+        historyWindow = new HistoryWindow
         {
             Owner = System.Windows.Application.Current.MainWindow
         };
-        window.Show();
+        historyWindow.Closed += (_, _) => historyWindow = null;
+        historyWindow.Show();
     }
+
+    // One ISO Verifier window at a time too.
+    private IsoVerifierWindow? isoVerifierWindow;
 
     private void OpenIsoVerifier()
     {
-        var window = new IsoVerifierWindow
+        if (isoVerifierWindow is not null)
+        {
+            if (isoVerifierWindow.WindowState == System.Windows.WindowState.Minimized)
+                isoVerifierWindow.WindowState = System.Windows.WindowState.Normal;
+            isoVerifierWindow.Activate();
+            return;
+        }
+        isoVerifierWindow = new IsoVerifierWindow
         {
             Owner = System.Windows.Application.Current.MainWindow
         };
-        window.Show();
+        isoVerifierWindow.Closed += (_, _) => isoVerifierWindow = null;
+        isoVerifierWindow.Show();
     }
 
 
@@ -623,6 +657,10 @@
         if (IsSeasonal(c.Theme)) return regular;
         return Themes.Any(t => t.Id == c.Theme) ? c.Theme : regular;
     }
+
+    /// <summary>A theme's name as the 🎨 menu shows it ("Midnight", "Remembrance Day"), for Settings.</summary>
+    internal static string ThemeName(string id) =>
+        Themes.Concat(Seasonal.Select(s => s.Info)).FirstOrDefault(t => t.Id == id)?.Name ?? id;
 
     private static string DeclineKey(string id) => $"{id}:{DateTime.Today.Year}";
 
