@@ -51,6 +51,14 @@ namespace ArchivSector_OD
             header = rows.Count > 0 ? rows[0].ToList() : new List<string>();
             allRows = rows.Skip(1).ToList();
 
+            // Beta 5: rows saved before drive names were tidied ("ASUS
+            // DRW-24F1ST   d") show the same tidy name as new ones. Only
+            // what's shown changes; the history file is left as it was.
+            int model = header.IndexOf("Drive Model");
+            if (model >= 0)
+                foreach (var row in allRows)
+                    if (model < row.Length) row[model] = HistoryService.TidyDriveModel(row[model]);
+
             ComputeStats(allRows);
             ApplyFilter();
         }

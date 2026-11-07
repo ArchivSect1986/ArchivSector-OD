@@ -29,6 +29,7 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 
 ### 🐛 Fixed
 * **Copy in the Live log** doubled the line breaks of a report (Drive info pasted with a blank line between every row).
+* **History showed drive names with the drive's padding and revision letter** ("ASUS DRW-24F1ST   d"). New rips are recorded with the tidy name ("ASUS DRW-24F1ST"), and older rows are shown that way too (the history file itself isn't changed).
 
 ---
 

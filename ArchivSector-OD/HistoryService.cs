@@ -61,7 +61,7 @@ namespace ArchivSector_OD
 
                 writer.WriteLine(string.Join(",", new[]
                 {
-                    entry.Timestamp, entry.DriveLetter, entry.DriveModel, entry.Title,
+                    entry.Timestamp, entry.DriveLetter, TidyDriveModel(entry.DriveModel), entry.Title,
                     entry.System, entry.Serial, entry.OutputPath, entry.Capacity,
                     entry.Sha1, entry.Md5, entry.AacsVersion, entry.RedumpMatch,
                 }.Select(CsvField)));
@@ -71,6 +71,20 @@ namespace ArchivSector_OD
                 // Best-effort -- a missed history entry should never
                 // interrupt or fail a rip.
             }
+        }
+
+        /// <summary>
+        /// A drive's name as the rest of the app shows it (beta 5): the
+        /// drive's own padding squeezed out, and a lone letter some drives
+        /// add after the model (ASUS "DRW-24F1ST   d", a hardware revision)
+        /// left off. "ASUS DRW-24F1ST   d" becomes "ASUS DRW-24F1ST".
+        /// The same rule as the Burn tab's drive names (BurnerDrive.Name).
+        /// </summary>
+        public static string TidyDriveModel(string model)
+        {
+            var parts = (model ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+            if (parts.Count > 2 && parts[^1].Length == 1) parts.RemoveAt(parts.Count - 1);
+            return string.Join(' ', parts);
         }
 
         // Converts a v2.0-format history file (no "Serial ID" column)
