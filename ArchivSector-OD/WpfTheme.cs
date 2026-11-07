@@ -242,6 +242,37 @@ namespace ArchivSector_OD
         <Setter Property="Background" Value="{DynamicResource Panel}"/>
     </Style>
 
+    <!-- A list row: a line under each, the theme's highlight when hovered,
+         and an accent bar on the left when picked. Lists ask for it with
+         ItemContainerStyle="{DynamicResource ThemeListItem}". -->
+    <Style x:Key="ThemeListItem" TargetType="ListBoxItem">
+        <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+        <Setter Property="Padding" Value="8,7"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="Box" Background="Transparent" BorderBrush="{DynamicResource Edge}" BorderThickness="0,0,0,1">
+                        <DockPanel>
+                            <Border x:Name="Bar" DockPanel.Dock="Left" Width="3" Background="Transparent"/>
+                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource PanelAlt}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource PanelAlt}"/>
+                            <Setter TargetName="Bar" Property="Background" Value="{DynamicResource Accent}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Tables -->
     <Style TargetType="DataGrid">
         <Setter Property="Background" Value="{DynamicResource Panel}"/>

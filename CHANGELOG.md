@@ -14,7 +14,7 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
   * **Appearance** shows the theme you're on and the holiday-theme switch. Themes are still picked with 🎨, where the whole app changes as you click.
   * **About** says what the app is, with buttons for the GitHub page, what's new and reporting a problem.
   * Closing with unsaved changes asks whether to save them first.
-* **Settings, History and ISO Verifier follow the theme** picked in 🎨 (colours, font and corners), and change with it while they're open. History's table no longer stays white.
+* **Every separate window follows the theme** picked in 🎨 (colours, font and corners) and changes with it while it's open: Settings, History, ISO Verifier, the Live log pop-out, Fetch Metadata & Artwork, and the title and track pickers for Movie-Only. History's table no longer stays white.
 * **⧉ Pop out the Live log** into its own window, to watch a burn from another tab, over another program or on a second monitor. It follows the theme as well.
 * **Book type in Drive info** (what a burned DVD tells players it is: a DVD+R burned as a DVD-ROM says so), and the size of layer 0 on a dual-layer disc. The burn log records the book type after a DVD+R burn.
 * **Verify disc spots a DVD+R DL burned with its capacity raised** (an Xbox 360 XGD3 game). If the differences start exactly where the blank's original layer 0 ended, it says the drive is reading the disc from the wrong place and the disc is probably fine, shown as a warning instead of an error.

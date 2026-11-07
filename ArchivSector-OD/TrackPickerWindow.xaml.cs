@@ -30,6 +30,8 @@ namespace ArchivSector_OD
         public TrackPickerWindow(List<MakeMkvService.TrackInfo> tracks, string suggestedName)
         {
             InitializeComponent();
+            // Beta 5: the theme picked in the 🎨 menu, followed while open.
+            WpfTheme.Follow(this, WpfTheme.Apply(this));
             this.suggestedName = suggestedName;
             OutputNameBox.Text = suggestedName;
 

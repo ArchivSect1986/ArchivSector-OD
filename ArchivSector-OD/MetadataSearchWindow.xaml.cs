@@ -30,6 +30,8 @@ namespace ArchivSector_OD
         public MetadataSearchWindow(string initialQuery, DiscCategory category, AppConfig config)
         {
             InitializeComponent();
+            // Beta 5: the theme picked in the 🎨 menu, followed while open.
+            WpfTheme.Follow(this, WpfTheme.Apply(this));
             this.config = config;
 
             QueryBox.Text = initialQuery;

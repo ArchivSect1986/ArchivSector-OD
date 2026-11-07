@@ -3,7 +3,6 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Choose the Titles to Extract"
         Height="440" Width="560"
-        Background="#141b2d"
         WindowStartupLocation="CenterOwner">
     <Grid Margin="16">
         <Grid.RowDefinitions>
@@ -12,25 +11,12 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="#8b93a8" FontSize="11" Margin="0,0,0,10"
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,0,0,10"
                    Text="MakeMKV found these titles on the disc, longest first. The longest is usually the actual movie -- extras, menus, and alternate cuts are usually much shorter. A disc with more than one film (a double or triple feature)? Tick each film: every one becomes its own MKV."/>
 
-        <ListBox Grid.Row="1" x:Name="TitleList" SelectionMode="Multiple" SelectionChanged="TitleList_SelectionChanged"
-                  Background="#1b2438" BorderBrush="#2a3550" BorderThickness="1"
+        <ListBox ItemContainerStyle="{DynamicResource ThemeListItem}" Grid.Row="1" x:Name="TitleList" SelectionMode="Multiple" SelectionChanged="TitleList_SelectionChanged"
+                  Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Edge}" BorderThickness="1"
                   ScrollViewer.VerticalScrollBarVisibility="Auto">
-            <ListBox.ItemContainerStyle>
-                <Style TargetType="ListBoxItem">
-                    <Setter Property="Padding" Value="8,7"/>
-                    <Setter Property="Background" Value="Transparent"/>
-                    <Setter Property="BorderThickness" Value="0,0,0,1"/>
-                    <Setter Property="BorderBrush" Value="#2a3550"/>
-                    <Style.Triggers>
-                        <Trigger Property="IsSelected" Value="True">
-                            <Setter Property="Background" Value="#16384a"/>
-                        </Trigger>
-                    </Style.Triggers>
-                </Style>
-            </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <Grid>
@@ -43,17 +29,17 @@
                         <!-- The tick follows the row's selection; clicking anywhere on the row ticks or unticks it. -->
                         <CheckBox Grid.Column="0" VerticalAlignment="Center" IsHitTestVisible="False" Focusable="False"
                                   IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Mode=OneWay}"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="#e5e9f5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Grid.Column="2" Text="{Binding Duration}" Foreground="#8b93a8" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="3" Text="{Binding SizeGb}" Foreground="#8b93a8" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{DynamicResource Text}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Duration}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="3" Text="{Binding SizeGb}" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
                     </Grid>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button x:Name="CancelButton" Content="Cancel" Width="90" Height="32" Margin="0,0,8,0" Click="CancelButton_Click"/>
-            <Button x:Name="ExtractButton" Content="Extract 1 Title" Background="#10b981" Foreground="Black" FontWeight="Bold" Width="160" Height="32" Click="ExtractButton_Click"/>
+            <Button x:Name="CancelButton" Content="Cancel" MinWidth="90" Margin="0,0,8,0" Click="CancelButton_Click"/>
+            <Button x:Name="ExtractButton" Content="Extract 1 Title" Style="{DynamicResource SaveButton}" FontWeight="Bold" MinWidth="160" Click="ExtractButton_Click"/>
         </StackPanel>
     </Grid>
 </Window>
