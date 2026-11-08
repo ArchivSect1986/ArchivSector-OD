@@ -160,10 +160,14 @@ namespace ArchivSector_OD.Burning
         // can't be read, each listed exactly (a chunk that won't read is
         // re-read one sector at a time). It gives up early on a hopeless
         // disc instead of grinding on for an hour: after 10,000 bad sectors,
-        // or 3 minutes spent re-reading sectors that won't read.
+        // or 10 minutes spent re-reading sectors that won't read.
 
         private const long VerifyGiveUpBad = 10_000;
-        private static readonly TimeSpan VerifyGiveUpRereads = TimeSpan.FromMinutes(3);
+        // Beta 5: 10 minutes (was 3). Each unreadable sector can take the
+        // drive several seconds to give up on, and 3 minutes stopped a
+        // 42 GB check after only 23 bad sectors, before it could say
+        // whether the rest of the disc was fine.
+        private static readonly TimeSpan VerifyGiveUpRereads = TimeSpan.FromMinutes(10);
 
         private sealed class IsoCheck
         {

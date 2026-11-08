@@ -66,6 +66,10 @@ namespace ArchivSector_OD.Burning
             // like TargetFill's "Pad existing ISOs". The real size is noted on
             // the file so "Remove padding" can undo it exactly.
             public long PadToBytes;
+            // Beta 5: a Blu-ray's own file system (UDF 2.50, what players
+            // need) whatever the size, for a Blu-ray backup that may be
+            // bigger than a BD-50 (a BD-66 or BD-100 UHD disc). No size check.
+            public bool BluRay;
         }
 
         // BD-25 as Windows' burning engine formats it (768 MB kept spare).
@@ -161,13 +165,13 @@ namespace ArchivSector_OD.Burning
             : hasLargeFile ? FileSystemChoice.UdfOnly
             : FileSystemChoice.IsoJolietUdf;
 
-        public static string Describe(FileSystemChoice resolved, MediaTarget target) =>
+        public static string Describe(FileSystemChoice resolved, MediaTarget target, bool bluRay = false) =>
             resolved == FileSystemChoice.UdfOnly
-                ? $"UDF {UdfVersionText(target)} only"
-                : $"ISO9660 + Joliet + UDF {UdfVersionText(target)}";
+                ? $"UDF {UdfVersionText(target, bluRay)} only"
+                : $"ISO9660 + Joliet + UDF {UdfVersionText(target, bluRay)}";
 
-        private static int UdfRevision(MediaTarget t) => t is MediaTarget.Bd25 or MediaTarget.Bd50 ? 0x250 : 0x102;
-        private static string UdfVersionText(MediaTarget t) => t is MediaTarget.Bd25 or MediaTarget.Bd50 ? "2.50" : "1.02";
+        private static int UdfRevision(MediaTarget t, bool bluRay = false) => bluRay || t is MediaTarget.Bd25 or MediaTarget.Bd50 ? 0x250 : 0x102;
+        private static string UdfVersionText(MediaTarget t, bool bluRay = false) => bluRay || t is MediaTarget.Bd25 or MediaTarget.Bd50 ? "2.50" : "1.02";
 
         public static Task<Result> BuildAsync(Options o, IProgress<Progress>? progress, CancellationToken ct, Action<string>? log = null)
         {
@@ -219,7 +223,7 @@ namespace ArchivSector_OD.Burning
             var fs = forceUdf ? FileSystemChoice.UdfOnly : Resolve(o.FileSystem, info.HasLargeFile);
             if (fs == FileSystemChoice.IsoJolietUdf && info.HasLargeFile)
                 return new Result { Message = $"{Path.GetFileName(info.LargestFileName)} is 2 GB or bigger, which ISO9660 can't hold here. Choose \"UDF only\" or \"Automatic\"." };
-            string fsText = Describe(fs, o.Target);
+            string fsText = Describe(fs, o.Target, o.BluRay);
             string label = CleanLabel(string.IsNullOrWhiteSpace(o.VolumeLabel) ? Path.GetFileName(o.SourceFolder.TrimEnd('\\')) : o.VolumeLabel);
             log?.Invoke($"Build: {o.SourceFolder} -> {outFull} ({info.Files:N0} files, {info.Bytes:N0} bytes, {fsText}, label {label}, for {NameOf(o.Target)})");
 
@@ -233,7 +237,7 @@ namespace ArchivSector_OD.Burning
                 fsiObj = Activator.CreateInstance(t)!;
                 dynamic fsi = fsiObj;
 
-                int physical = o.Target switch
+                int physical = o.BluRay ? 18 : o.Target switch
                 {
                     MediaTarget.Cd => 2,              // CD-R
                     MediaTarget.Dvd => 6,             // DVD+R
@@ -243,7 +247,7 @@ namespace ArchivSector_OD.Burning
                 };
                 TryCom(() => fsi.ChooseImageDefaultsForMediaType(physical));
                 fsi.FileSystemsToCreate = fs == FileSystemChoice.UdfOnly ? 4 : 7;   // 1 ISO9660, 2 Joliet, 4 UDF
-                TryCom(() => fsi.UDFRevision = UdfRevision(o.Target));
+                TryCom(() => fsi.UDFRevision = UdfRevision(o.Target, o.BluRay));
                 // No size limit from IMAPI2 itself; the size is checked below.
                 TryCom(() => fsi.FreeMediaBlocks = 0);
                 fsi.VolumeName = label;

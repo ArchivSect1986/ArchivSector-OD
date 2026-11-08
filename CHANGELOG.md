@@ -23,8 +23,10 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 
 ### 🔧 Changed
 * **The verify after burning counts bad sectors the same way as Verify disc:** sectors that read but differ and sectors that can't be read are counted separately and exactly, and the problem ranges are logged. (It used to count a whole 32-sector block as bad when one read failed.)
-* **Both verifies stop early on a hopeless disc** (10,000 bad sectors, or 3 minutes re-reading unreadable ones) and say why, instead of grinding on for an hour.
+* **Both verifies stop early on a hopeless disc** (10,000 bad sectors, or 10 minutes re-reading unreadable ones) and say why, instead of grinding on for an hour.
 * **Live log:** a long message wraps at the edge of the box, lined up under itself, so it can be read in full. The pop-out's buttons move to a second row when the window is narrow.
+* **Blu-ray Full Backup no longer needs ImgBurn:** the decrypted disc is turned into a single ISO by ArchivSector-OD itself (UDF 2.50, the file system Blu-ray players need, at any size, BD-66 and BD-100 too), with a progress bar and Cancel. ImgBurn is only used if it's installed and the app's own build fails; with neither, the decrypted folder is kept as before.
+* **The own writer calibrates the laser before the first write** (as ImgBurn does), and gives that first write 5 minutes: on a dual-layer BD-R calibration takes most of a minute, and the first write used to time out at sector 0. If the drive stops answering altogether, it stops at once and says the disc is still blank. The drive's own speeds are restored before each burn, so a speed another program left set can't hold it back.
 * **Tidier drive names** on the drive cards and in the burn screen.
 * **Only one Settings, History or ISO Verifier window** opens at a time: clicking again brings the open one to the front.
 * **Saving Settings no longer overwrites** what the Burn tab changed while Settings was open.
@@ -32,6 +34,15 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 ### 🐛 Fixed
 * **Copy in the Live log** doubled the line breaks of a report (Drive info pasted with a blank line between every row).
 * **History showed drive names with the drive's padding and revision letter** ("ASUS DRW-24F1ST   d"). New rips are recorded with the tidy name ("ASUS DRW-24F1ST"), and older rows are shown that way too (the history file itself isn't changed).
+* **The burn summary card** showed no disc type and a wrong average speed ("156.3x") once the disc had been burned.
+
+### ✅ Tested
+* **BD-R DL (50 GB) is burned by the own writer:** a 42 GB Blu-ray backup on a Verbatim BD-R DL at 6x, and the disc matched the ISO sector for sector.
+
+### ⚠ Known issues
+* **DVD-R DL** isn't written by the own writer yet: ImgBurn or Windows takes over for it. (DVD-R DL blanks are rare now; DVD+R DL is written by the own writer.)
+* **The start of a BD-R DL's second layer can be hard for some drives to read back.** On the test disc, the verify straight after burning found 23 unreadable sectors just after the layer change in the burning drive, while the same disc read perfectly in another drive. Other programs see the same thing (ImgBurn users report it with Verbatim BD-R DL discs). If a BD-R DL's verify fails only just past sector 12,219,392, check it in another drive before giving up on it.
+* **A drive can stop answering when told to start writing on a BD-R DL** (seen once on one of two identical drives, with ImgBurn too). The own writer now stops by itself and says the disc is still blank: try another drive or disc.
 
 ---
 

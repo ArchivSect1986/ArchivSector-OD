@@ -410,6 +410,10 @@
             {
                 <text>@FormatGb(writtenBytes) / @FormatGb(targetBytes) (@progressPercent%)</text>
             }
+            else if (runningKind == "iso")
+            {
+                <text>@isoProgressText</text>
+            }
         </p>
         <button class="bay-btn cancel-btn" @onclick="CancelRun">✖ Cancel</button>
     }
@@ -569,6 +573,8 @@
     }
     private string runningLabel = "";
     private string runningKind = "makemkv";
+    private string isoProgressText = "";          // beta 5: the own ISO build's progress line
+    private CancellationTokenSource? isoCts;      // beta 5: Cancel for the own ISO build
     private bool showModeDialog = false;
     private string dialogKind = "bd";
     private bool wasCancelled = false;
@@ -1693,6 +1699,7 @@
     {
         wasCancelled = true;
         AddLog("Cancel requested by user");
+        try { isoCts?.Cancel(); } catch { /* already finished */ }
         try { currentProcess?.Kill(entireProcessTree: true); }
         catch { /* already exited, or couldn't be killed -- either way, proceed */ }
     }
@@ -2132,11 +2139,12 @@
             return;
         }
 
+        // Beta 5: the single-file ISO is built by ArchivSector-OD itself
+        // (UDF 2.50, like ImgBurn), with progress and Cancel. ImgBurn is
+        // only a fallback now, if it's installed and the own build fails.
         var imgBurnExe = kind == "bd" ? ImgBurnService.FindExecutable(config.ImgBurnPathOverride) : null;
         if (kind == "bd")
-            AddLog(imgBurnExe is not null
-                ? "Blu-ray Full Backup: ImgBurn found -- will build a single-file ISO as stage 2/2 after decrypt"
-                : "Blu-ray Full Backup: ImgBurn not configured -- the decrypted folder will be the final output");
+            AddLog("Blu-ray Full Backup: the decrypted disc becomes a single-file ISO afterwards (stage 2/2, ArchivSector-OD's own ISO builder)");
 
         var indexResult = await Task.Run(() => MakeMkvService.ResolveDiscIndex(exe, DriveLetter));
         makeMkvResult = indexResult;
@@ -2178,7 +2186,7 @@
             ? Path.Combine(outputFolder, $"{baseName}.iso")
             : null;
 
-        var decryptTarget = (kind == "bd" && imgBurnExe is not null)
+        var decryptTarget = kind == "bd"
             ? Path.Combine(outputFolder, "_temp_decrypt")
             : outputFolder;
 
@@ -2201,35 +2209,81 @@
             AddLog($"{opLabel}: cancelled, cleaning up");
             await CleanUpCancelledFolder(decryptTarget);
         }
-        else if (kind == "bd" && backupResult.Success && imgBurnExe is not null)
+        else if (kind == "bd" && backupResult.Success)
         {
-            AddLog("Blu-ray Full Backup: MakeMKV decrypt complete, starting ImgBurn stage 2/2 (build single ISO)");
-            runningLabel = "Building single-file ISO via ImgBurn (stage 2/2, no live progress)…";
-            runningKind = "imgburn";
+            AddLog("Blu-ray Full Backup: MakeMKV decrypt complete, building the single-file ISO (stage 2/2)");
+            runningLabel = "Building the single-file ISO (stage 2/2)…";
+            runningKind = "iso";
             isRunning = true;
-            progressPercent = null;
+            progressPercent = 0;
+            isoProgressText = "Reading the folder…";
             StateHasChanged();
 
-            var imgBurnResult = await Task.Run(() => ImgBurnService.BuildSingleIso(imgBurnExe, decryptTarget, outputFolder, baseName));
+            var isoPath = Path.Combine(outputFolder, $"{baseName}.iso");
+            isoCts = new CancellationTokenSource();
+            var isoProgress = new System.Progress<ArchivSector_OD.Burning.IsoBuilder.Progress>(p => InvokeAsync(() =>
+            {
+                progressPercent = p.Percent >= 0 ? (int)p.Percent : null;
+                isoProgressText = p.Percent >= 0
+                    ? $"{FormatGb(p.BytesDone)} / {FormatGb(p.TotalBytes)} ({(int)p.Percent}%) · {p.BytesPerSec / (1024 * 1024):0} MB/s"
+                    : p.Phase + "…";
+                StateHasChanged();
+            }));
+            ArchivSector_OD.Burning.IsoBuilder.Result built;
+            try
+            {
+                built = await ArchivSector_OD.Burning.IsoBuilder.BuildAsync(new ArchivSector_OD.Burning.IsoBuilder.Options
+                {
+                    SourceFolder = decryptTarget,
+                    OutputPath = isoPath,
+                    VolumeLabel = baseName,
+                    FileSystem = ArchivSector_OD.Burning.IsoBuilder.FileSystemChoice.UdfOnly,   // a Blu-ray disc's own file system
+                    Target = ArchivSector_OD.Burning.IsoBuilder.MediaTarget.Any,
+                    BluRay = true,                                      // UDF 2.50, any size (BD-66/100 too)
+                }, isoProgress, isoCts.Token, line => AddLog(line));
+            }
+            catch (Exception ex) { built = new ArchivSector_OD.Burning.IsoBuilder.Result { Message = ex.Message }; }
+            finally { isoCts.Dispose(); isoCts = null; }
+
+            // The own build failed (not cancelled) and ImgBurn is installed: let ImgBurn try.
+            string? finalIso = built.Ok ? built.IsoPath ?? isoPath : null;
+            string? failure = built.Ok ? null : built.Message;
+            if (!built.Ok && !wasCancelled && imgBurnExe is not null)
+            {
+                AddLog($"[WARNING] The ISO couldn't be built ({built.Message}): trying ImgBurn instead");
+                runningLabel = "Building the single-file ISO with ImgBurn (no live progress)…";
+                runningKind = "imgburn";
+                progressPercent = null;
+                StateHasChanged();
+                var imgBurnResult = await Task.Run(() => ImgBurnService.BuildSingleIso(imgBurnExe, decryptTarget, outputFolder, baseName));
+                if (imgBurnResult.Success) { finalIso = imgBurnResult.IsoPath; failure = null; }
+                else failure = imgBurnResult.ErrorMessage;
+            }
             isRunning = false;
 
-            if (imgBurnResult.Success)
+            if (wasCancelled)
             {
-                AddLog($"ImgBurn complete: {imgBurnResult.IsoPath}");
+                AddLog($"{opLabel}: ISO build cancelled; the decrypted folder is kept: {decryptTarget}");
+                trimMessage = "ISO build cancelled: the decrypted folder was kept";
+                lastOutputFolder = decryptTarget;
+            }
+            else if (finalIso is not null)
+            {
+                AddLog($"ISO complete: {finalIso}");
                 try { Directory.Delete(decryptTarget, recursive: true); } catch { /* best-effort cleanup */ }
-                lastOutputFolder = imgBurnResult.IsoPath;
-                await VerifyOutput(imgBurnResult.IsoPath!);
-                NotifyIfEnabled(config, true, opLabel, imgBurnResult.IsoPath);
-                RecordHistory(opLabel, imgBurnResult.IsoPath!, lastSha1, lastMd5, lastRedumpMatch);
+                lastOutputFolder = finalIso;
+                await VerifyOutput(finalIso);
+                NotifyIfEnabled(config, true, opLabel, finalIso);
+                RecordHistory(opLabel, finalIso, lastSha1, lastMd5, lastRedumpMatch);
                 OnRipSucceeded(config);
                 AutoEjectIfEnabled(config, DriveLetter);
             }
             else
             {
-                AddLog($"[WARNING] ImgBurn did not produce a valid ISO: {imgBurnResult.ErrorMessage} -- keeping the decrypted folder instead.");
-                trimMessage = "⚠ ImgBurn step failed -- decrypted folder kept as final output";
+                AddLog($"[WARNING] No ISO was made: {failure} -- keeping the decrypted folder instead.");
+                trimMessage = "⚠ The ISO couldn't be built: the decrypted folder was kept as the backup";
                 lastOutputFolder = decryptTarget;
-                NotifyIfEnabled(config, false, opLabel, "ImgBurn step failed, folder kept");
+                NotifyIfEnabled(config, false, opLabel, "ISO build failed, folder kept");
                 RecordHistory(opLabel, decryptTarget);
             }
         }

@@ -183,8 +183,28 @@ namespace ArchivSector_OD.Burning
                     startLba = 0;
                 }
 
-                // The speed asked for (0 = the fastest the drive offers, set above).
+                // Beta 5: first the drive's own speeds back (SET STREAMING
+                // "restore defaults"), so nothing another program left set
+                // (MakeMKV's reading speeds, say) holds the burn back; then
+                // the speed asked for (0 = the fastest the drive offers).
+                FullDriveSpeed(drive);
                 SetDirectWriteSpeed(drive, profile, speedX, startLba + isoSectors + padSectors - 1, log);
+
+                // Beta 5: calibrate the laser before the first write, as
+                // ImgBurn does ("Performing OPC"). Left to itself, a drive
+                // does it on the first write, and on a dual-layer BD-R that
+                // can take over a minute, longer than the write was given.
+                if (!isCd && !CalibrateLaser(drive, log))
+                {
+                    // The drive stopped answering altogether: writing would
+                    // only hang the same way. Nothing has been written.
+                    r.DiscUntouched = true;
+                    r.NoFallback = true;   // another program would hang on the drive too
+                    r.Message = $"The drive stopped answering while getting ready to write (no reply for 5 minutes). Nothing was written: the {discName} is still blank. "
+                        + "Eject it and put it back in, or restart the PC (a drive just used by MakeMKV in LibreDrive mode may need that before it writes again), then try again, or use another writer.";
+                    log?.Invoke("Direct write: " + r.Message);
+                    return;
+                }
 
                 // 4. Write.
                 r.DiscUntouched = false;
@@ -925,6 +945,29 @@ namespace ArchivSector_OD.Burning
         // WriteRefusedAtStart if the drive refused the very first write
         // ("illegal request"), so nothing was written.
         private const long WriteRefusedAtStart = -2;
+        // SEND OPC INFORMATION with DoOpc: the drive calibrates its laser for
+        // this disc now. Some drives say no (they calibrate on the first
+        // write instead), which is fine. Up to 5 minutes.
+        // False: the drive didn't answer at all (Windows gave up on it), so
+        // it's stuck and writing would hang the same way.
+        private static bool CalibrateLaser(ScsiDrive drive, Action<string>? log)
+        {
+            try
+            {
+                var sw = Stopwatch.StartNew();
+                var rep = drive.Command(new byte[] { 0x54, 0x01, 0, 0, 0, 0, 0, 0, 0, 0 }, 300);
+                if (rep.Ok) log?.Invoke($"Direct write: laser calibrated for this disc (OPC) in {sw.Elapsed.TotalSeconds:0.0} s");
+                else if (rep.Win32Error != 0)
+                {
+                    log?.Invoke($"Direct write: the drive didn't answer the laser calibration ({rep.Describe()} after {sw.Elapsed.TotalSeconds:0} s)");
+                    return false;
+                }
+                else log?.Invoke("Direct write: the drive calibrates its laser by itself on the first write (" + rep.Describe() + ")");
+            }
+            catch { /* calibration is optional */ }
+            return true;
+        }
+
         private static long WriteSectors(ScsiDrive drive, string isoPath, long startLba, long isoSectors, long padSectors, IProgress<Progress>? progress,
             CancellationToken ct, Result r, Action<string>? log, string afterFailure)
         {
@@ -1019,7 +1062,10 @@ namespace ArchivSector_OD.Burning
                     // A drive that's busy (buffer full, or still calibrating the laser /
                     // recording a DVD-R's reservation before the first data, which
                     // can take a minute or more) is asked again for up to 3 minutes.
-                    var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, 60), TimeSpan.FromMinutes(3), 50);
+                    // Beta 5: the first write gets 5 minutes (the drive may still be
+                    // calibrating, a dual-layer BD-R especially); the rest 60 seconds.
+                    int writeTimeout = done == 0 ? 300 : 60;
+                    var rep = RetryWhileBusyFor(() => drive.Write(cdb, data, writeTimeout), TimeSpan.FromMinutes(3), 50);
                     if (!free.IsAddingCompleted) free.Add(item.Buf);
                     if (!rep.Ok)
                     {

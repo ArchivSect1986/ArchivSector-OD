@@ -317,7 +317,7 @@
                     <TextBlock x:Name="RedumperStatus" Style="{StaticResource Status}"/>
 
                     <TextBlock Style="{StaticResource Label}" Text="ImgBurn (ImgBurn.exe), optional"/>
-                    <TextBlock Style="{StaticResource Help}" Text="Builds single-file Blu-ray ISOs, and burns the discs ArchivSector-OD's own writer can't yet (DVD-R DL)."/>
+                    <TextBlock Style="{StaticResource Help}" Text="Burns the discs ArchivSector-OD's own writer can't yet (DVD-R DL), and steps in if the app's own ISO build ever fails. Not needed otherwise."/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>

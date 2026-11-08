@@ -416,6 +416,10 @@ else if (state == State.Done && result is not null)
     private double resultSpeed;
     private bool resultSwitched;      // the own writer couldn't start and another program took over
     private long resultBytes;
+    // The disc type and its 1x, remembered at the start: once burned, the
+    // disc isn't blank any more and BlankMediaType comes back empty.
+    private string resultDisc = "";
+    private double resultOneX = 4_500_000;
     private DateTime resultTime;
     private bool summaryCopied;
 
@@ -428,13 +432,13 @@ else if (state == State.Done && result is not null)
         const string plain = "var(--text-primary)", good = "var(--success)", bad = "var(--danger)", muted = "var(--text-secondary)";
 
         rows.Add(new("Image", $"{Path.GetFileName(isoPath)}{(resultBytes > 0 ? $" ({SizeText(resultBytes)})" : "")}", plain));
-        rows.Add(new("Disc", $"{BlankMediaType} in {DriveLetter}: {DriveModel}".TrimEnd(), plain));
+        rows.Add(new("Disc", $"{(resultDisc.Length > 0 ? resultDisc : "Disc")} in {DriveLetter}: {DriveModel}".TrimEnd(), plain));
 
         string writer = resultSwitched ? $"{resultEngine} couldn't start; another program took over" : resultEngine;
         rows.Add(new("Writer", writer, plain));
         string speed = resultSpeed > 0 ? BurnEngine.SpeedText(resultSpeed) : "fastest";
         if (result.Burned && result.BurnTime.TotalSeconds > 1 && resultBytes > 0 && !resultSwitched)
-            speed += $" chosen · averaged {DiscHealthService.FormatSpeed(resultBytes / result.BurnTime.TotalSeconds, OneX)}";
+            speed += $" chosen · averaged {DiscHealthService.FormatSpeed(resultBytes / result.BurnTime.TotalSeconds, resultOneX)}";
         rows.Add(new("Speed", speed, plain));
         rows.Add(new("Burn", result.Burned ? $"✓ written in {Dur(result.BurnTime)}" : result.Cancelled ? "stopped" : "⚠ not burned", result.Burned ? plain : bad));
 
@@ -620,6 +624,8 @@ else if (state == State.Done && result is not null)
         resultSpeed = speed;
         resultSwitched = false;
         resultBytes = isoBytes;
+        resultDisc = BlankMediaType;
+        resultOneX = OneX;
         summaryCopied = false;
         LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {engineName} (speed: {SpeedLog}, verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");
         var reporter = new Progress<BurnEngine.Progress>(p => InvokeAsync(() =>
