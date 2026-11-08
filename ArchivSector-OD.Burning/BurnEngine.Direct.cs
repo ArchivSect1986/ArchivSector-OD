@@ -1145,6 +1145,9 @@ namespace ArchivSector_OD.Burning
             }
             check.Finish();
             r.MismatchedSectors = check.Bad;
+            r.DifferentSectors = check.Different;
+            r.UnreadableSectors = check.Unreadable;
+            r.BadRanges = check.Ranges;
             r.Verified = check.Bad == 0 && check.StoppedEarly is null;
             if (r.Verified == false)
             {

@@ -17,6 +17,8 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 * **Every separate window follows the theme** picked in 🎨 (colours, font and corners) and changes with it while it's open: Settings, History, ISO Verifier, the Live log pop-out, Fetch Metadata & Artwork, and the title and track pickers for Movie-Only. History's table no longer stays white.
 * **⧉ Pop out the Live log** into its own window, to watch a burn from another tab, over another program or on a second monitor. It follows the theme as well.
 * **Book type in Drive info** (what a burned DVD tells players it is: a DVD+R burned as a DVD-ROM says so), and the size of layer 0 on a dual-layer disc. The burn log records the book type after a DVD+R burn.
+* **A summary card at the end of every burn:** the image and its size, the disc and drive, the writer, the speed chosen and the average reached, how long it took, and what the verify found: ✓ every sector matches, or how many sectors differ or can't be read and where. **📋 Copy summary** puts it on the clipboard for a forum post or bug report, and **📄 Open log** opens the full log.
+* **Drive info shows how many layers a blank Blu-ray has** (a BD-R DL reports itself as a plain BD-R, so it's worked out from its size): 1, 2 (50 GB), or 3 and 4 for BDXL.
 * **Verify disc spots a DVD+R DL burned with its capacity raised** (an Xbox 360 XGD3 game). If the differences start exactly where the blank's original layer 0 ended, it says the drive is reading the disc from the wrong place and the disc is probably fine, shown as a warning instead of an error.
 
 ### 🔧 Changed

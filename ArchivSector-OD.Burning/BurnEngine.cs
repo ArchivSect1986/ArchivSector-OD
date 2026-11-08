@@ -52,6 +52,11 @@ namespace ArchivSector_OD.Burning
             public bool Cancelled;
             public bool? Verified;          // null = not verified
             public long MismatchedSectors;
+            // Beta 5: the verify after burning, in detail (own writer): sectors
+            // that read but differ, sectors that can't be read, and where.
+            public long DifferentSectors;
+            public long UnreadableSectors;
+            public List<(long Lba, long Count)> BadRanges = new();
             public List<long> BadSectorLbas = new();   // BIN/CUE verify: which sectors (beta 4)
             public bool VerifiedByImgBurn;   // ImgBurn did the check (its "Exact Match")
             public bool IsoDeleted;          // the ISO went to the Recycle Bin afterwards

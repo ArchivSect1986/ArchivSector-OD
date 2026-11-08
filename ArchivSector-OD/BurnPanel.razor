@@ -199,28 +199,25 @@ else if (state == State.Running)
 }
 else if (state == State.Done && result is not null)
 {
-    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 6px; margin-top: 6px;">
+    @* Beta 5: the result as a summary card: what was burned, on what, how,
+       and what the verify found (with the problem sectors), plus 📋 Copy
+       summary for a forum post or bug report and 📄 Open log. *@
+    <div class="bay-status" style="flex-direction: column; align-items: stretch; gap: 8px; margin-top: 6px;">
         <strong style="color: @ResultColor;">@ResultIcon @result.Message</strong>
-        <span class="bay-subtitle" style="margin: 0;">
-            @Path.GetFileName(isoPath)
-            @if (result.Burned)
+        <div style="display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--bg-panel-alt);">
+            @foreach (var row in SummaryRows())
             {
-                <text> • burned in @Dur(result.BurnTime)</text>
+                <span style="color: var(--text-muted); white-space: nowrap;">@row.Label</span>
+                <span style="color: @row.Colour; overflow-wrap: anywhere;">@row.Value</span>
             }
-            @if (result.Verified is not null)
-            {
-                <text> • checked in @Dur(result.VerifyTime)</text>
-            }
-            @if (health is not null && health.ReportPath is not null)
-            {
-                <text> • health report saved</text>
-            }
-        </span>
+        </div>
         <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             @if (result.Burned)
             {
                 <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="Eject">⏏ Eject disc</button>
             }
+            <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="CopySummary" title="Copies this summary, for a forum post or a bug report">@(summaryCopied ? "✓ Copied" : "📋 Copy summary")</button>
+            <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="LogService.OpenToday" title="Today's log, with every step of this burn">📄 Open log</button>
             <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="OpenIsoFolder">📂 ISO folder</button>
             <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="Reset">Close</button>
         </div>
@@ -412,6 +409,75 @@ else if (state == State.Done && result is not null)
     private static string F(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
 
     private bool HealthBad => health?.Verdict == DiscHealthService.Level.Damaged;
+
+    // ---- The summary card (beta 5) ----
+    // What the burn was, remembered when it starts (the choices can change after).
+    private string resultEngine = "";
+    private double resultSpeed;
+    private bool resultSwitched;      // the own writer couldn't start and another program took over
+    private long resultBytes;
+    private DateTime resultTime;
+    private bool summaryCopied;
+
+    private sealed record SummaryRow(string Label, string Value, string Colour);
+
+    private List<SummaryRow> SummaryRows()
+    {
+        var rows = new List<SummaryRow>();
+        if (result is null) return rows;
+        const string plain = "var(--text-primary)", good = "var(--success)", bad = "var(--danger)", muted = "var(--text-secondary)";
+
+        rows.Add(new("Image", $"{Path.GetFileName(isoPath)}{(resultBytes > 0 ? $" ({SizeText(resultBytes)})" : "")}", plain));
+        rows.Add(new("Disc", $"{BlankMediaType} in {DriveLetter}: {DriveModel}".TrimEnd(), plain));
+
+        string writer = resultSwitched ? $"{resultEngine} couldn't start; another program took over" : resultEngine;
+        rows.Add(new("Writer", writer, plain));
+        string speed = resultSpeed > 0 ? BurnEngine.SpeedText(resultSpeed) : "fastest";
+        if (result.Burned && result.BurnTime.TotalSeconds > 1 && resultBytes > 0 && !resultSwitched)
+            speed += $" chosen · averaged {DiscHealthService.FormatSpeed(resultBytes / result.BurnTime.TotalSeconds, OneX)}";
+        rows.Add(new("Speed", speed, plain));
+        rows.Add(new("Burn", result.Burned ? $"✓ written in {Dur(result.BurnTime)}" : result.Cancelled ? "stopped" : "⚠ not burned", result.Burned ? plain : bad));
+
+        if (result.Verified == true)
+            rows.Add(new("Verify", $"✓ every sector matches the image{(result.VerifiedByImgBurn ? " (checked by ImgBurn)" : "")} · {Dur(result.VerifyTime)}", good));
+        else if (result.Verified == false)
+        {
+            string what = result.DifferentSectors + result.UnreadableSectors > 0
+                ? $"⚠ {result.DifferentSectors:N0} sector(s) differ, {result.UnreadableSectors:N0} can't be read"
+                : $"⚠ {result.MismatchedSectors:N0} sector(s) don't match";
+            rows.Add(new("Verify", what + (result.VerifyTime > TimeSpan.Zero ? $" · {Dur(result.VerifyTime)}" : ""), bad));
+            string where = result.BadRanges.Count > 0
+                ? string.Join(", ", result.BadRanges.Take(8).Select(b => b.Count == 1 ? b.Lba.ToString("N0") : $"{b.Lba:N0}–{b.Lba + b.Count - 1:N0}"))
+                  + (result.BadRanges.Count > 8 ? $" and {result.BadRanges.Count - 8} more ranges (see the log)" : "")
+                : result.BadSectorLbas.Count > 0
+                ? string.Join(", ", result.BadSectorLbas.Take(12).Select(l => l.ToString("N0"))) + (result.BadSectorLbas.Count > 12 ? $" and {result.BadSectorLbas.Count - 12} more (see the log)" : "")
+                : "";
+            if (where.Length > 0) rows.Add(new("Where", "sectors " + where, bad));
+        }
+        else if (result.Burned)
+            rows.Add(new("Verify", result.Cancelled ? "stopped before the end: the disc wasn't fully checked" : "not verified", muted));
+
+        if (health is not null) rows.Add(new("Health", BurnService.HealthLine(health), HealthBad ? bad : plain));
+        return rows;
+    }
+
+    private static string SizeText(long bytes) =>
+        bytes >= 1L << 30 ? $"{bytes / (double)(1L << 30):0.00} GB" : $"{bytes / (double)(1L << 20):0} MB";
+
+    private async Task CopySummary()
+    {
+        if (result is null) return;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"ArchivSector-OD v{UpdateCheckService.CurrentVersionDisplay}: burn of {resultTime:yyyy-MM-dd HH:mm}");
+        sb.AppendLine(result.Message);
+        foreach (var row in SummaryRows()) sb.AppendLine($"{row.Label,-8} {row.Value}");
+        try { System.Windows.Clipboard.SetText(sb.ToString()); } catch { return; }
+        summaryCopied = true;
+        StateHasChanged();
+        await Task.Delay(1500);
+        summaryCopied = false;
+        StateHasChanged();
+    }
     private string ResultColor => HealthBad ? "var(--danger)" : result?.Verified == true ? "var(--success)"
         : result?.Verified == false || result?.Burned != true ? "var(--danger)" : "var(--amber)";
     private string ResultIcon => HealthBad ? "⚠" : result?.Verified == true ? "✅" : result?.Verified == false || result?.Burned != true ? "⚠" : "✓";
@@ -550,12 +616,17 @@ else if (state == State.Done && result is not null)
         bool delete = deleteIso && verify && !NoWindows;
         string engineName = direct ? "ArchivSector-OD's own writer" : imgBurn ? "ImgBurn" : "Windows";
         double speed = speedX;
+        resultEngine = engineName;
+        resultSpeed = speed;
+        resultSwitched = false;
+        resultBytes = isoBytes;
+        summaryCopied = false;
         LogService.Write($"{DriveLetter}:", $"Burn started: {path} -> {BlankMediaType} with {engineName} (speed: {SpeedLog}, verify: {(verify ? "yes" : "no")}, delete ISO after: {(delete ? "yes" : "no")})");
         var reporter = new Progress<BurnEngine.Progress>(p => InvokeAsync(() =>
         {
             progress = p;
             // Our own writer handed over to another program: stopping that one isn't harmless.
-            if (p.Phase.StartsWith("Switching to")) runningDirect = false;
+            if (p.Phase.StartsWith("Switching to")) { runningDirect = false; resultSwitched = true; }
             StateHasChanged();
         }));
         BurnEngine.Result r;
@@ -575,10 +646,11 @@ else if (state == State.Done && result is not null)
         if (healthCheck && r.Burned && r.Verified != false && !cts.IsCancellationRequested)
         {
             health = await BurnService.HealthCheckAfterBurnAsync(DriveLetter, title, DriveModel, reporter, cts.Token);
-            if (health is not null) r.Message += " " + BurnService.HealthLine(health);
+            // Beta 5: shown on its own line of the summary card (not added to the message).
         }
 
         result = r;
+        resultTime = DateTime.Now;
         state = State.Done;
         cts.Dispose();
         cts = null;

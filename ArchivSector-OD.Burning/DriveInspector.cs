@@ -223,7 +223,15 @@ namespace ArchivSector_OD.Burning
                 r = drive.Read(new byte[] { 0x52, 0x01, (byte)(track >> 24), (byte)(track >> 16), (byte)(track >> 8), (byte)track, 0, 0, 48, 0 }, ti, 10);
                 long free = r.Ok ? BE32(ti, 16) : 0;
                 if (free > 0)
+                {
                     disc.Add("Free space", $"{free:N0} sectors = {free * 2048:N0} bytes ({Gb(free * 2048)})");
+                    // Beta 5: a blank Blu-ray reports the same disc type whatever
+                    // its layers (a BD-R DL says "BD-R"), so say how many from
+                    // its size: one layer holds about 25 GB (12,219,392 sectors).
+                    if (blank && family == "BD")
+                        disc.Add("Layers", free > 55_000_000 ? "4 (BDXL, 128 GB)" : free > 26_000_000 ? "3 (BDXL, 100 GB)"
+                            : free > 13_000_000 ? "2 (dual layer, 50 GB)" : "1 (single layer, 25 GB)");
+                }
                 else if (!r.Ok)
                     rep.Notes.Add("Free space (READ TRACK INFORMATION): " + r.Describe());
             }
