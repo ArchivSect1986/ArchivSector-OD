@@ -38,7 +38,7 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 
 ## 🛠️ System Requirements & External Prerequisites
 
-**Windows:** Windows 10 or 11 (64-bit). The app also needs the **Microsoft Edge WebView2 Runtime**, which is already installed on Windows 11 and most up-to-date Windows 10 PCs, and the **.NET 8 Desktop Runtime** unless you're using a self-contained release build.
+**Windows:** Windows 10 or 11 (64-bit). The app also needs the **Microsoft Edge WebView2 Runtime**, which is already installed on Windows 11 and most up-to-date Windows 10 PCs, and the **.NET 10 Desktop Runtime** unless you're using a self-contained release build.
 
 To use **ArchivSector-OD**, you must independently download the following third-party utilities. The application relies entirely on your user-defined local file paths to communicate with these external command-line interfaces:
 

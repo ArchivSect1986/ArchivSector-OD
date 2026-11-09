@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net8.0-windows</TargetFramework>
+		<TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
 		<RootNamespace>ArchivSector_OD</RootNamespace>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
@@ -24,11 +24,13 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="8.0.40" />
+		<!-- v4.0 beta 5: .NET 10 (long-term support until November 2028;
+		     .NET 8's support ended on 10 November 2026). -->
+		<PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="10.0.70" />
 		<!-- Beta 4: Windows' own audio decoders (Media Foundation) for Music
 		     CD mode's FLAC / MP3 / M4A / WMA files. NAudio.Wasapi holds the
 		     Media Foundation reader and resampler; NAudio.Core comes with it. -->
-		<PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+		<PackageReference Include="NAudio.Wasapi" Version="3.3.0" />
 	</ItemGroup>
 
 	<!-- Burning engine (IMAPI2 wrapper). Lives in its own project so a

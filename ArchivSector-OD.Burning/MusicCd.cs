@@ -185,7 +185,7 @@ namespace ArchivSector_OD.Burning
         private static (string Title, string Artist, string Album) Id3v2Tags(FileStream fs)
         {
             var h = new byte[10];
-            fs.Read(h, 0, 10);
+            if (fs.ReadAtLeast(h, 10, throwOnEndOfStream: false) < 10) return ("", "", "");
             int ver = h[3];
             int flags = h[5];
             int size = (h[6] << 21) | (h[7] << 14) | (h[8] << 7) | h[9];

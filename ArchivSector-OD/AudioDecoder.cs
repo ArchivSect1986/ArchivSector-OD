@@ -54,7 +54,7 @@ namespace ArchivSector_OD
                 var buffer = new byte[176_400];   // one second
                 long length = Math.Max(1, reader.Length);
                 int n;
-                while ((n = resampler.Read(buffer, 0, buffer.Length)) > 0)
+                while ((n = resampler.Read(buffer)) > 0)   // NAudio 3: Read takes a Span
                 {
                     ct.ThrowIfCancellationRequested();
                     writer.Write(buffer, 0, n);

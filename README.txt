@@ -8,7 +8,7 @@ help find what doesn't. If you'd rather stay on a finished version, keep
 v3.4.
 
 Version 2.0 was a complete rewrite: the
-app is now a native Windows program built in C# (.NET 8), replacing the old
+app is now a native Windows program built in C# (.NET 10), replacing the old
 Python/Tkinter version. Everything from v1.1 came along — the Blu-ray/4K UHD
 and DVD backup pipelines, per-track Movie-Only MKV extraction, unattended
 batch ripping, and the searchable archival history — with a new look and a
@@ -516,7 +516,7 @@ Already on Beta 1, 2 or 3? Replace that folder with this one.
   The app's interface files (layout, colors, and styling). Required.
 
 • All the other .dll / .json files and language folders (cs, de, fr...)
-  The built-in .NET 8 runtime and its libraries, bundled so you don't
+  The built-in .NET 10 runtime and its libraries, bundled so you don't
   have to install .NET yourself. Required — leave them alone.
 
 Keep everything in the folder together. Moving ArchivSector-OD.exe out
@@ -555,7 +555,7 @@ or copy the whole folder.
 ------------------------------------------------------------
 BUILDING FROM SOURCE (for developers)
 ------------------------------------------------------------
-You'll need Windows 10/11, the .NET 8 SDK, and Visual Studio 2022 (or
+You'll need Windows 10/11, the .NET 10 SDK, and Visual Studio 2026 (or
 later) with the ".NET desktop development" workload. Open the solution
 and build, or publish a release build from a command prompt in the
 project folder:

@@ -34,8 +34,8 @@ If you want to write code for the project, please follow these steps:
 
 ## 🧰 Building From Source
 
-* **Requirements:** Windows 10/11, the **.NET 8 SDK**, and **Visual Studio 2022** (or later) with the **.NET desktop development** workload.
-* **Project type:** WPF app (`net8.0-windows`) hosting a Blazor Hybrid `BlazorWebView`. The main UI lives in `AppShell.razor` and `DriveBayCard.razor`; pop-up windows (Settings, History, ISO Verifier, title/track pickers, metadata search) are native WPF windows.
+* **Requirements:** Windows 10/11, the **.NET 10 SDK**, and **Visual Studio 2026** (or later) with the **.NET desktop development** workload.
+* **Project type:** WPF app (`net10.0-windows10.0.17763.0`, which .NET 10's BlazorWebView needs) hosting a Blazor Hybrid `BlazorWebView`. The main UI lives in `AppShell.razor` and `DriveBayCard.razor`; pop-up windows (Settings, History, ISO Verifier, title/track pickers, metadata search) are native WPF windows.
 * **If a build shows errors that don't make sense:** delete the `bin` and `obj` folders, then **Rebuild Solution**. Stale generated files are a common cause.
 
 ---

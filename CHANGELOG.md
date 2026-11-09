@@ -24,6 +24,7 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 * **Verify disc spots a DVD+R DL burned with its capacity raised** (an Xbox 360 XGD3 game). If the differences start exactly where the blank's original layer 0 ended, it says the drive is reading the disc from the wrong place and the disc is probably fine, shown as a warning instead of an error.
 
 ### 🔧 Changed
+* **Now built on .NET 10** (long-term support until November 2028), as .NET 8's support ended on 10 November 2026. The release zip still includes everything it needs: nothing to install. Music CD mode's audio decoding (NAudio) moved up to version 3.3.
 * **The verify after burning counts bad sectors the same way as Verify disc:** sectors that read but differ and sectors that can't be read are counted separately and exactly, and the problem ranges are logged. (It used to count a whole 32-sector block as bad when one read failed.)
 * **Both verifies stop early on a hopeless disc** (10,000 bad sectors, or 10 minutes re-reading unreadable ones) and say why, instead of grinding on for an hour.
 * **Live log:** a long message wraps at the edge of the box, lined up under itself, so it can be read in full. The pop-out's buttons move to a second row when the window is narrow.

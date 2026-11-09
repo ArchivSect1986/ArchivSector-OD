@@ -6,7 +6,7 @@
 	     Uses IMAPI2, which is built into Windows - nothing extra to install. -->
 
 	<PropertyGroup>
-		<TargetFramework>net8.0-windows</TargetFramework>
+		<TargetFramework>net10.0-windows</TargetFramework>
 		<RootNamespace>ArchivSector_OD.Burning</RootNamespace>
 		<AssemblyName>ArchivSector-OD.Burning</AssemblyName>
 		<Nullable>enable</Nullable>
