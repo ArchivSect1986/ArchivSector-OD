@@ -147,6 +147,8 @@ namespace ArchivSector_OD.Burning
                 }
                 else r.Message += " This disc was burned with its capacity raised: if another drive burned it, verify it there too before giving up on it.";
             }
+            else if (bad > 0 && BdLayerChangeHint(check.FirstBad) is { } layerHint)
+                r.Message += layerHint;
             log?.Invoke($"Verify: {r.Message} ({r.Time:hh\\:mm\\:ss})");
             if (r.BadRanges.Count > 0)
                 log?.Invoke(overburned && Math.Abs(check.FirstBad - blankL0) <= 64
@@ -163,6 +165,17 @@ namespace ArchivSector_OD.Burning
         // or 10 minutes spent re-reading sectors that won't read.
 
         private const long VerifyGiveUpBad = 10_000;
+
+        // Beta 5: a BD-R DL's second layer starts at sector 12,219,392. Some
+        // drives read its first few megabytes poorly (the burning drive
+        // straight after burning especially), while another drive reads the
+        // same disc perfectly: seen in testing, and by ImgBurn users with
+        // Verbatim BD-R DL. Problems that start there get this hint.
+        private const long BdLayer1Start = 12_219_392;
+        internal static string? BdLayerChangeHint(long firstBad) =>
+            firstBad >= BdLayer1Start && firstBad < BdLayer1Start + 65_536
+                ? $" The problems start just after the layer change (sector {BdLayer1Start:N0}): some drives read the start of a BD-R DL's second layer poorly. Check the disc in another drive with Verify disc before giving up on it."
+                : null;
         // Beta 5: 10 minutes (was 3). Each unreadable sector can take the
         // drive several seconds to give up on, and 3 minutes stopped a
         // 42 GB check after only 23 bad sectors, before it could say

@@ -1200,6 +1200,7 @@ namespace ArchivSector_OD.Burning
                 r.Message = check.StoppedEarly is not null
                     ? $"Burned, but the check stopped early at {100.0 * lba / isoSectors:0.0}%: {check.StoppedEarly}."
                     : $"Burned, but {check.Bad:N0} sector(s) on the disc don't match the ISO ({check.Different:N0} differ, {check.Unreadable:N0} can't be read). Don't rely on this disc.";
+                if (BdLayerChangeHint(check.FirstBad) is { } layerHint) r.Message += layerHint;
                 log?.Invoke($"Direct write: {check.Different:N0} sector(s) differ and {check.Unreadable:N0} can't be read" + (check.StoppedEarly is not null ? " (the check stopped early)" : ""));
                 if (check.Ranges.Count > 0) log?.Invoke("Direct write: problem sectors at " + check.RangesText());
             }

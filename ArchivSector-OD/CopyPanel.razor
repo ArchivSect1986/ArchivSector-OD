@@ -41,6 +41,21 @@
                 <button class="shortcut-btn" @onclick="RefreshAsync">🔄 Check again</button>
             </div>
             <span style="font-size: 12px; color: @DiscColor; margin-left: 100px;">@DiscText</span>
+            @if (movieKind is not null)
+            {
+                @* Beta 5: a movie disc. A bought one is copy-protected, so an
+                   exact copy won't play: the drive bay's Full Backup is the way. *@
+                <div style="margin-left: 100px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--amber);">
+                    <span>⚠ @MovieText</span>
+                    @if (!movieProtected)
+                    {
+                        <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; color: var(--text-primary);">
+                            <input type="checkbox" checked="@movieAnyway" @onchange="e => movieAnyway = (bool)(e.Value ?? false)" />
+                            It's a home-made disc with no copy protection: copy it anyway
+                        </label>
+                    }
+                </div>
+            }
 
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                 <strong style="min-width: 90px;">Burn to</strong>
@@ -149,7 +164,30 @@
     private bool summaryOk, summaryStopped;
     private readonly List<string> copyLines = new();
 
-    private bool CanStart => !checking && disc is not null && (disc.Ready || cdCopy) && disc.Problem is null && target.Length > 0 && SpaceProblem is null;
+    private bool CanStart => !checking && disc is not null && (disc.Ready || cdCopy) && disc.Problem is null && target.Length > 0 && SpaceProblem is null
+        && (movieKind is null || (!movieProtected && movieAnyway));
+
+    // Beta 5: a movie disc in the source drive ("DVD-Video" or "Blu-ray movie"), else null.
+    private string? movieKind;
+    private bool movieProtected;   // a Blu-ray with an AACS folder: certainly copy-protected
+    private bool movieAnyway;      // a DVD-Video the user says is home-made
+    private string MovieText => movieProtected
+        ? $"This is a copy-protected {movieKind} disc (AACS). An exact copy won't play. Back it up in drive {source}:'s bay with Full Backup instead, then burn the ISO it makes here (🔥 Burn an ISO)."
+        : $"This looks like a {movieKind} disc. A bought movie is copy-protected, so an exact copy won't play: back it up in drive {source}:'s bay with Full Backup instead, then burn the ISO it makes here.";
+
+    private static (string? Kind, bool Protected) DetectMovie(string letter)
+    {
+        try
+        {
+            string root = letter.TrimEnd(':', '\\') + ":\\";
+            if (Directory.Exists(Path.Combine(root, "BDMV")))
+                return ("Blu-ray movie", Directory.Exists(Path.Combine(root, "AACS")));
+            if (Directory.Exists(Path.Combine(root, "VIDEO_TS")))
+                return ("DVD-Video", false);
+        }
+        catch { /* not readable: not a movie disc we can tell */ }
+        return (null, false);
+    }
 
     // A CD with music tracks (beta 2) or a mode 2 track (beta 4): copied as .bin + .cue instead of an ISO.
     private CdImageReader.Toc? toc;
@@ -286,6 +324,12 @@
                     : t.Tracks[0].StartLba != 0 && t.Tracks[0].IsData ? "This CD's first track is a data track that doesn't start in the usual place, which Copy disc can't copy. ImgBurn or Redumper can."
                     : null;
             }
+        }
+        movieKind = null; movieProtected = false; movieAnyway = false;
+        if (info.Ready && !cdCopy)
+        {
+            var (kind, prot) = await Task.Run(() => DetectMovie(letter));
+            movieKind = kind; movieProtected = prot;
         }
         checking = false;
         if (letter != source) return;

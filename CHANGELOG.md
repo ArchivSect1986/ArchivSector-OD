@@ -19,6 +19,8 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 * **Book type in Drive info** (what a burned DVD tells players it is: a DVD+R burned as a DVD-ROM says so), and the size of layer 0 on a dual-layer disc. The burn log records the book type after a DVD+R burn.
 * **A summary card at the end of every burn:** the image and its size, the disc and drive, the writer, the speed chosen and the average reached, how long it took, and what the verify found: ✓ every sector matches, or how many sectors differ or can't be read and where. **📋 Copy summary** puts it on the clipboard for a forum post or bug report, and **📄 Open log** opens the full log.
 * **Drive info shows how many layers a blank Blu-ray has** (a BD-R DL reports itself as a plain BD-R, so it's worked out from its size): 1, 2 (50 GB), or 3 and 4 for BDXL.
+* **Copy disc recognises a movie disc** (a DVD-Video or Blu-ray movie): a bought one is copy-protected and an exact copy won't play, so it points to the drive bay's Full Backup, then burning the ISO it makes. A Blu-ray with AACS isn't copied; a DVD-Video can still be copied when it's a home-made disc.
+* **A BD-R DL whose verify fails just after the layer change** (sector 12,219,392) gets a hint to check it in another drive first: some drives read the start of the second layer poorly.
 * **Verify disc spots a DVD+R DL burned with its capacity raised** (an Xbox 360 XGD3 game). If the differences start exactly where the blank's original layer 0 ended, it says the drive is reading the disc from the wrong place and the disc is probably fine, shown as a warning instead of an error.
 
 ### 🔧 Changed
