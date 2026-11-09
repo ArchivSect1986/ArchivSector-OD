@@ -57,6 +57,7 @@ namespace ArchivSector_OD.Burning
             public long DifferentSectors;
             public long UnreadableSectors;
             public List<(long Lba, long Count)> BadRanges = new();
+            public string DriveSpeed = "";   // beta 5: the write speed the drive actually set ("6x", "4.1x to 8x")
             public List<long> BadSectorLbas = new();   // BIN/CUE verify: which sectors (beta 4)
             public bool VerifiedByImgBurn;   // ImgBurn did the check (its "Exact Match")
             public bool IsoDeleted;          // the ISO went to the Recycle Bin afterwards

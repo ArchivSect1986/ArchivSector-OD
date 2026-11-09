@@ -436,9 +436,11 @@ else if (state == State.Done && result is not null)
 
         string writer = resultSwitched ? $"{resultEngine} couldn't start; another program took over" : resultEngine;
         rows.Add(new("Writer", writer, plain));
-        string speed = resultSpeed > 0 ? BurnEngine.SpeedText(resultSpeed) : "fastest";
+        string speed = (resultSpeed > 0 ? BurnEngine.SpeedText(resultSpeed) : "fastest") + " chosen";
+        if (result.DriveSpeed.Length > 0 && !resultSwitched)
+            speed += $" · drive set {result.DriveSpeed}";
         if (result.Burned && result.BurnTime.TotalSeconds > 1 && resultBytes > 0 && !resultSwitched)
-            speed += $" chosen · averaged {DiscHealthService.FormatSpeed(resultBytes / result.BurnTime.TotalSeconds, resultOneX)}";
+            speed += $" · averaged {DiscHealthService.FormatSpeed(resultBytes / result.BurnTime.TotalSeconds, resultOneX)}";
         rows.Add(new("Speed", speed, plain));
         rows.Add(new("Burn", result.Burned ? $"✓ written in {Dur(result.BurnTime)}" : result.Cancelled ? "stopped" : "⚠ not burned", result.Burned ? plain : bad));
 

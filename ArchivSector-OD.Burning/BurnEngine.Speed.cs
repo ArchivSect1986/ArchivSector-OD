@@ -17,7 +17,11 @@ namespace ArchivSector_OD.Burning
         {
             public double X;            // 4 = 4x
             public int KBs;             // kilobytes (1000 bytes) per second
-            public string Label => SpeedText(X);
+            // Beta 5: a CAV speed: the drive only reaches it at the outer
+            // edge and is slower nearer the centre (Verbatim BD-R DL in a
+            // BW-16D1HT: "8x" is CAV, so it averages less than 8x).
+            public bool Cav;
+            public string Label => Cav ? "up to " + SpeedText(X) : SpeedText(X);
         }
 
         // 1x in kilobytes (1000 bytes) per second, as drives count it.
@@ -58,14 +62,16 @@ namespace ArchivSector_OD.Burning
                 rep = drive.Read(new byte[] { 0xAC, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0x03, 0 }, perf, 10);
                 if (!rep.Ok) return list;
                 long len = Math.Min(BE32(perf, 0) + 4, perf.Length);
-                var seen = new HashSet<double>();
                 for (int off = 8; off + 16 <= len; off += 16)
                 {
                     long kbs = BE32(perf, off + 12);
                     if (kbs <= 0) continue;
                     double x = Math.Round(kbs / oneX, 1);
-                    if (x <= 0 || !seen.Add(x)) continue;
-                    list.Add(new WriteSpeed { X = x, KBs = (int)kbs });
+                    if (x <= 0) continue;
+                    bool cav = ((perf[off] >> 3) & 3) == 1;
+                    var same = list.FirstOrDefault(sp => Math.Abs(sp.X - x) < 0.05);
+                    if (same is null) list.Add(new WriteSpeed { X = x, KBs = (int)kbs, Cav = cav });
+                    else if (!cav) same.Cav = false;   // offered steady too: no "up to"
                 }
                 list.Sort((a, b) => b.X.CompareTo(a.X));
             }
@@ -125,6 +131,34 @@ namespace ArchivSector_OD.Burning
             log?.Invoke(ok
                 ? $"Direct write: asked for {SpeedText(speedX)} ({kbs:N0} KB/s); the drive may round it to a speed it supports"
                 : $"Direct write: the drive didn't accept the {SpeedText(speedX)} speed ({rep.Describe()}); it writes at its own speed");
+        }
+
+        // Beta 5: the speed the drive has actually set for writing this disc,
+        // as ImgBurn shows it ("Effective: 6x"): GET PERFORMANCE, nominal
+        // write performance. "6x", or "4.1x to 8x" when the speed rises
+        // across the disc (CAV). Null if the drive doesn't say.
+        internal static string? ReadWriteSpeed(ScsiDrive drive, int profile)
+        {
+            try
+            {
+                var buf = new byte[8 + 16 * 4];
+                var rep = drive.Read(new byte[] { 0xAC, 0x04, 0, 0, 0, 0, 0, 0, 0, 4, 0x00, 0 }, buf, 10);
+                if (!rep.Ok) return null;
+                long len = Math.Min(BE32(buf, 0) + 4, buf.Length);
+                if (len < 8 + 16) return null;
+                double oneX = OneXKBs(FamilyOfProfile(profile));
+                long first = BE32(buf, 8 + 4), last = first;
+                for (int off = 8; off + 16 <= len; off += 16)
+                {
+                    long a = BE32(buf, off + 4), b = BE32(buf, off + 12);
+                    if (a > 0) first = Math.Min(first, a);
+                    last = Math.Max(last, b);
+                }
+                if (first <= 0 && last <= 0) return null;
+                double x1 = Math.Round(first / oneX, 1), x2 = Math.Round(last / oneX, 1);
+                return Math.Abs(x2 - x1) < 0.2 ? SpeedText(x2) : $"{SpeedText(x1)} to {SpeedText(x2)}";
+            }
+            catch { return null; }
         }
 
         // After writing at a chosen speed: back to the drive's own (fastest)

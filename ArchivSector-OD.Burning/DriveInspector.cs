@@ -376,13 +376,24 @@ namespace ArchivSector_OD.Burning
                     long len = Math.Min(BE32(perf, 0) + 4, perf.Length);
                     double oneX = family switch { "CD" => 176.4, "BD" => 4495.5, _ => 1385.0 };
                     var speeds = new SortedSet<double>();
+                    var details = new List<string>();
                     for (int off = 8; off + 16 <= len; off += 16)
                     {
                         long kbs = BE32(perf, off + 12);
                         if (kbs > 0) speeds.Add(Math.Round(kbs / oneX, 1));
+                        // Beta 5: each entry as the drive gives it: CAV (rising
+                        // across the disc, "up to") or not, and how far it applies.
+                        if (kbs > 0)
+                        {
+                            int wrc = (perf[off] >> 3) & 3;
+                            long end = BE32(perf, off + 4);
+                            details.Add($"{Math.Round(kbs / oneX, 1):0.#}x {(wrc == 1 ? "CAV (rises to it at the outer edge)" : "steady")}");
+                        }
                     }
                     if (speeds.Count > 0)
                         disc.Add("Write speeds", string.Join(", ", speeds.Reverse().Select(x => $"{x:0.#}x")));
+                    if (details.Count > 0)
+                        disc.Add("Speed details", string.Join("; ", details));
                 }
                 else rep.Notes.Add("Write speeds (GET PERFORMANCE): " + r.Describe());
             }

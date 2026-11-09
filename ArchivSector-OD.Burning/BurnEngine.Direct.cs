@@ -189,6 +189,13 @@ namespace ArchivSector_OD.Burning
                 // the speed asked for (0 = the fastest the drive offers).
                 FullDriveSpeed(drive);
                 SetDirectWriteSpeed(drive, profile, speedX, startLba + isoSectors + padSectors - 1, log);
+                // Beta 5: what the drive actually set (it may round or ignore the request).
+                var effective = ReadWriteSpeed(drive, profile);
+                if (effective is not null)
+                {
+                    r.DriveSpeed = effective;
+                    log?.Invoke($"Direct write: the drive set its write speed to {effective}" + (speedX > 0 ? $" (asked for {SpeedText(speedX)})" : " (fastest asked for)"));
+                }
 
                 // Beta 5: calibrate the laser before the first write, as
                 // ImgBurn does ("Performing OPC"). Left to itself, a drive
