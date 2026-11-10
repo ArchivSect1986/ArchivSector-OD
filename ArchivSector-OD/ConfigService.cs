@@ -92,6 +92,7 @@ namespace ArchivSector_OD
         // like everything else here, but lives in AppShell's header,
         // matching where the Python app puts its own equivalent.
         public bool UnattendedAutoStart { get; set; } = false;
+        public bool DriveBayFaceplate { get; set; } = false;   // beta 6 experiment: the D faceplate row layout for the drive bays (false = classic cards)
 
         public Dictionary<string, string> BayLabels { get; set; } = new();
 

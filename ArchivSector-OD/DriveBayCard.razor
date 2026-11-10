@@ -72,7 +72,55 @@
 @using System.IO
 @using System.Diagnostics
 
-<div class="bay-card">
+<div class="bay-card @(Faceplate ? "faceplate" : "")">
+    @if (Faceplate)
+    {
+        <div class="fp-head">
+            <div class="fp-id">
+                <div class="fp-letter">@DriveLetter:</div>
+                @if (!string.IsNullOrEmpty(DriveModel))
+                {
+                    <div class="fp-model">@DriveModel</div>
+                }
+                <div class="fp-sub">@(customLabel ?? "Optical drive")</div>
+            </div>
+            <div class="fp-slot">
+                <div class="fp-rail"></div>
+                <div class="fp-status"><span class="fp-dot @(isRunning ? "run" : MediaPresent ? "on" : "")"></span>@StatusText</div>
+            </div>
+            <div class="bay-art-tile">
+                @if (coverDataUri is not null)
+                {
+                    <img src="@coverDataUri" alt="Cover art" />
+                }
+                else if (Category == DiscCategory.Game)
+                {
+                    <span class="bay-art-icon">🎮</span><span>Game box art</span><span style="opacity: 0.7;">RAWG</span>
+                }
+                else if (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd)
+                {
+                    <span class="bay-art-icon">🎬</span><span>Movie poster</span><span style="opacity: 0.7;">TMDB</span>
+                }
+                else
+                {
+                    <span class="bay-art-icon">💿</span><span>@(MediaPresent ? "Disc" : "No disc")</span>
+                }
+            </div>
+            <div class="fp-term">
+                @if (!MediaPresent)
+                {
+                    <div class="t-empty">NO DISC · INSERT ONE TO START</div>
+                }
+                else
+                {
+                    <div class="t-title @(isRunning ? "run" : "")">@(string.IsNullOrWhiteSpace(VolumeTitle) ? "DISC DETECTED" : VolumeTitle)</div>
+                    <div class="t-info">@FormatLabel@(!string.IsNullOrEmpty(CapacityLabel) ? " · " + CapacityLabel : "")</div>
+                }
+            </div>
+        </div>
+    }
+    @if (!Faceplate)
+    {
     @if (isEditingLabel)
     {
         <input class="label-input" @bind="labelDraft" @bind:event="oninput"
@@ -185,6 +233,7 @@
         {
             <p class="bay-subtitle" style="margin: 0 0 8px; max-width: 100%;">@cachedArt.Metadata.Detail</p>
         }
+    }
     }
 
     @if (CanRawDump || lastGameFolder is not null)
@@ -675,6 +724,7 @@
 
     // v4.0 beta 2: the Drive Bays tab is showing (tray watching only runs then).
     [Parameter] public bool TabVisible { get; set; } = true;
+    [Parameter] public bool Faceplate { get; set; }   // beta 6: the D faceplate row layout
 
     // Tray watching (v4.0 beta 2): every couple of seconds while the Drive
     // Bays tab is showing and the drive isn't busy, the drive is asked

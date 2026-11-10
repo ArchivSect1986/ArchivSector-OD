@@ -987,6 +987,90 @@ body {
     min-width: 160px;
 }
 
+/* Drive Bay faceplate row layout (beta 6, opt-in via the header toggle). */
+.bays-grid.faceplate {
+    grid-template-columns: 1fr;
+}
+
+.bay-card.faceplate .fp-head {
+    display: grid;
+    grid-template-columns: 180px 160px 92px minmax(0, 1fr);
+    gap: 18px;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.fp-id .fp-letter {
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    line-height: 1;
+    color: var(--text-primary);
+}
+
+.fp-id .fp-model {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.fp-id .fp-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.fp-slot {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.fp-rail {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--bg-panel-alt);
+    border: 1px solid var(--border);
+}
+
+.fp-status {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.fp-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+    .fp-dot.on { background: var(--accent); }
+    .fp-dot.run { background: var(--success); }
+
+.fp-term {
+    background: #05080f;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    min-height: 88px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+    .fp-term .t-title { font-size: 18px; letter-spacing: 1px; color: var(--text-primary); }
+    .fp-term .t-title.run { color: var(--accent); }
+    .fp-term .t-info { margin-top: 8px; font-size: 12px; color: var(--text-muted); letter-spacing: 1px; }
+    .fp-term .t-empty { font-size: 14px; color: var(--text-muted); letter-spacing: 1px; }
+
+@media (max-width: 900px) {
+    .bay-card.faceplate .fp-head { grid-template-columns: 1fr; }
+}
+
 /* ============================================================
    Modals (mode-selection popup, History, Settings)
    ============================================================ */

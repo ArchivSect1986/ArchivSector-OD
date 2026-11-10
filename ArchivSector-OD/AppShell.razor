@@ -63,6 +63,10 @@
                         title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
                     <span class="dot"></span>Unattended @(config.UnattendedAutoStart ? "on" : "off")
                 </button>
+                <button class="unattended-pill @(config.DriveBayFaceplate ? "on" : "")" @onclick="ToggleFaceplate"
+                        title="Beta: shows each drive bay as a wide faceplate row with cover art, instead of the classic cards.">
+                    <span class="dot"></span>Faceplate @(config.DriveBayFaceplate ? "on" : "off")
+                </button>
             }
             <button class="icon-btn" @onclick="ShowHistory" title="History" aria-label="History">📜</button>
             <button class="icon-btn" @onclick="OpenIsoVerifier" title="ISO Verifier" aria-label="ISO Verifier">🔍</button>
@@ -128,7 +132,7 @@
     <div style="display: @(activeTab == "bays" ? "block" : "none");">
     @if (driveStates.Count == 0)
     {
-        <div class="bays-grid">
+        <div class="bays-grid @(config.DriveBayFaceplate ? "faceplate" : "")">
             <p style="color: var(--text-muted); padding: 20px;">
                 No optical drives detected on this machine.
             </p>
@@ -136,7 +140,7 @@
     }
     else
     {
-        <div class="bays-grid">
+        <div class="bays-grid @(config.DriveBayFaceplate ? "faceplate" : "")">
             @foreach (var letter in driveStates.Keys.OrderBy(l => l))
             {
                 var st = driveStates[letter];
@@ -156,6 +160,7 @@
                               BlankFreeBytes="@st.BlankFreeBytes" BlankTotalBytes="@st.BlankTotalBytes"
                               DriveModel="@(hw?.Caption ?? "")"
                               DriveFirmware="@(hw?.Firmware ?? "")"
+                              Faceplate="@config.DriveBayFaceplate"
                               TabVisible="@(activeTab == "bays")" />
             }
         </div>
@@ -387,6 +392,14 @@
     {
         var fresh = ConfigService.Load();
         fresh.UnattendedAutoStart = !config.UnattendedAutoStart;
+        ConfigService.Save(fresh);
+        config = fresh;
+    }
+
+    private void ToggleFaceplate()
+    {
+        var fresh = ConfigService.Load();
+        fresh.DriveBayFaceplate = !config.DriveBayFaceplate;
         ConfigService.Save(fresh);
         config = fresh;
     }
