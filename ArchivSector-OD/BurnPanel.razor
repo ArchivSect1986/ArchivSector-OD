@@ -50,7 +50,7 @@ else if (state == State.Confirm && isoPath is not null)
                 {
                     <span style="color: var(--amber);">💡 @hint</span>
                 }
-                <span>An XGD3 game needs @BurnEngine.Xgd3Sectors.ToString("N0") sectors, and this DVD+R DL takes @(raisedSectors > 0 ? raisedSectors.ToString("N0") : "fewer"). Raise its capacity with the <strong>BurnerMAX Payload Tool</strong>: pick <strong>@DriveLetter:</strong> in its list and click <strong>BurnerMAX</strong> (tick <strong>Auto</strong> there to have it do every blank you put in). Then click Check again.</span>
+                <span>An XGD3 game needs @BurnEngine.Xgd3Sectors.ToString("N0") sectors, and this DVD+R DL takes @(raisedSectors > 0 ? raisedSectors.ToString("N0") : "fewer"). Raise its capacity with the <strong>BurnerMAX Payload Tool</strong>: pick <strong>@DriveLetter:</strong> in its list and click <strong>BurnerMAX</strong> (tick <strong>Auto</strong> there to have it do every blank you put in). When you close BurnerMAX, the capacity is checked here on its own.</span>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <button class="shortcut-btn" @onclick="OpenBurnerMax">🛠 Open BurnerMAX</button>
                     <button class="shortcut-btn" @onclick="CheckCapacity" disabled="@checkingCapacity">@(checkingCapacity ? "⏳ Checking…" : "🔄 Check again")</button>
@@ -343,6 +343,7 @@ else if (state == State.Done && result is not null)
     private bool checkingCapacity;
     private bool xboxBlank;              // an Xbox 360 image whose security data is blank: not burned
     private string? burnerMaxNote;
+    private bool disposed;
     private bool NeedsBurnerMax => xboxKind == "XGD3" && BlankMediaType == "DVD+R DL" && raisedSectors < BurnEngine.Xgd3Sectors;
 
     private async Task CheckCapacity()
@@ -381,8 +382,27 @@ else if (state == State.Done && result is not null)
                 cfg.BurnerMaxPath = exe;
                 ConfigService.Save(cfg);
             }
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe) });
-            burnerMaxNote = $"BurnerMAX is open: pick {DriveLetter}: and click BurnerMAX, then Check again here.";
+            // Beta 6: keep the handle so the capacity can be read again on
+            // its own when BurnerMAX closes, instead of a trip back to
+            // "Check again". The button stays as a manual fallback.
+            var proc = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe) },
+                EnableRaisingEvents = true,
+            };
+            proc.Exited += (_, _) =>
+            {
+                try { proc.Dispose(); } catch { }
+                _ = InvokeAsync(async () =>
+                {
+                    // The component may be gone, or the disc/drive changed: only
+                    // re-check when this blank still needs BurnerMAX.
+                    if (disposed || !NeedsBurnerMax) return;
+                    await CheckCapacity();
+                });
+            };
+            proc.Start();
+            burnerMaxNote = $"BurnerMAX is open: pick {DriveLetter}: and click BurnerMAX. When you close BurnerMAX, the capacity is checked here on its own.";
             LogService.Write($"{DriveLetter}:", "Burn: opened BurnerMAX for an XGD3 game: " + exe);
         }
         catch (Exception ex) { burnerMaxNote = "BurnerMAX couldn't be opened: " + ex.Message; }
@@ -712,5 +732,5 @@ else if (state == State.Done && result is not null)
 
     // Never cancel a burn just because the screen was redrawn; the burn
     // carries on in the background and the updater won't interrupt it.
-    public void Dispose() { }
+    public void Dispose() { disposed = true; }
 }
