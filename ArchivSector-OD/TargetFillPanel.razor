@@ -129,6 +129,7 @@
                            @onchange="OnFolderTyped" disabled="@busy" />
                     <button class="tf2-chip" @onclick="BrowseFolder" disabled="@busy">📁 Browse…</button>
                     <button class="tf2-chip" @onclick="OpenFolder" disabled="@(!HasFolder)">📂 Open</button>
+                    <button class="tf2-chip" @onclick="ClearFolder" disabled="@(busy || !HasFolder)" title="Clear the chosen folder (nothing on disc is changed)">✕ Clear</button>
                 </div>
                 @if (scanning)
                 {
@@ -277,7 +278,7 @@
                 <button class="tf2-key primary" @onclick="RunIso" disabled="@(busy || !HasFolder || Medium.IsUsb)"
                         title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds ready-to-burn .iso images; your files aren't changed")">💿 Generate .ISO Image</button>
                 <button class="tf2-key" @onclick="RunFiller" disabled="@(busy || !HasFolder)" title="Adds filler files to this folder so it burns to exactly 100%">🧩 Generate Split Filler</button>
-                <button class="tf2-key" @onclick="RunClean" disabled="@(busy || !HasFolder)">🧹 Clean Fillers</button>
+                <button class="tf2-key danger" @onclick="RunClean" disabled="@(busy || !HasFolder)">🧹 Clean Fillers</button>
                 <button class="tf2-key" @onclick="RunImgBurn" disabled="@(busy || !HasFolder || Medium.IsUsb)"
                         title="Opens ImgBurn in Build mode with this folder, UDF 2.60 and the volume label">🔥 ImgBurn</button>
             </div>
@@ -1582,6 +1583,10 @@ else
     }
 
     private async Task OnFolderTyped(ChangeEventArgs e) => await SetFolder(e.Value?.ToString() ?? "");
+
+    // Resets the folder pick (e.g. the wrong folder was chosen). Only the
+    // selection is cleared; no files are touched.
+    private async Task ClearFolder() => await SetFolder("");
 
     private async Task BrowseFolder()
     {

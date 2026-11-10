@@ -1396,8 +1396,10 @@ body {
 }
 .tf2-key:hover:not(:disabled) { border-color: var(--text-muted); }
 .tf2-key:active:not(:disabled) { box-shadow: none; transform: translateY(1px); }
-.tf2-key.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
-.tf2-key.primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--accent); }
+.tf2-key.primary { background: var(--success); color: var(--on-success); border-color: var(--success); font-weight: 600; }
+.tf2-key.primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--success); }
+.tf2-key.danger { background: var(--danger); color: var(--on-danger); border-color: var(--danger); font-weight: 600; }
+.tf2-key.danger:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--danger); }
 
 /* Fold-out sections */
 .tf2-fold { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); }
