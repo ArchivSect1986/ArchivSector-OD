@@ -148,13 +148,20 @@
 
     @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game))
     {
-        <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 4px; flex-wrap: wrap;">
-            @if (coverDataUri is not null)
-            {
-                <img src="@coverDataUri" alt="Cover art"
-                     style="width: 50px; height: 70px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); flex: 0 0 auto;" />
-            }
-            <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div class="bay-art">
+            <div class="bay-art-tile">
+                @if (coverDataUri is not null)
+                {
+                    <img src="@coverDataUri" alt="Cover art" />
+                }
+                else
+                {
+                    <span class="bay-art-icon">@(Category == DiscCategory.Game ? "🎮" : "🎬")</span>
+                    <span>@(Category == DiscCategory.Game ? "Game box art" : "Movie poster")</span>
+                    <span style="opacity: 0.7;">@(Category == DiscCategory.Game ? "RAWG" : "TMDB")</span>
+                }
+            </div>
+            <div class="bay-art-info">
                 <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">
                     🎨 Fetch Metadata &amp; Artwork
                 </button>
