@@ -34,11 +34,13 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 * **Tidier drive names** on the drive cards and in the burn screen.
 * **Only one Settings, History or ISO Verifier window** opens at a time: clicking again brings the open one to the front.
 * **Saving Settings no longer overwrites** what the Burn tab changed while Settings was open.
+* **BurnerMAX feels built in for XGD3 games:** after you close the BurnerMAX Payload Tool, ArchivSector-OD reads the DVD+R DL's capacity again on its own, so the burn carries straight on without a trip back to **Check again** (BurnerMAX stays your own separate copy; the app only watches for it to close).
 
 ### 🐛 Fixed
 * **Copy in the Live log** doubled the line breaks of a report (Drive info pasted with a blank line between every row).
 * **History showed drive names with the drive's padding and revision letter** ("ASUS DRW-24F1ST   d"). New rips are recorded with the tidy name ("ASUS DRW-24F1ST"), and older rows are shown that way too (the history file itself isn't changed).
 * **The burn summary card** showed no disc type and a wrong average speed ("156.3x") once the disc had been burned.
+* **A white flash at start-up on .NET 10.** The new .NET 10 window could show one white frame before the dark screen was drawn; the window now stays hidden until its first picture is ready, so it opens straight into its theme.
 
 ### ✅ Tested
 * **BD-R DL (50 GB) is burned by the own writer:** a 42 GB Blu-ray backup on a Verbatim BD-R DL at 6x, and the disc matched the ISO sector for sector.
