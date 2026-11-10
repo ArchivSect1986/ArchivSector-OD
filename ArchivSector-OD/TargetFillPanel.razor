@@ -19,6 +19,444 @@
 @using ArchivSector_OD.Burning
 @implements IDisposable
 
+@* v4.0 beta 6 experiment: the new look (design D). Same choices, same
+   jobs, same code underneath: only the screen is laid out differently.
+   The choices on the left; on the right a capacity meter that shows the
+   result at once, the action keys, and Expert options, Batch and Pad
+   existing ISOs as fold-out sections. Styled by the .tf2 rules in
+   app.css with the theme's own colours. "Classic look" switches back
+   (remembered in targetfill.json). *@
+@if (newLook)
+{
+<div class="tf2">
+    <div class="tf2-head">
+        <h2>TargetFill</h2>
+        <span class="tf2-sub">Fill a disc to exactly 100%, with your data in the safe middle tracks</span>
+        <span style="flex: 1;"></span>
+        <button class="tf2-chip" @onclick="() => showGuide = true">❔ Instructions</button>
+        <button class="tf2-chip" @onclick="() => SetNewLook(false)" title="Back to the TargetFill screen as it was">↩ Classic look</button>
+    </div>
+
+    <div class="tf2-cols">
+        @* ---- Left: the choices ---- *@
+        <section class="tf2-panel tf2-choices">
+
+            <div class="tf2-group">
+                <span class="tf2-label">Fill to</span>
+                <div class="tf2-chips">
+                    @foreach (var p in TargetFillService.OpticalPresets)
+                    {
+                        var label = p.Label;
+                        <button class="tf2-chip @(mediaKey == label ? "on" : "")" @onclick="() => SelectMedia(label)" disabled="@busy">@(label.Replace("Blu-ray ", ""))</button>
+                    }
+                    <button class="tf2-chip @(mediaKey == CustomKey ? "on" : "")" @onclick="() => SelectMedia(CustomKey)" disabled="@busy">Custom (@F(customOpticalGb) GB)</button>
+                </div>
+                <div class="tf2-chips">
+                    <button class="tf2-chip @(Medium.IsUsb ? "on" : "")" @onclick="() => showUsb = !showUsb" disabled="@busy">🔌 @(Medium.IsUsb ? Medium.Label : "USB drive") @(showUsb ? "▴" : "▾")</button>
+                    @if (mediaKey == DiscKey && discBytes > 0)
+                    {
+                        <button class="tf2-chip on" disabled="@busy" @onclick="() => showDiscPicker = !showDiscPicker">💿 @DiscPreset.Label (@TargetFillService.FormatBytes(discBytes))</button>
+                    }
+                    else
+                    {
+                        <button class="tf2-chip" disabled="@busy" @onclick="OpenDiscPicker">💿 Use the blank disc in a drive…</button>
+                    }
+                </div>
+                @if (showUsb)
+                {
+                    <div class="tf2-chips">
+                        @foreach (var p in TargetFillService.UsbPresets)
+                        {
+                            var label = p.Label;
+                            <button class="tf2-chip small @(mediaKey == label ? "on" : "")" @onclick="() => SelectMedia(label)" disabled="@busy">@label</button>
+                        }
+                        <button class="tf2-chip small @(mediaKey == CustomUsbKey ? "on" : "")" @onclick="() => SelectMedia(CustomUsbKey)" disabled="@busy">Custom USB (@F(customUsbGb) GB)</button>
+                    </div>
+                }
+                @if (mediaKey == CustomKey || mediaKey == CustomUsbKey)
+                {
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                        <label for="tf2-custom" class="tf2-hint">Custom size in GB (1 GB = 1,000,000,000 bytes):</label>
+                        <input id="tf2-custom" type="number" min="0.01" step="0.01" class="tf2-input" style="width: 120px;"
+                               value="@F(mediaKey == CustomKey ? customOpticalGb : customUsbGb)" @onchange="OnCustomSize" disabled="@busy" />
+                    </div>
+                }
+                @if (showDiscPicker)
+                {
+                    <div class="tf2-box">
+                        <span class="tf2-hint">Put a blank disc in a writer, and TargetFill fills to that exact disc instead of a standard size.</span>
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                            <select value="@discDrive" @onchange="OnDiscDriveChanged" disabled="@measuring">
+                                @if (discDrives.Count == 0)
+                                {
+                                    <option value="">No disc drives found</option>
+                                }
+                                @foreach (var d in discDrives)
+                                {
+                                    <option value="@d">Drive @d:</option>
+                                }
+                            </select>
+                            <button class="tf2-chip" @onclick="MeasureDiscAsync" disabled="@(measuring || discDrive.Length == 0)">@(measuring ? "⏳ Reading the disc…" : "📏 Read disc size")</button>
+                        </div>
+                        @if (blank is not null)
+                        {
+                            <span style="font-size: 13px;">Blank <strong>@blank.MediaType</strong> in @measuredDrive:</span>
+                            <label class="tf2-check">
+                                <input type="radio" name="tf2-disc-size" checked="@(!discWindows)" @onchange="() => SetDiscSize(false)" />
+                                Whole disc: @BlankWhole.ToString("N0") bytes (ArchivSector-OD's own writer, ImgBurn)
+                            </label>
+                            @if (blank.FreeBytes < BlankWhole)
+                            {
+                                <label class="tf2-check">
+                                    <input type="radio" name="tf2-disc-size" checked="@discWindows" @onchange="() => SetDiscSize(true)" />
+                                    What Windows can burn: @blank.FreeBytes.ToString("N0") bytes
+                                </label>
+                            }
+                            <button class="tf2-chip on" style="align-self: flex-start;" @onclick="UseMeasuredDisc">✔ Fill to this disc</button>
+                        }
+                        else if (discMessage is not null)
+                        {
+                            <span class="tf2-hint" style="color: var(--amber);">⚠ @discMessage</span>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="tf2-group">
+                <span class="tf2-label">Your folder</span>
+                <div style="display: flex; gap: 8px;">
+                    <input class="tf2-input" style="flex: 1; min-width: 0;" value="@folder" placeholder="Choose a folder, or paste its path"
+                           @onchange="OnFolderTyped" disabled="@busy" />
+                    <button class="tf2-chip" @onclick="BrowseFolder" disabled="@busy">📁 Browse…</button>
+                    <button class="tf2-chip" @onclick="OpenFolder" disabled="@(!HasFolder)">📂 Open</button>
+                </div>
+                @if (scanning)
+                {
+                    <span class="tf2-hint">Scanning folder…</span>
+                }
+                else if (HasFolder && stats is not null)
+                {
+                    <span class="tf2-hint">@stats.Count.ToString("N0") file(s), @TargetFillService.FormatBytes(stats.Bytes) of your data</span>
+                }
+            </div>
+
+            @if (!Medium.IsUsb)
+            {
+                <div class="tf2-group">
+                    <span class="tf2-label">Where your data goes</span>
+                    <div class="tf2-chips three">
+                        <button class="tf2-chip tall @(placement == TargetFillService.Placement.DualSplit ? "on" : "")" @onclick="() => SetPlacement(TargetFillService.Placement.DualSplit)" disabled="@busy">Dual-Part Split<span>in the middle</span></button>
+                        <button class="tf2-chip tall @(placement == TargetFillService.Placement.EndOnly ? "on" : "")" @onclick="() => SetPlacement(TargetFillService.Placement.EndOnly)" disabled="@busy">Single: End<span>filler at the end</span></button>
+                        <button class="tf2-chip tall @(placement == TargetFillService.Placement.StartOnly ? "on" : "")" @onclick="() => SetPlacement(TargetFillService.Placement.StartOnly)" disabled="@busy">Single: Start<span>filler at the start</span></button>
+                    </div>
+                    @if (placement == TargetFillService.Placement.DualSplit)
+                    {
+                        <div class="tf2-chips five">
+                            @foreach (var preset in SplitPresets)
+                            {
+                                var v = preset.Value;
+                                <button class="tf2-chip tall @(splitPercent == v ? "on" : "")" @onclick="() => SetSplit(v)" disabled="@busy">@preset.Ratio<span>@preset.Name</span></button>
+                            }
+                        </div>
+                        <input type="range" min="1" max="99" step="1" value="@splitPercent" aria-label="Split balance, beginning against end"
+                               @oninput="OnSplitSlider" @onchange="_ => Persist()" disabled="@busy" class="tf2-range" />
+                        <div style="display: flex; justify-content: space-between; gap: 8px;" class="tf2-hint">
+                            <span>Beginning: @TargetFillService.FormatBytes(Split.Head) (@splitPercent%)</span>
+                            <span>End: @TargetFillService.FormatBytes(Split.Tail) (@(100 - splitPercent)%)</span>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="tf2-group">
+                    <span class="tf2-label">How the filler is written</span>
+                    <div class="tf2-chips">
+                        <button class="tf2-chip tall @(!physical ? "on" : "")" @onclick="() => SetPhysical(false)" disabled="@busy">Virtual<span>sparse, instant</span></button>
+                        <button class="tf2-chip tall @(physical ? "on" : "")" @onclick="() => SetPhysical(true)" disabled="@busy">Physical<span>real blocks, slow</span></button>
+                    </div>
+                </div>
+            }
+
+            <div class="tf2-group">
+                <label for="tf2-vol" class="tf2-label">Volume label (the disc's name)</label>
+                <input id="tf2-vol" class="tf2-input" value="@volumeLabel"
+                       placeholder="@(HasFolder ? new DirectoryInfo(folder).Name : "Folder name")"
+                       @oninput="e => volumeLabel = e.Value?.ToString() ?? string.Empty" @onchange="_ => Persist()" disabled="@busy" />
+            </div>
+
+            <div class="tf2-group">
+                <span class="tf2-label">On the disc too</span>
+                <label class="tf2-check">
+                    <input type="checkbox" checked="@manifest" @onchange="e => SetBool(ref manifest, e)" disabled="@busy" />
+                    <span><strong>SHA-256 manifest</strong> <span class="tf2-hint">a checksum of every file</span></span>
+                </label>
+                <label class="tf2-check">
+                    <input type="checkbox" checked="@verifier" @onchange="e => SetBool(ref verifier, e)" disabled="@busy" />
+                    <span><strong>On-disc verifier</strong> <span class="tf2-hint">re-checks the disc years from now</span></span>
+                </label>
+            </div>
+        </section>
+
+        @* ---- Right: the meter, the keys, the fold-outs ---- *@
+        <section class="tf2-right">
+            <div class="tf2-panel" style="display: flex; flex-direction: column; gap: 14px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="tf2-light @(busy ? "busy" : !HasFolder ? "" : Discs > 1 ? "warn" : "ok")"></span>
+                    <span class="tf2-hint">@StatusLine</span>
+                    <span style="flex: 1;"></span>
+                    @if (!Medium.IsUsb)
+                    {
+                        <button class="tf2-chip small @(showRadial ? "on" : "")" @onclick="() => showRadial = !showRadial">💿 Disc preview</button>
+                    }
+                </div>
+
+                <div class="tf2-display">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px;">
+                        <span class="tf2-readout">@Medium.Label.ToUpperInvariant() · @TargetFillService.FormatBytes(Medium.Bytes)</span>
+                        <span class="tf2-big">@(HasFolder ? "100%" : "—")</span>
+                    </div>
+                    @if (showRadial && !Medium.IsUsb)
+                    {
+                        <div style="display: flex; justify-content: center;">
+                            <svg width="240" height="240" viewBox="0 0 320 320" role="img" aria-label="Disc layout: filler at the inner and outer edges, your data in the middle tracks">
+                                <circle cx="160" cy="160" r="152" class="tf2-disc"></circle>
+                                <circle cx="160" cy="160" r="@F(Rings.HeadMid)" fill="none" class="tf2-ring head" stroke-width="@F(Rings.HeadW)"></circle>
+                                <circle cx="160" cy="160" r="@F(Rings.DataMid)" fill="none" class="tf2-ring data" stroke-width="@F(Rings.DataW)"></circle>
+                                <circle cx="160" cy="160" r="@F(Rings.TailMid)" fill="none" class="tf2-ring tail" stroke-width="@F(Rings.TailW)"></circle>
+                                <circle cx="160" cy="160" r="62" class="tf2-hub"></circle>
+                                <circle cx="160" cy="160" r="20" class="tf2-hole"></circle>
+                            </svg>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="tf2-meter" aria-hidden="true">
+                            @foreach (var seg in MeterSegments())
+                            {
+                                <span class="tf2-seg @seg"></span>
+                            }
+                        </div>
+                    }
+                    <div class="tf2-legend">
+                        @if (Medium.IsUsb)
+                        {
+                            <span class="data">YOUR DATA @TargetFillService.FormatBytes(PerDiscPayload)</span>
+                            <span class="tail">FILLER @TargetFillService.FormatBytes(Split.Head)</span>
+                        }
+                        else
+                        {
+                            <span class="head">FILLER @TargetFillService.FormatBytes(Split.Head)</span>
+                            <span class="data">YOUR DATA @TargetFillService.FormatBytes(PerDiscPayload)@(Discs > 1 ? " / DISC" : "")</span>
+                            <span class="tail">FILLER @TargetFillService.FormatBytes(Split.Tail)</span>
+                        }
+                    </div>
+                </div>
+
+                <div class="tf2-stats">
+                    <div><span class="tf2-label">Files</span><span class="tf2-num">@(stats is null ? "—" : stats.Count.ToString("N0"))</span></div>
+                    <div><span class="tf2-label">@(Medium.IsUsb ? "Drives" : "Discs needed")</span><span class="tf2-num">@(HasFolder ? Discs.ToString() : "—")</span></div>
+                    <div><span class="tf2-label">Volume label</span><span class="tf2-num" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">@(volumeLabel.Length > 0 ? volumeLabel : HasFolder ? new DirectoryInfo(folder).Name : "—")</span></div>
+                </div>
+
+                @if (HasFolder && Discs > 1)
+                {
+                    <span class="tf2-hint" style="color: var(--amber);">
+                        ⚠ Too big for one @Medium.Label (@TargetFillService.FormatBytes(stats!.Bytes)): this needs @Discs discs.
+                        Generate .ISO Image builds all @Discs ISOs, each filled to 100%.
+                        @(autoSpan ? "Generate Split Filler will offer ISOs or Disc_01… folders." : "To use Generate Split Filler, turn on Auto-Span in Expert options.")
+                    </span>
+                }
+                @if (!Medium.IsUsb && HasFolder)
+                {
+                    <span class="tf2-hint">🛡 Your data sits in the middle of the disc, the part least likely to wear first. Filler files are sparse: they use no real disk space.</span>
+                }
+            </div>
+
+            <div class="tf2-keys">
+                <button class="tf2-key primary" @onclick="RunIso" disabled="@(busy || !HasFolder || Medium.IsUsb)"
+                        title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds ready-to-burn .iso images; your files aren't changed")">💿 Generate .ISO Image</button>
+                <button class="tf2-key" @onclick="RunFiller" disabled="@(busy || !HasFolder)" title="Adds filler files to this folder so it burns to exactly 100%">🧩 Generate Split Filler</button>
+                <button class="tf2-key" @onclick="RunClean" disabled="@(busy || !HasFolder)">🧹 Clean Fillers</button>
+                <button class="tf2-key" @onclick="RunImgBurn" disabled="@(busy || !HasFolder || Medium.IsUsb)"
+                        title="Opens ImgBurn in Build mode with this folder, UDF 2.60 and the volume label">🔥 ImgBurn</button>
+            </div>
+
+            @if (busy)
+            {
+                <div class="tf2-panel" style="display: flex; flex-direction: column; gap: 8px;">
+                    <div class="progress-bar"><div class="progress-fill" style="width: 100%; opacity: 0.6;"></div></div>
+                    <span class="tf2-hint">@(progressText ?? "Working…")</span>
+                </div>
+            }
+            else if (resultMessage is not null)
+            {
+                <div class="tf2-panel" style="display: flex; flex-direction: column; gap: 4px;">
+                    <span style="color: @(resultOk ? "var(--success)" : "var(--danger)"); white-space: pre-line;">@((resultOk ? "✓ " : "⚠ ") + resultMessage)</span>
+                    @foreach (var o in resultOutputs)
+                    {
+                        <span class="tf2-hint">• @o</span>
+                    }
+                    @foreach (var n in resultNotes)
+                    {
+                        <span class="tf2-hint" style="color: var(--amber);">ℹ @n</span>
+                    }
+                </div>
+            }
+
+            @* Expert options *@
+            <details class="tf2-fold">
+                <summary>⚙ Expert options</summary>
+                <div class="tf2-fold-body">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 16px;">
+                        @(Option("Pre-Flight Archival Scanner", "Stops first if a path is 250+ characters (may fail on a disc).", preflight, v => preflight = v))
+                        @(Option("Detailed LBA Sector Map & Report", "Adds the physical mm radial ranges to the manifest.", lbaReport, v => lbaReport = v))
+                        @(Option("Audio Feedback Cues", "Plays a chime when a job finishes.", sound, v => sound = v))
+                        @(Option("Auto-Span Multi-Disc Volumes", "When the folder is too big for one disc, Generate Split Filler offers ISOs or Disc_01… folders.", autoSpan, v => autoSpan = v))
+                        @(Option("PAR2 Recovery Files (needs par2.exe)", par2Found ? "Adds real 10% PAR2 recovery data so damaged files can be repaired." : "par2.exe not found: put it next to ArchivSector-OD or on the PATH.", parity, v => parity = v))
+                        @(Option("Stealth Decoy File Generator", "Names the filler files like cache files instead of pad_start / pad_end.", stealth, v => stealth = v))
+                        @(Option("Random-Data Filler (instead of zeros)", "Pads with random bytes. Slower and uses real disk space.", noise, v => noise = v))
+                        @(Option("Searchable Disc Library Indexer", "Logs each disc in History and the disc catalog (_DiscCatalog.json / .csv).", catalog, v => catalog = v))
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                        <button class="tf2-chip" @onclick="() => RunArt(false)" disabled="@(busy || !HasFolder)">🖼 Export disc label (.png)</button>
+                        <button class="tf2-chip" @onclick="() => RunArt(true)" disabled="@(busy || !HasFolder)">📇 Export jewel case / inlay (.png)</button>
+                        <button class="tf2-chip" @onclick="ViewCatalog">📚 View disc library catalog</button>
+                        <button class="tf2-chip" @onclick="ToggleRightClick" disabled="@busy"
+                                title="Adds 'TargetFill (ArchivSector-OD)' when you right-click a folder in File Explorer">
+                            @(rightClickInstalled ? "🖱 Remove from right-click menu" : "🖱 Add to right-click menu")
+                        </button>
+                    </div>
+                </div>
+            </details>
+
+            @* Batch: several folders *@
+            <details class="tf2-fold" open="@(batch.Count > 0)">
+                <summary>📚 Batch: several folders @(batch.Count > 0 ? $"({batch.Count})" : "")</summary>
+                <div class="tf2-fold-body">
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        <button class="tf2-chip" @onclick="AddBatchFolders" disabled="@busy">➕ Add folders…</button>
+                        <button class="tf2-chip" @onclick="AddCurrentToBatch" disabled="@(busy || !HasFolder)">➕ Add this folder</button>
+                        @if (batch.Count > 0)
+                        {
+                            <button class="tf2-chip" @onclick="ClearBatch" disabled="@busy">Clear</button>
+                        }
+                    </div>
+                    @if (batch.Count == 0)
+                    {
+                        <span class="tf2-hint">Add several folders to build all their ISOs (or pad them all) in one go, with the disc size and options above. Each folder is named after itself.</span>
+                    }
+                    else
+                    {
+                        @foreach (var item in batch)
+                        {
+                            var it = item;
+                            <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 13px;">
+                                <span style="width: 18px; text-align: center;">@BatchIcon(it)</span>
+                                <span style="flex: 1; min-width: 0;">
+                                    <strong>@Path.GetFileName(it.Folder.TrimEnd('\\', '/'))</strong>
+                                    <span class="tf2-hint" style="display: block; overflow-wrap: anywhere;">@(it.Detail ?? it.Folder)</span>
+                                </span>
+                                @if (!busy)
+                                {
+                                    <button class="tf2-chip small" title="Remove from the batch" @onclick="() => batch.Remove(it)">✖</button>
+                                }
+                            </div>
+                        }
+                        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                            @if (batchRunning)
+                            {
+                                <button class="tf2-key" @onclick="() => batchStop = true" disabled="@batchStop">@(batchStop ? "Stopping after this folder…" : "✖ Stop after this folder")</button>
+                            }
+                            else
+                            {
+                                <button class="tf2-key primary" @onclick="() => RunBatch(true)" disabled="@(busy || Medium.IsUsb || BatchTodo(true) == 0)">💿 Build all ISOs (@BatchTodo(true))</button>
+                                <button class="tf2-key" @onclick="() => RunBatch(false)" disabled="@(busy || BatchTodo(false) == 0)">🧩 Pad all folders (@BatchTodo(false))</button>
+                                @if (batch.Any(b => b.IsoDone || b.PadDone))
+                                {
+                                    <button class="tf2-chip" @onclick="ResetBatch" title="Lets every folder be built or padded again">↺ Reset list</button>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            </details>
+
+            @* Pad existing ISOs *@
+            <details class="tf2-fold" open="@(padList.Count > 0)">
+                <summary>📀 Pad existing ISOs @(padList.Count > 0 ? $"({padList.Count})" : "")</summary>
+                <div class="tf2-fold-body">
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        <button class="tf2-chip" @onclick="AddPadIsos" disabled="@(busy || padBusy)">➕ Add ISOs…</button>
+                        @if (padList.Count > 0)
+                        {
+                            <button class="tf2-chip" @onclick="ClearPadList" disabled="@padBusy">Clear</button>
+                        }
+                    </div>
+                    @if (Medium.IsUsb)
+                    {
+                        <span class="tf2-hint">Choose a disc size (CD, DVD or Blu-ray) to pad ISOs to it.</span>
+                    }
+                    else if (padList.Count == 0)
+                    {
+                        <span class="tf2-hint">Fills ISOs you already have out to exactly 100% of a @Medium.Label, by adding empty space at the end. Nothing inside an ISO changes or moves, so movies and games still play.</span>
+                    }
+                    else
+                    {
+                        @foreach (var it in padList)
+                        {
+                            <div style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+                                <span style="width: 18px; text-align: center;">@PadIcon(it)</span>
+                                <span style="flex: 1; min-width: 0; overflow-wrap: anywhere;" title="@it.Path">
+                                    <strong>@System.IO.Path.GetFileName(it.Path)</strong>
+                                    <span class="tf2-hint" style="display: block;">@PadLine(it)</span>
+                                </span>
+                                @if (!padBusy && it.Recorded > 0 && it.Recorded < it.Bytes)
+                                {
+                                    <button class="tf2-chip small" @onclick="() => RunRemovePadding(it)" disabled="@busy" title="Takes the empty padding back off the end of this ISO">↺ Remove padding</button>
+                                }
+                                @if (!padBusy)
+                                {
+                                    <button class="tf2-chip small" @onclick="() => { padList.Remove(it); }" title="Take it off the list (the file isn't touched)">✖</button>
+                                }
+                            </div>
+                        }
+                        @if (!padBusy && PadTodo > 0)
+                        {
+                            <label class="tf2-check">
+                                <input type="radio" name="tf2-padmode" checked="@padCopy" @onchange="() => SetPadCopy(true)" />
+                                Make padded copies (recommended: the originals are kept; each copy is "&lt;name&gt;_padded.iso")
+                            </label>
+                            <label class="tf2-check">
+                                <input type="radio" name="tf2-padmode" checked="@(!padCopy)" @onchange="() => SetPadCopy(false)" />
+                                Pad the original files (instant; can be undone with "Remove padding")
+                            </label>
+                        }
+                        @if (padBusy)
+                        {
+                            <span style="font-size: 13px;"><strong>ISO @padIndex of @padTotal</strong>: @padCurrentName</span>
+                            <div class="progress-bar"><div class="progress-fill" style="width: @F(PadOverallPercent)%;"></div></div>
+                            <span class="tf2-hint">This ISO: @(padProgress?.Phase ?? "Working")… @(padProgress is not null && padProgress.Percent >= 0 ? padProgress.Percent.ToString("0") + "%" : "")</span>
+                            <button class="tf2-key" @onclick="StopPad" disabled="@padStopping">@(padStopping ? "Stopping…" : "✖ Stop")</button>
+                        }
+                        else
+                        {
+                            <button class="tf2-key primary" style="align-self: flex-start;" @onclick="RunPadAll" disabled="@(busy || PadTodo == 0)">🧩 Pad @(PadTodo == 1 ? "1 ISO" : PadTodo + " ISOs") to @Medium.Label</button>
+                        }
+                        @if (padMessage is not null)
+                        {
+                            <span class="tf2-hint" style="color: @(padOk ? "var(--success)" : "var(--amber)");">@(padOk ? "✅" : "⚠") @padMessage</span>
+                        }
+                        <span class="tf2-hint">Tip: game dumps padded this way no longer match their Redump checksums, so keep the originals (use "Make padded copies").</span>
+                    }
+                </div>
+            </details>
+        </section>
+    </div>
+</div>
+}
+else
+{
 <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; padding: 20px;">
 
     <section class="bay-card" style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
@@ -26,6 +464,7 @@
             <h2 style="margin: 0;">🎯 TargetFill</h2>
             <span class="bay-subtitle" style="flex: 1 1 260px;">Fill a disc to exactly 100%, with your data in the safe middle tracks</span>
             <button class="shortcut-btn" @onclick="() => showGuide = true">❔ Instructions</button>
+            <button class="shortcut-btn" @onclick="() => SetNewLook(true)" title="Try the new TargetFill screen (beta 6 experiment)">✨ Try the new look</button>
         </div>
 
         @* Source folder *@
@@ -495,6 +934,7 @@
         </p>
     </aside>
 </div>
+}
 
 @if (showGuide)
 {
@@ -891,6 +1331,8 @@
         padCopy = s.PadIsoCopy;
         stealth = s.Stealth;
         sound = s.Sound;
+        newLook = s.NewLook;
+        showUsb = Medium.IsUsb;
 
         rightClickInstalled = TargetFillService.IsRightClickInstalled();
         par2Found = TargetFillService.FindPar2() is not null;
@@ -920,6 +1362,7 @@
             PadIsoCopy = padCopy,
             Stealth = stealth,
             Sound = sound,
+            NewLook = newLook,
         }.Save();
     }
 
@@ -938,6 +1381,48 @@
                 await SetFolder(SourceRequest);
             }
         }
+    }
+
+    // ---- The new look (beta 6 experiment) ----
+
+    private bool newLook = true;      // remembered in targetfill.json
+    private bool showUsb, showRadial;
+
+    private void SetNewLook(bool on)
+    {
+        newLook = on;
+        showUsb = Medium.IsUsb;
+        Persist();
+    }
+
+    // The line next to the status light above the meter.
+    private string StatusLine =>
+        busy ? progressText ?? "Working…"
+        : scanning ? "Scanning the folder…"
+        : !HasFolder ? "Choose a folder to fill"
+        : Discs > 1 ? $"Too big for one {Medium.Label}: needs {Discs}"
+        : "Ready: fills the " + Medium.Label + " to exactly 100%";
+
+    // The capacity meter: 60 segments, each "head" (filler at the start),
+    // "data" (your files), "tail" (filler at the end) or "off" (no folder yet).
+    private List<string> MeterSegments()
+    {
+        const int n = 60;
+        var segs = new List<string>(n);
+        double cap = Math.Max(1, Medium.Bytes);
+        if (!HasFolder || stats is null)
+        {
+            for (int i = 0; i < n; i++) segs.Add("off");
+            return segs;
+        }
+        double head = Medium.IsUsb ? 0 : Split.Head / cap;
+        double data = Math.Min(1, PerDiscPayload / cap);
+        for (int i = 0; i < n; i++)
+        {
+            double at = (i + 0.5) / n;
+            segs.Add(at < head ? "head" : at < head + data ? "data" : "tail");
+        }
+        return segs;
     }
 
     // ---- small UI helpers ----

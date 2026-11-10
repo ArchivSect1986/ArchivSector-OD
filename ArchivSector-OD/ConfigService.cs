@@ -123,6 +123,7 @@ namespace ArchivSector_OD
         public bool PadIsoCopy { get; set; } = true;   // v3.3 "Pad an existing ISO": copy (true) or pad the original
         public bool Stealth { get; set; } = false;
         public bool Sound { get; set; } = true;        // "Audio Feedback Cues"
+        public bool NewLook { get; set; } = true;      // beta 6 experiment: the new TargetFill screen (false = classic)
 
         private static string FilePath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
