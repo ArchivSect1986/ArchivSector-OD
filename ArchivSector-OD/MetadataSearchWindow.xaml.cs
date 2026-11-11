@@ -37,10 +37,12 @@ namespace ArchivSector_OD
             QueryBox.Text = initialQuery;
 
             var sources = category == DiscCategory.Game
-                ? new[] { "RAWG" }
+                ? new[] { "RAWG", "SteamGridDB" }
                 : new[] { "TMDB" };
             SourceCombo.ItemsSource = sources;
-            SourceCombo.SelectedIndex = 0;
+            // Start on the source chosen in Settings, when it's one of the options.
+            var preferredIdx = Array.IndexOf(sources, config.GameArtSource);
+            SourceCombo.SelectedIndex = preferredIdx >= 0 ? preferredIdx : 0;
 
             UpdateAttribution(sources[0]);
 
@@ -79,6 +81,11 @@ namespace ArchivSector_OD
                     linkText = "TMDB";
                     url = "https://www.themoviedb.org";
                     break;
+                case "SteamGridDB":
+                    prefix = "Game artwork from ";
+                    linkText = "SteamGridDB";
+                    url = "https://www.steamgriddb.com";
+                    break;
                 default:
                     prefix = "";
                     linkText = "";
@@ -114,7 +121,12 @@ namespace ArchivSector_OD
 
             try
             {
-                var key = source == "RAWG" ? config.RawgApiKey : config.TmdbApiKey;
+                var key = source switch
+                {
+                    "RAWG" => config.RawgApiKey,
+                    "SteamGridDB" => config.SteamGridDbApiKey,
+                    _ => config.TmdbApiKey,
+                };
                 if (string.IsNullOrWhiteSpace(key))
                 {
                     StatusText.Text = $"No {source} API key set -- add a free one in Settings.";
@@ -124,6 +136,7 @@ namespace ArchivSector_OD
                 List<MetadataFetchService.MetadataResult> results = source switch
                 {
                     "RAWG" => await MetadataFetchService.SearchRawg(query, config.RawgApiKey),
+                    "SteamGridDB" => await MetadataFetchService.SearchSteamGridDb(query, config.SteamGridDbApiKey),
                     "TMDB" => await MetadataFetchService.SearchTmdb(query, config.TmdbApiKey),
                     _ => new List<MetadataFetchService.MetadataResult>(),
                 };

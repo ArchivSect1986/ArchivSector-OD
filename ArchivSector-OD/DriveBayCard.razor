@@ -90,6 +90,10 @@
                     {
                         <span class="bay-art-icon">🎬</span><span>Movie</span>
                     }
+                    else if (Category == DiscCategory.Audio)
+                    {
+                        <span class="bay-art-icon">🎵</span><span>Album</span>
+                    }
                     else
                     {
                         <span class="bay-art-icon">💿</span><span>@(MediaPresent ? "Disc" : "No disc")</span>
@@ -117,7 +121,7 @@
                 </div>
             </div>
             <div class="fp-stat"><span class="fp-dot @(isRunning ? "run" : MediaPresent ? "on" : "")"></span>@StatusText</div>
-            @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game))
+            @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game || Category == DiscCategory.Audio))
             {
                 <div class="fp-artrow">
                     <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">🎨 Fetch Metadata &amp; Artwork</button>
@@ -218,7 +222,7 @@
         </p>
     }
 
-    @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game))
+    @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game || Category == DiscCategory.Audio))
     {
         <div class="bay-art">
             <div class="bay-art-tile">
@@ -228,9 +232,9 @@
                 }
                 else
                 {
-                    <span class="bay-art-icon">@(Category == DiscCategory.Game ? "🎮" : "🎬")</span>
-                    <span>@(Category == DiscCategory.Game ? "Game box art" : "Movie poster")</span>
-                    <span style="opacity: 0.7;">@(Category == DiscCategory.Game ? "RAWG" : "TMDB")</span>
+                    <span class="bay-art-icon">@(Category == DiscCategory.Game ? "🎮" : Category == DiscCategory.Audio ? "🎵" : "🎬")</span>
+                    <span>@(Category == DiscCategory.Game ? "Game box art" : Category == DiscCategory.Audio ? "Album cover" : "Movie poster")</span>
+                    <span style="opacity: 0.7;">@(Category == DiscCategory.Game ? "RAWG" : Category == DiscCategory.Audio ? "iTunes" : "TMDB")</span>
                 }
             </div>
             <div class="bay-art-info">
@@ -705,6 +709,8 @@
     // after, the Rename button renames the finished folder and files.
     private string gameNameDraft = "";
     private string? cdTextLine;   // v4.0 beta 4: "Album — Artist" from a music CD's CD-Text
+    private string musicAlbum = "", musicArtist = "";   // beta 6: music CD album/artist, for album art
+    private string? musicCacheKey;                       // beta 6: where a music CD's album art is cached
     private string? gameNameNote = null;
     private string? lastTitleId = null;   // v3.4: an Xbox 360 dump that couldn't be named automatically
     private string? lastGameFolder = null; // folder of the last finished game dump
@@ -897,6 +903,19 @@
             AddLog($"CD-Text: {cdTextLine} -- suggested name \"{gameNameDraft}\"");
         }
         else AddLog($"CD-Text: {cdTextLine}");
+
+        // Album cover art (iTunes, no key needed), cached under the album name.
+        musicAlbum = album;
+        musicArtist = artist;
+        musicCacheKey = FileNamingService.SanitizeFilename(
+            album.Length > 0 && artist.Length > 0 ? $"{artist} - {album}" : album.Length > 0 ? album : artist);
+        if (!string.IsNullOrWhiteSpace(musicCacheKey))
+        {
+            cachedArt = MetadataFetchService.GetCachedArt(musicCacheKey);
+            LoadCoverDataUri();
+            if (!hasCachedCover && ConfigService.Load().AutoFetchMetadataArt)
+                _ = AutoFetchAlbumArt(album, artist, musicCacheKey);
+        }
         await InvokeAsync(StateHasChanged);
     }
 
@@ -1036,6 +1055,18 @@
 
     private async Task FetchMetadata()
     {
+        if (Category == DiscCategory.Audio)
+        {
+            if (string.IsNullOrWhiteSpace(musicAlbum) && string.IsNullOrWhiteSpace(musicArtist))
+            {
+                AddLog("Album art: this disc has no CD-Text to search by.");
+                return;
+            }
+            await AutoFetchAlbumArt(musicAlbum, musicArtist,
+                musicCacheKey ?? FileNamingService.SanitizeFilename(musicArtist + " - " + musicAlbum));
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
 
         var config = ConfigService.Load();
@@ -1326,27 +1357,71 @@
     {
         var config = ConfigService.Load();
         if (!config.AutoFetchMetadataArt) return;
-        if (string.IsNullOrWhiteSpace(config.RawgApiKey))
+        bool hasRawg = !string.IsNullOrWhiteSpace(config.RawgApiKey);
+        bool hasSgdb = !string.IsNullOrWhiteSpace(config.SteamGridDbApiKey);
+        if (!hasRawg && !hasSgdb)
         {
-            AddLog("Cover art skipped: no RAWG API key set (add a free one in Settings).");
+            AddLog("Cover art skipped: no RAWG or SteamGridDB API key set (add a free one in Settings).");
             return;
         }
         // "Halo 3 (USA) (En,Fr,Es)" -> "Halo 3"
         var query = System.Text.RegularExpressions.Regex.Replace(name, BracketsPattern, "").Trim();
         if (query.Length == 0) query = name;
+
+        async Task<List<MetadataFetchService.MetadataResult>> FromRawg()
+        {
+            if (!hasRawg) return new();
+            try { return await MetadataFetchService.SearchRawg(query, config.RawgApiKey); }
+            catch (Exception ex) { AddLog("Cover art: RAWG unavailable (" + ex.Message.Trim() + ")."); return new(); }
+        }
+        async Task<List<MetadataFetchService.MetadataResult>> FromSgdb()
+        {
+            if (!hasSgdb) return new();
+            try { return await MetadataFetchService.SearchSteamGridDb(query, config.SteamGridDbApiKey, 1); }
+            catch (Exception ex) { AddLog("Cover art: SteamGridDB failed (" + ex.Message.Trim() + ")."); return new(); }
+        }
+
         try
         {
-            var results = await MetadataFetchService.SearchRawg(query, config.RawgApiKey);
-            if (results.Count == 0) { AddLog("Cover art: no RAWG results for '" + query + "'."); return; }
+            // The chosen source first (Settings), the other as fallback.
+            bool preferSgdb = string.Equals(config.GameArtSource, "SteamGridDB", StringComparison.OrdinalIgnoreCase);
+            AddLog("Cover art: looking up '" + query + "' (" + (preferSgdb ? "SteamGridDB" : "RAWG") + " first)…");
+            var results = preferSgdb ? await FromSgdb() : await FromRawg();
+            if (results.Count == 0) results = preferSgdb ? await FromRawg() : await FromSgdb();
+            if (results.Count == 0) { AddLog("Cover art: no results for '" + query + "'."); return; }
             var top = results[0];
             cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(name, top);
             LoadCoverDataUri();
-            AddLog(hasCachedCover ? "Cover art: saved '" + top.Title + "' (RAWG)" : "Cover art: '" + top.Title + "' has no cover image on RAWG.");
+            AddLog(hasCachedCover ? "Cover art: saved '" + top.Title + "' (" + top.Source + ")" : "Cover art: '" + top.Title + "' has no cover image.");
             StateHasChanged();
         }
         catch (Exception ex)
         {
             AddLog($"Cover art lookup failed: {ex.Message}");
+        }
+    }
+
+    // Album cover art for a music CD from iTunes (no key needed), cached under
+    // the album name so it comes back on the next insert.
+    private async Task AutoFetchAlbumArt(string album, string artist, string cacheKey)
+    {
+        var config = ConfigService.Load();
+        if (!config.AutoFetchMetadataArt) return;
+        var query = (artist.Length > 0 ? artist + " " : "") + album;
+        if (string.IsNullOrWhiteSpace(query)) return;
+        try
+        {
+            var results = await MetadataFetchService.SearchItunesAlbum(query);
+            if (results.Count == 0) { AddLog("Album art: no iTunes match for '" + query + "'."); return; }
+            var top = results[0];
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(cacheKey, top);
+            LoadCoverDataUri();
+            AddLog(hasCachedCover ? "Album art: saved '" + top.Title + "' (iTunes)" : "Album art: '" + top.Title + "' had no cover image.");
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Album art lookup failed: {ex.Message}");
         }
     }
 
@@ -2715,6 +2790,10 @@
                 if (!hasCachedCover && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd))
                 {
                     _ = AutoFetchArtSilently();
+                }
+                else if (!hasCachedCover && Category == DiscCategory.Game)
+                {
+                    _ = AutoFetchGameArt(VolumeTitle);
                 }
 
                 _ = TryAutoStart();

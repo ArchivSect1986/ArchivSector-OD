@@ -146,6 +146,113 @@ namespace ArchivSector_OD
             return results;
         }
 
+        // Album cover art from the iTunes Search API (no key needed). Good for
+        // music CDs, searched by "<artist> <album>" from the disc's CD-Text.
+        public static async Task<List<MetadataResult>> SearchItunesAlbum(string query, int maxResults = 10)
+        {
+            var results = new List<MetadataResult>();
+            if (string.IsNullOrWhiteSpace(query)) return results;
+
+            var url = $"https://itunes.apple.com/search?term={Uri.EscapeDataString(query)}&entity=album&limit={maxResults}";
+            using var resp = await Http.GetAsync(url);
+            resp.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+
+            if (doc.RootElement.TryGetProperty("results", out var items))
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    var art100 = item.TryGetProperty("artworkUrl100", out var a) ? (a.GetString() ?? "") : "";
+                    // iTunes gives a 100x100 thumbnail; ask for a larger copy.
+                    var big = art100.Replace("100x100bb", "600x600bb");
+                    var album = item.TryGetProperty("collectionName", out var c) ? (c.GetString() ?? "") : "";
+                    var artist = item.TryGetProperty("artistName", out var ar) ? (ar.GetString() ?? "") : "";
+                    var rel = item.TryGetProperty("releaseDate", out var rd) ? (rd.GetString() ?? "") : "";
+                    var genre = item.TryGetProperty("primaryGenreName", out var g) ? (g.GetString() ?? "") : "";
+                    if (string.IsNullOrEmpty(album)) continue;
+
+                    var parts = new List<string>();
+                    if (!string.IsNullOrEmpty(artist)) parts.Add(artist);
+                    if (!string.IsNullOrEmpty(genre)) parts.Add(genre);
+                    if (rel.Length >= 4) parts.Add(rel.Substring(0, 4));
+
+                    results.Add(new MetadataResult
+                    {
+                        Id = item.TryGetProperty("collectionId", out var id) ? id.ToString() : "",
+                        Title = album,
+                        Year = rel.Length >= 4 ? rel.Substring(0, 4) : "",
+                        ThumbnailUrl = big,
+                        FullImageUrl = big,
+                        Detail = string.Join(" · ", parts),
+                        Source = "iTunes",
+                    });
+                }
+            }
+            return results;
+        }
+
+        // Game box art from SteamGridDB (needs a free API key). Used as a
+        // fallback when RAWG is down: finds the game, then its best vertical
+        // 600x900 box-art grid.
+        public static async Task<List<MetadataResult>> SearchSteamGridDb(string query, string apiKey, int maxResults = 5)
+        {
+            var results = new List<MetadataResult>();
+            if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(query)) return results;
+
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"https://www.steamgriddb.com/api/v2/search/autocomplete/{Uri.EscapeDataString(query)}");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            using var resp = await Http.SendAsync(req);
+            resp.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+
+            if (!doc.RootElement.TryGetProperty("data", out var games) || games.ValueKind != JsonValueKind.Array)
+                return results;
+
+            foreach (var game in games.EnumerateArray())
+            {
+                if (results.Count >= maxResults) break;
+                if (!game.TryGetProperty("id", out var idEl)) continue;
+                var gameId = idEl.GetRawText();
+                var name = game.TryGetProperty("name", out var n) ? (n.GetString() ?? "Unknown") : "Unknown";
+
+                // Best static vertical box-art grid for this game.
+                string img = "";
+                try
+                {
+                    using var greq = new HttpRequestMessage(HttpMethod.Get,
+                        $"https://www.steamgriddb.com/api/v2/grids/game/{gameId}?dimensions=600x900&types=static&limit=1");
+                    greq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+                    using var gresp = await Http.SendAsync(greq);
+                    if (gresp.IsSuccessStatusCode)
+                    {
+                        using var gdoc = JsonDocument.Parse(await gresp.Content.ReadAsStringAsync());
+                        if (gdoc.RootElement.TryGetProperty("data", out var grids) && grids.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var grid in grids.EnumerateArray())
+                            {
+                                if (grid.TryGetProperty("url", out var u)) { img = u.GetString() ?? ""; break; }
+                            }
+                        }
+                    }
+                }
+                catch { /* skip this game's art */ }
+
+                if (string.IsNullOrEmpty(img)) continue;
+                results.Add(new MetadataResult
+                {
+                    Id = gameId,
+                    Title = name,
+                    Year = "",
+                    ThumbnailUrl = img,
+                    FullImageUrl = img,
+                    Detail = "SteamGridDB box art",
+                    Source = "SteamGridDB",
+                });
+            }
+            return results;
+        }
+
         // v3.3: a year in brackets at the end -- "One Hundred and One
         // Dalmatians (1961)" or "Dune [1984]" -- is taken off the title and
         // sent to TMDB as the release year, so the right version comes

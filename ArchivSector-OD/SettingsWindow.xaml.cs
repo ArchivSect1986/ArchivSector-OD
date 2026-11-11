@@ -41,6 +41,9 @@ namespace ArchivSector_OD
             MkvmergePathBox.Text = config.MkvmergePathOverride;
             BurnerMaxPathBox.Text = config.BurnerMaxPath;
             RawgKeyBox.Password = config.RawgApiKey;
+            SteamGridDbKeyBox.Password = config.SteamGridDbApiKey;
+            GameArtSgdbRadio.IsChecked = string.Equals(config.GameArtSource, "SteamGridDB", StringComparison.OrdinalIgnoreCase);
+            GameArtRawgRadio.IsChecked = !GameArtSgdbRadio.IsChecked.GetValueOrDefault();
             TmdbKeyBox.Password = config.TmdbApiKey;
 
             AutoCategorizeCheck.IsChecked = config.AutoCategorize;
@@ -141,6 +144,7 @@ namespace ArchivSector_OD
 
             KeyStatus(TmdbStatus, TmdbKeyBox.Password, "No key: movie titles and artwork won't be looked up.");
             KeyStatus(RawgStatus, RawgKeyBox.Password, "No key: game titles and artwork won't be looked up.");
+            KeyStatus(SteamGridDbStatus, SteamGridDbKeyBox.Password, "No key: used only as a fallback when RAWG is down.");
         }
 
         private void ToolStatus(TextBlock status, string boxText, Func<string?, string?> find, string notFound, bool required)
@@ -178,8 +182,10 @@ namespace ArchivSector_OD
         {
             foreach (var box in new[] { OutputFolderBox, MakeMkvPathBox, RedumperPathBox, ImgBurnPathBox, MkvmergePathBox, BurnerMaxPathBox, MaxConcurrentBox })
                 box.TextChanged += (_, _) => Changed();
-            foreach (var box in new[] { RawgKeyBox, TmdbKeyBox })
+            foreach (var box in new[] { RawgKeyBox, TmdbKeyBox, SteamGridDbKeyBox })
                 box.PasswordChanged += (_, _) => Changed();
+            GameArtRawgRadio.Checked += (_, _) => Changed();
+            GameArtSgdbRadio.Checked += (_, _) => Changed();
             foreach (var check in new[] { AutoCategorizeCheck, AutoEjectCheck, ToastCheck, SoundCheck, StartupUpdateCheck, LiveLogCheck, DeleteIsoCheck, SeasonalCheck, AutoFetchArtCheck, BatchQueueCheck, MultiDriveSyncCheck })
             {
                 check.Checked += (_, _) => Changed();
@@ -411,6 +417,8 @@ namespace ArchivSector_OD
             c.MkvmergePathOverride = CleanPath(MkvmergePathBox.Text);
             c.BurnerMaxPath = CleanPath(BurnerMaxPathBox.Text);
             c.RawgApiKey = RawgKeyBox.Password.Trim();
+            c.SteamGridDbApiKey = SteamGridDbKeyBox.Password.Trim();
+            c.GameArtSource = GameArtSgdbRadio.IsChecked == true ? "SteamGridDB" : "RAWG";
             c.TmdbApiKey = TmdbKeyBox.Password.Trim();
 
             c.AutoCategorize = AutoCategorizeCheck.IsChecked ?? true;

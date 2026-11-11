@@ -125,6 +125,12 @@
             <Setter Property="Cursor" Value="Hand"/>
         </Style>
 
+        <Style TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+
         <!-- Text styles -->
         <Style x:Key="PageTitle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource Text}"/>
@@ -382,6 +388,15 @@
                     <TextBlock Style="{StaticResource Help}" Text="From rawg.io/apidocs."/>
                     <PasswordBox x:Name="RawgKeyBox"/>
                     <TextBlock x:Name="RawgStatus" Style="{StaticResource Status}"/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="SteamGridDB API key (games, fallback)"/>
+                    <TextBlock Style="{StaticResource Help}" Text="From steamgriddb.com: your profile → Preferences → API. Used when RAWG is down or has no match."/>
+                    <PasswordBox x:Name="SteamGridDbKeyBox"/>
+                    <TextBlock x:Name="SteamGridDbStatus" Style="{StaticResource Status}"/>
+
+                    <TextBlock Style="{StaticResource Label}" Text="Which game art source to try first"/>
+                    <RadioButton x:Name="GameArtRawgRadio" GroupName="GameArt" Content="RAWG, then SteamGridDB" Margin="0,4,0,0"/>
+                    <RadioButton x:Name="GameArtSgdbRadio" GroupName="GameArt" Content="SteamGridDB, then RAWG" Margin="0,2,0,0"/>
                 </StackPanel>
 
                 <!-- 📦 Batch & drives -->
