@@ -63,9 +63,9 @@
                         title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
                     <span class="dot"></span>Unattended @(config.UnattendedAutoStart ? "on" : "off")
                 </button>
-                <button class="unattended-pill @(config.DriveBayFaceplate ? "on" : "")" @onclick="ToggleFaceplate"
-                        title="Beta: shows each drive bay as a wide faceplate row with cover art, instead of the classic cards.">
-                    <span class="dot"></span>Faceplate @(config.DriveBayFaceplate ? "on" : "off")
+                <button class="unattended-pill @(config.DriveBayFaceplateCols > 0 ? "on" : "")" @onclick="CycleFaceplate"
+                        title="Beta: each drive bay as a faceplate card with cover art. Click to cycle: off, 2 columns, 3 columns.">
+                    <span class="dot"></span>@(config.DriveBayFaceplateCols == 2 ? "Faceplate 2-col" : config.DriveBayFaceplateCols == 3 ? "Faceplate 3-col" : "Faceplate off")
                 </button>
             }
             <button class="icon-btn" @onclick="ShowHistory" title="History" aria-label="History">📜</button>
@@ -132,7 +132,7 @@
     <div style="display: @(activeTab == "bays" ? "block" : "none");">
     @if (driveStates.Count == 0)
     {
-        <div class="bays-grid @(config.DriveBayFaceplate ? "faceplate" : "")">
+        <div class="bays-grid @(config.DriveBayFaceplateCols == 2 ? "faceplate fp-cols-2" : config.DriveBayFaceplateCols == 3 ? "faceplate fp-cols-3" : "")">
             <p style="color: var(--text-muted); padding: 20px;">
                 No optical drives detected on this machine.
             </p>
@@ -140,7 +140,7 @@
     }
     else
     {
-        <div class="bays-grid @(config.DriveBayFaceplate ? "faceplate" : "")">
+        <div class="bays-grid @(config.DriveBayFaceplateCols == 2 ? "faceplate fp-cols-2" : config.DriveBayFaceplateCols == 3 ? "faceplate fp-cols-3" : "")">
             @foreach (var letter in driveStates.Keys.OrderBy(l => l))
             {
                 var st = driveStates[letter];
@@ -160,7 +160,7 @@
                               BlankFreeBytes="@st.BlankFreeBytes" BlankTotalBytes="@st.BlankTotalBytes"
                               DriveModel="@(hw?.Caption ?? "")"
                               DriveFirmware="@(hw?.Firmware ?? "")"
-                              Faceplate="@config.DriveBayFaceplate"
+                              Faceplate="@(config.DriveBayFaceplateCols > 0)"
                               TabVisible="@(activeTab == "bays")" />
             }
         </div>
@@ -396,10 +396,10 @@
         config = fresh;
     }
 
-    private void ToggleFaceplate()
+    private void CycleFaceplate()
     {
         var fresh = ConfigService.Load();
-        fresh.DriveBayFaceplate = !config.DriveBayFaceplate;
+        fresh.DriveBayFaceplateCols = config.DriveBayFaceplateCols == 0 ? 2 : config.DriveBayFaceplateCols == 2 ? 3 : 0;
         ConfigService.Save(fresh);
         config = fresh;
     }

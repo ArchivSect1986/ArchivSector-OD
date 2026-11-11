@@ -76,47 +76,71 @@
     @if (Faceplate)
     {
         <div class="fp-head">
-            <div class="fp-id">
-                <div class="fp-letter">@DriveLetter:</div>
-                @if (!string.IsNullOrEmpty(DriveModel))
-                {
-                    <div class="fp-model">@DriveModel</div>
-                }
-                <div class="fp-sub">@(customLabel ?? "Optical drive")</div>
+            <div class="fp-top">
+                <div class="bay-art-tile fp-art">
+                    @if (coverDataUri is not null)
+                    {
+                        <img src="@coverDataUri" alt="Cover art" />
+                    }
+                    else if (Category == DiscCategory.Game)
+                    {
+                        <span class="bay-art-icon">🎮</span><span>Game</span>
+                    }
+                    else if (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd)
+                    {
+                        <span class="bay-art-icon">🎬</span><span>Movie</span>
+                    }
+                    else
+                    {
+                        <span class="bay-art-icon">💿</span><span>@(MediaPresent ? "Disc" : "No disc")</span>
+                    }
+                </div>
+                <div class="fp-right">
+                    <div class="fp-idrow">
+                        <span class="fp-letter">@DriveLetter:</span>
+                        @if (!string.IsNullOrEmpty(DriveModel))
+                        {
+                            <span class="fp-model" title="@DriveModel">@HistoryService.TidyDriveModel(DriveModel)</span>
+                        }
+                    </div>
+                    <div class="fp-term">
+                        @if (!MediaPresent)
+                        {
+                            <div class="t-empty">NO DISC · INSERT ONE</div>
+                        }
+                        else
+                        {
+                            <div class="t-title @(isRunning ? "run" : "")" title="@VolumeTitle">@(string.IsNullOrWhiteSpace(VolumeTitle) ? "DISC DETECTED" : VolumeTitle)</div>
+                            <div class="t-info">@FormatLabel@(!string.IsNullOrEmpty(CapacityLabel) ? " · " + CapacityLabel : "")</div>
+                        }
+                    </div>
+                </div>
             </div>
-            <div class="fp-slot">
-                <div class="fp-rail"></div>
-                <div class="fp-status"><span class="fp-dot @(isRunning ? "run" : MediaPresent ? "on" : "")"></span>@StatusText</div>
-            </div>
-            <div class="bay-art-tile">
-                @if (coverDataUri is not null)
+            <div class="fp-stat"><span class="fp-dot @(isRunning ? "run" : MediaPresent ? "on" : "")"></span>@StatusText</div>
+            @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game))
+            {
+                <div class="fp-artrow">
+                    <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">🎨 Fetch Metadata &amp; Artwork</button>
+                    @if (hasCachedCover && cachedArt?.Metadata is not null)
+                    {
+                        <span class="tray-message" style="color: var(--success); cursor: pointer;"
+                              @onclick="OpenArtCacheFolder" title="Click to open cached artwork folder">
+                            ✓ Cached: @cachedArt.Metadata.Title (@cachedArt.Metadata.Source)
+                        </span>
+                        @if (!string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
+                        {
+                            <span class="tray-message" style="cursor: pointer; text-decoration: underline;"
+                                  @onclick="() => showMetadataDetails = !showMetadataDetails">
+                                @(showMetadataDetails ? "▾ Hide details" : "▸ Show details")
+                            </span>
+                        }
+                    }
+                </div>
+                @if (showMetadataDetails && cachedArt?.Metadata is not null && !string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
                 {
-                    <img src="@coverDataUri" alt="Cover art" />
+                    <p class="bay-subtitle" style="margin: 0; max-width: 100%;">@cachedArt.Metadata.Detail</p>
                 }
-                else if (Category == DiscCategory.Game)
-                {
-                    <span class="bay-art-icon">🎮</span><span>Game box art</span><span style="opacity: 0.7;">RAWG</span>
-                }
-                else if (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd)
-                {
-                    <span class="bay-art-icon">🎬</span><span>Movie poster</span><span style="opacity: 0.7;">TMDB</span>
-                }
-                else
-                {
-                    <span class="bay-art-icon">💿</span><span>@(MediaPresent ? "Disc" : "No disc")</span>
-                }
-            </div>
-            <div class="fp-term">
-                @if (!MediaPresent)
-                {
-                    <div class="t-empty">NO DISC · INSERT ONE TO START</div>
-                }
-                else
-                {
-                    <div class="t-title @(isRunning ? "run" : "")">@(string.IsNullOrWhiteSpace(VolumeTitle) ? "DISC DETECTED" : VolumeTitle)</div>
-                    <div class="t-info">@FormatLabel@(!string.IsNullOrEmpty(CapacityLabel) ? " · " + CapacityLabel : "")</div>
-                }
-            </div>
+            }
         </div>
     }
     @if (!Faceplate)
