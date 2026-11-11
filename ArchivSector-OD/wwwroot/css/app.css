@@ -1139,7 +1139,6 @@ body {
     .bays-grid.faceplate.fp-cols-2,
     .bays-grid.faceplate.fp-cols-3 { grid-template-columns: 1fr; }
 }
-}
 
 /* ============================================================
    Modals (mode-selection popup, History, Settings)
