@@ -286,6 +286,36 @@
     color-scheme: dark;
 }
 
+/* Ultraviolet: a blacklight glow -- near-black with one intense violet. */
+[data-theme="ultraviolet"] {
+    --bg-root: #060109;
+    --bg-panel: #0e0618;
+    --bg-panel-alt: #150a24;
+    --border: #2e155c;
+    --text-primary: #f0e8ff;
+    --text-secondary: #bda8e6;
+    --text-muted: #8a77b5;
+    --accent: #b84dff;
+    --accent-hover: #cd7bff;
+    --success: #3ddc84;
+    --success-hover: #5feba0;
+    --neutral: #1c1033;
+    --neutral-hover: #281748;
+    --danger: #ff4d5e;
+    --danger-hover: #ff7385;
+    --amber: #f5b544;
+    --on-accent: #16002e;       /* text on an accent-coloured button */
+    --on-success: #052412;
+    --on-danger: #2a0509;
+    --on-amber: #1f1400;
+    --font-body: "Segoe UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;   /* headings and the app name */
+    --font-mono: Consolas, "Cascadia Mono", monospace;
+    --radius: 10px;
+    --radius-sm: 6px;
+    color-scheme: dark;
+}
+
 /* I · Catalog: archive-card paper, ink blue, typewriter numbers. */
 [data-theme="catalog"] {
     --bg-root: #dfe0d8;

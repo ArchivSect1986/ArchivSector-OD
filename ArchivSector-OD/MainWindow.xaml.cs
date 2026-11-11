@@ -148,14 +148,14 @@ namespace ArchivSector_OD
         // before the page is there; anything unknown gets Midnight's.
         private static System.Windows.Media.Color StartBackground()
         {
-            string id = "midnight";
+            string id = "console";
             // The theme the app will actually start in (a holiday theme in its week, too).
             try { id = AppShell.PickStartTheme(ConfigService.Load()); } catch { }
             string hex = id switch
             {
                 "nova" => "#070d1a", "console" => "#0c0e11", "daylight" => "#f2f3ef", "rack" => "#18191b",
                 "library" => "#161412", "swiss" => "#ffffff", "table" => "#f4f4f4", "neon" => "#100820",
-                "catalog" => "#dfe0d8", "kiosk" => "#000000", "halloween" => "#120a05", "remembrance" => "#111111",
+                "catalog" => "#dfe0d8", "kiosk" => "#000000", "ultraviolet" => "#060109", "halloween" => "#120a05", "remembrance" => "#111111",
                 "christmas" => "#0d1f16", "canada" => "#fbf4f4", "july4" => "#0b1733",
                 _ => "#0a1022",
             };

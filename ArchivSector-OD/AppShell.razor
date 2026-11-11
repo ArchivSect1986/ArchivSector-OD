@@ -184,7 +184,7 @@
 
 @code {
     private AppConfig config = new();
-    private string currentTheme = "midnight";
+    private string currentTheme = "console";
     // The themes offered in the 🎨 menu. Each Id matches a [data-theme="…"]
     // block in app.css; the colours here only draw the little preview tile.
     private sealed record ThemeInfo(string Id, string Name, string Background, string Panel, string Accent, string Text);
@@ -199,6 +199,7 @@
         new("swiss",    "Swiss",        "#ffffff", "#111111", "#111111", "#d40000"),
         new("table",    "Power Table",  "#f4f4f4", "#c6c6c6", "#0f62fe", "#161616"),
         new("neon",     "Neon",         "#100820", "#3a2a6b", "#3df5ff", "#ff4fc3"),
+        new("ultraviolet","Ultraviolet", "#060109", "#2e155c", "#b84dff", "#f0e8ff"),
         new("catalog",  "Catalog",      "#dfe0d8", "#b9bbae", "#2f5d8a", "#23261f"),
         new("kiosk",    "Big Tiles",    "#000000", "#3d3d3d", "#ffd60a", "#ffffff"),
     };
@@ -660,7 +661,7 @@
     internal static string PickStartTheme(AppConfig c)
     {
         string regular = Themes.Any(t => t.Id == c.RegularTheme) ? c.RegularTheme
-                       : Themes.Any(t => t.Id == c.Theme) ? c.Theme : "midnight";
+                       : Themes.Any(t => t.Id == c.Theme) ? c.Theme : "console";
         if (IsSeasonal(c.Theme) && SeasonalNow.Any(t => t.Id == c.Theme)) return c.Theme;
         if (c.AutoSeasonalTheme)
         {

@@ -8,7 +8,7 @@ namespace ArchivSector_OD
     // config file can never prevent the app from starting.
     public class AppConfig
     {
-        public string Theme { get; set; } = "midnight";
+        public string Theme { get; set; } = "console";
 
         // v4.0: the last everyday (non-seasonal) theme picked. A seasonal
         // theme (Halloween, Canada Day...) is only offered around its date;
