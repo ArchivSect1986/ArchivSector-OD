@@ -72,8 +72,8 @@
 @using System.IO
 @using System.Diagnostics
 
-<div class="bay-card @(Faceplate ? "faceplate" : "")">
-    @if (Faceplate)
+<div class="bay-card @(BayStyle == "faceplate" ? "faceplate" : BayStyle == "card" ? "card" : "")">
+    @if (BayStyle == "faceplate")
     {
         <div class="fp-head">
             <div class="fp-top">
@@ -147,7 +147,95 @@
             }
         </div>
     }
-    @if (!Faceplate)
+    @if (BayStyle == "card")
+    {
+        <div class="cd-head">
+            <div class="cd-top">
+                <div class="bay-art-tile cd-art">
+                    @if (coverDataUri is not null)
+                    {
+                        <img src="@coverDataUri" alt="Cover art" />
+                    }
+                    else if (Category == DiscCategory.Game)
+                    {
+                        <span class="bay-art-icon">🎮</span><span>Game</span>
+                    }
+                    else if (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd)
+                    {
+                        <span class="bay-art-icon">🎬</span><span>Movie</span>
+                    }
+                    else if (Category == DiscCategory.Audio)
+                    {
+                        <span class="bay-art-icon">🎵</span><span>Album</span>
+                    }
+                    else
+                    {
+                        <span class="bay-art-icon">💿</span><span>@(MediaPresent ? "Disc" : "No disc")</span>
+                    }
+                </div>
+                <div class="cd-right">
+                    <div class="cd-idrow">
+                        <span class="cd-letter">@DriveLetter:</span>
+                        @if (!string.IsNullOrEmpty(DriveModel))
+                        {
+                            <span class="cd-model" title="@DriveModel">@HistoryService.TidyDriveModel(DriveModel)</span>
+                        }
+                    </div>
+                    <div class="cd-term">
+                        @if (!MediaPresent)
+                        {
+                            <div class="t-empty">NO DISC · INSERT ONE TO START</div>
+                        }
+                        else
+                        {
+                            <div class="t-title @(isRunning ? "run" : "")" title="@VolumeTitle">@(string.IsNullOrWhiteSpace(VolumeTitle) ? "DISC DETECTED" : VolumeTitle)</div>
+                            <div class="t-info">@FormatLabel@(!string.IsNullOrEmpty(CapacityLabel) ? " · " + CapacityLabel : "")</div>
+                        }
+                    </div>
+                </div>
+            </div>
+            <div class="cd-acts">
+                <button class="bay-btn bd @(selectedMode == "Blu-ray / 4K UHD" ? "selected" : "")"
+                        disabled="@(Category != DiscCategory.BluRay || healthRunning)"
+                        title="@(Category != DiscCategory.BluRay ? "Insert a Blu-ray/4K disc to enable this" : "")"
+                        @onclick='() => OpenModeDialog("bd")'>🎬 Blu-ray / 4K</button>
+                <button class="bay-btn dvd @(selectedMode == "DVD Movie Disc" ? "selected" : "")"
+                        disabled="@(Category != DiscCategory.Dvd || healthRunning)"
+                        title="@(Category != DiscCategory.Dvd ? "Insert a DVD to enable this" : "")"
+                        @onclick='() => OpenModeDialog("dvd")'>📀 DVD</button>
+                <button class="bay-btn game @(selectedMode == "Game Disc" ? "selected" : "")"
+                        disabled="@(!CanRawDump || healthRunning)"
+                        title="@(!CanRawDump ? "Insert a game or data disc to enable this" : Category == DiscCategory.Unknown ? "Unrecognized disc (e.g. a PC game) -- dumps a raw image with Redumper" : "")"
+                        @onclick='() => StartGated(() => RunRedumperDump("Game", "Game Disc", "Games"))'>🎮 Game</button>
+            </div>
+            <div class="cd-stat"><span class="cd-dot @(isRunning ? "run" : MediaPresent ? "on" : "")"></span>@StatusText</div>
+            @if (MediaPresent && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd || Category == DiscCategory.Game || Category == DiscCategory.Audio))
+            {
+                <div class="fp-artrow">
+                    <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">🎨 Fetch Metadata &amp; Artwork</button>
+                    @if (hasCachedCover && cachedArt?.Metadata is not null)
+                    {
+                        <span class="tray-message" style="color: var(--success); cursor: pointer;"
+                              @onclick="OpenArtCacheFolder" title="Click to open cached artwork folder">
+                            ✓ Cached: @cachedArt.Metadata.Title (@cachedArt.Metadata.Source)
+                        </span>
+                        @if (!string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
+                        {
+                            <span class="tray-message" style="cursor: pointer; text-decoration: underline;"
+                                  @onclick="() => showMetadataDetails = !showMetadataDetails">
+                                @(showMetadataDetails ? "▾ Hide details" : "▸ Show details")
+                            </span>
+                        }
+                    }
+                </div>
+                @if (showMetadataDetails && cachedArt?.Metadata is not null && !string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
+                {
+                    <p class="bay-subtitle" style="margin: 0; max-width: 100%;">@cachedArt.Metadata.Detail</p>
+                }
+            }
+        </div>
+    }
+    @if (BayStyle == "classic")
     {
     @if (isEditingLabel)
     {
@@ -339,6 +427,8 @@
         </button>
     </div>
 
+    @if (BayStyle != "card")
+    {
     <div class="bay-actions">
         <button class="bay-btn bd @(selectedMode == "Blu-ray / 4K UHD" ? "selected" : "")"
                 disabled="@(Category != DiscCategory.BluRay || healthRunning)"
@@ -359,6 +449,7 @@
             🎮 Game Disc / Raw ISO (Redumper)
         </button>
     </div>
+    }
 
     <div class="bay-status">
         <span>
@@ -754,7 +845,7 @@
 
     // v4.0 beta 2: the Drive Bays tab is showing (tray watching only runs then).
     [Parameter] public bool TabVisible { get; set; } = true;
-    [Parameter] public bool Faceplate { get; set; }   // beta 6: the D faceplate row layout
+    [Parameter] public string BayStyle { get; set; } = "classic";   // beta 6: "classic", "faceplate", or "card"
 
     // Tray watching (v4.0 beta 2): every couple of seconds while the Drive
     // Bays tab is showing and the drive isn't busy, the drive is asked

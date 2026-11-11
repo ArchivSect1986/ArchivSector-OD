@@ -63,9 +63,9 @@
                         title="Auto-starts a rip on disc insert with no confirmation dialogs -- Blu-ray goes straight to Full Backup, DVD to a raw ISO dump.">
                     <span class="dot"></span>Unattended @(config.UnattendedAutoStart ? "on" : "off")
                 </button>
-                <button class="unattended-pill @(config.DriveBayFaceplateCols > 0 ? "on" : "")" @onclick="CycleFaceplate"
-                        title="Beta: each drive bay as a faceplate card with cover art. Click to cycle: off, 2 columns, 3 columns.">
-                    <span class="dot"></span>@(config.DriveBayFaceplateCols == 2 ? "Faceplate 2-col" : config.DriveBayFaceplateCols == 3 ? "Faceplate 3-col" : "Faceplate off")
+                <button class="unattended-pill @(config.DriveBayStyle != "classic" ? "on" : "")" @onclick="CycleDriveBayLayout"
+                        title="Beta: the drive-bay layout. Click to cycle: Classic, Faceplate (2/3 columns), Card (2/3 columns).">
+                    <span class="dot"></span>@(config.DriveBayStyle == "classic" ? "Layout: Classic" : (config.DriveBayStyle == "faceplate" ? "Faceplate " : "Card ") + config.DriveBayCols + "-col")
                 </button>
             }
             <button class="icon-btn" @onclick="ShowHistory" title="History" aria-label="History">📜</button>
@@ -132,7 +132,7 @@
     <div class="tab-pane @(activeTab == "bays" ? "show" : "")">
     @if (driveStates.Count == 0)
     {
-        <div class="bays-grid @(config.DriveBayFaceplateCols == 2 ? "faceplate fp-cols-2" : config.DriveBayFaceplateCols == 3 ? "faceplate fp-cols-3" : "")">
+        <div class="bays-grid @(config.DriveBayStyle == "classic" ? "" : $"{config.DriveBayStyle} cols-{config.DriveBayCols}")">
             <p style="color: var(--text-muted); padding: 20px;">
                 No optical drives detected on this machine.
             </p>
@@ -140,7 +140,7 @@
     }
     else
     {
-        <div class="bays-grid @(config.DriveBayFaceplateCols == 2 ? "faceplate fp-cols-2" : config.DriveBayFaceplateCols == 3 ? "faceplate fp-cols-3" : "")">
+        <div class="bays-grid @(config.DriveBayStyle == "classic" ? "" : $"{config.DriveBayStyle} cols-{config.DriveBayCols}")">
             @foreach (var letter in driveStates.Keys.OrderBy(l => l))
             {
                 var st = driveStates[letter];
@@ -160,7 +160,7 @@
                               BlankFreeBytes="@st.BlankFreeBytes" BlankTotalBytes="@st.BlankTotalBytes"
                               DriveModel="@(hw?.Caption ?? "")"
                               DriveFirmware="@(hw?.Firmware ?? "")"
-                              Faceplate="@(config.DriveBayFaceplateCols > 0)"
+                              BayStyle="@config.DriveBayStyle"
                               TabVisible="@(activeTab == "bays")" />
             }
         </div>
@@ -397,10 +397,21 @@
         config = fresh;
     }
 
-    private void CycleFaceplate()
+    private void CycleDriveBayLayout()
     {
         var fresh = ConfigService.Load();
-        fresh.DriveBayFaceplateCols = config.DriveBayFaceplateCols == 0 ? 2 : config.DriveBayFaceplateCols == 2 ? 3 : 0;
+        var style = fresh.DriveBayStyle;
+        var cols = fresh.DriveBayCols;
+        (style, cols) = (style, cols) switch
+        {
+            ("classic", _) => ("faceplate", 2),
+            ("faceplate", 2) => ("faceplate", 3),
+            ("faceplate", _) => ("card", 2),
+            ("card", 2) => ("card", 3),
+            _ => ("classic", 2),
+        };
+        fresh.DriveBayStyle = style;
+        fresh.DriveBayCols = cols;
         ConfigService.Save(fresh);
         config = fresh;
     }
