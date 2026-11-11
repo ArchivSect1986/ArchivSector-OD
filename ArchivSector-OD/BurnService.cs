@@ -282,4 +282,12 @@ namespace ArchivSector_OD
             catch { }
         }
     }
+
+    // Lets a drive bay hand a finished ISO to the Burn tab's queue
+    // ("Burn this ISO"). AppShell listens and switches to the Burn tab.
+    public static class BurnHandoff
+    {
+        public static event Action<string>? Requested;
+        public static void Request(string isoPath) => Requested?.Invoke(isoPath);
+    }
 }

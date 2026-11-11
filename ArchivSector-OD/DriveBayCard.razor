@@ -605,6 +605,14 @@
         </button>
     }
 
+    @if (LastBurnableIso is string burnIso)
+    {
+        <button class="bay-btn tray-btn" style="margin-top: 6px;" @onclick="() => BurnThisIso(burnIso)"
+                title="Sends this ISO to the Burn tab's queue, ready to burn to a blank disc">
+            🔥 Burn this ISO
+        </button>
+    }
+
     @* v3.3: burning an ISO to a blank disc. Always mounted so a running
        burn keeps its screen; it shows nothing unless there's a blank disc
        or a burn to show. *@
@@ -1667,6 +1675,17 @@
             AddLog($"Sent to TargetFill: {dir}");
             TargetFillHandoff.Request(dir);
         }
+    }
+
+    // The finished ISO from a Blu-ray Full Backup or a raw-ISO dump, when there is one.
+    private string? LastBurnableIso =>
+        !isRunning && !isVerifying && lastOutputFolder is string p
+        && p.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) && File.Exists(p) ? p : null;
+
+    private void BurnThisIso(string isoPath)
+    {
+        AddLog($"Sent to Burn: {isoPath}");
+        BurnHandoff.Request(isoPath);
     }
 
     // ---- Game disc naming ----

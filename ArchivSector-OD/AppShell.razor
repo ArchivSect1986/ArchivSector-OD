@@ -126,7 +126,7 @@
     {
     @* Burn tab (in progress). It only scans the drives once it's first shown. *@
     <div class="tab-pane @(activeTab == "burn" ? "show" : "")">
-        <BurnTab Visible="@(activeTab == "burn")" />
+        <BurnTab Visible="@(activeTab == "burn")" BurnIsoRequest="@burnIsoRequest" BurnRequestId="@burnRequestId" />
     </div>
 
     <div class="tab-pane @(activeTab == "bays" ? "show" : "")">
@@ -235,6 +235,8 @@
     private string activeTab = "bays";
     private string? targetFillSource = null;
     private int targetFillRequestId = 0;
+    private string? burnIsoRequest = null;
+    private int burnRequestId = 0;
 
     // Opened from the right-click menu (--targetfill "<folder>").
     private bool fillOnly = false;
@@ -244,6 +246,14 @@
         targetFillSource = folder;
         targetFillRequestId++;
         activeTab = "fill";
+        StateHasChanged();
+    });
+
+    private void OnBurnRequested(string isoPath) => InvokeAsync(() =>
+    {
+        burnIsoRequest = isoPath;
+        burnRequestId++;
+        activeTab = "burn";
         StateHasChanged();
     });
     private string? shortcutMessage = null;
@@ -295,6 +305,7 @@
 
         BatchSyncService.StateChanged += OnBatchSyncStateChanged;
         TargetFillHandoff.Requested += OnTargetFillRequested;
+        BurnHandoff.Requested += OnBurnRequested;
 
         // Drives are checked on a background thread every 2 seconds. A drive
         // spinning up after its tray closes can keep Windows busy for several
@@ -733,5 +744,6 @@
         driveWatchTimer?.Dispose();
         BatchSyncService.StateChanged -= OnBatchSyncStateChanged;
         TargetFillHandoff.Requested -= OnTargetFillRequested;
+        BurnHandoff.Requested -= OnBurnRequested;
     }
 }

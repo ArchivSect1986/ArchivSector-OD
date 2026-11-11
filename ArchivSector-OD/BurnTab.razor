@@ -235,6 +235,10 @@
     private bool wasVisible;
     /// <summary>True while the Burn tab is the one showing.</summary>
     [Parameter] public bool Visible { get; set; }
+    [Parameter] public string? BurnIsoRequest { get; set; }   // beta 6: an ISO sent from a drive bay's "Burn this ISO"
+    [Parameter] public int BurnRequestId { get; set; }
+    private int lastBurnRequestId = -1;
+    private string? pendingBurnIso;
 
     private IReadOnlyList<BurnerDrive>? drives;
     private string mode = "write";
@@ -427,6 +431,17 @@
 
     // First time the tab is shown: scan, then keep watching the trays
     // (v4.0 week 6), so "Refresh drives" is only needed now and then.
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (pendingBurnIso is not null && queue is not null)
+        {
+            var iso = pendingBurnIso;
+            pendingBurnIso = null;
+            queue.AddIso(iso);
+            StateHasChanged();
+        }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         // The tab has just been shown: open the live log (Settings can turn this off).
@@ -435,6 +450,17 @@
             try { if (ConfigService.Load().LiveLogOpensWithBurnTab) showLiveLog = true; } catch { }
         }
         wasVisible = Visible;
+
+        if (BurnRequestId != lastBurnRequestId)
+        {
+            lastBurnRequestId = BurnRequestId;
+            if (!string.IsNullOrWhiteSpace(BurnIsoRequest))
+            {
+                mode = "write";
+                if (queue is not null) queue.AddIso(BurnIsoRequest);
+                else pendingBurnIso = BurnIsoRequest;
+            }
+        }
 
         if (Visible && !scannedOnce)
         {
