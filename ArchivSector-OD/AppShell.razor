@@ -118,18 +118,18 @@
 
     @* Both tabs stay mounted; the hidden one is only hidden, so running
        rips and a running TargetFill job keep going across tab switches. *@
-    <div style="display: @(activeTab == "fill" ? "block" : "none");">
+    <div class="tab-pane @(activeTab == "fill" ? "show" : "")">
         <TargetFillPanel SourceRequest="@targetFillSource" RequestId="@targetFillRequestId" />
     </div>
 
     @if (!fillOnly)
     {
     @* Burn tab (in progress). It only scans the drives once it's first shown. *@
-    <div style="display: @(activeTab == "burn" ? "block" : "none");">
+    <div class="tab-pane @(activeTab == "burn" ? "show" : "")">
         <BurnTab Visible="@(activeTab == "burn")" />
     </div>
 
-    <div style="display: @(activeTab == "bays" ? "block" : "none");">
+    <div class="tab-pane @(activeTab == "bays" ? "show" : "")">
     @if (driveStates.Count == 0)
     {
         <div class="bays-grid @(config.DriveBayFaceplateCols == 2 ? "faceplate fp-cols-2" : config.DriveBayFaceplateCols == 3 ? "faceplate fp-cols-3" : "")">

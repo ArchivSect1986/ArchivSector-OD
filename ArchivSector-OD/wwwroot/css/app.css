@@ -541,6 +541,7 @@
 html, body, #app {
     height: 100%;
     margin: 0;
+    overflow: hidden;   /* the window never scrolls; only a tab's content does */
 }
 
 body {
@@ -564,6 +565,7 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    overflow: hidden;
     background: var(--bg-root);
     /* body sits outside the theme, so the theme's text colour and font are
        set here. Without this, labels, <strong> and plain <div> text fell
@@ -833,6 +835,20 @@ body {
 /* ============================================================
    Drive bay grid
    ============================================================ */
+
+/* Each tab's content fills the space between the fixed header and footer
+   and scrolls on its own, so the header and footer stay put. */
+.tab-pane {
+    display: none;
+}
+
+    .tab-pane.show {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
 
 .bays-grid {
     flex: 1;
