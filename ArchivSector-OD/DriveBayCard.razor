@@ -64,8 +64,8 @@
    that landed in Games\General_Games into Games\<console>.
 
    Blu-ray Full Backup has an automatic ImgBurn stage 2 when ImgBurn
-   is available. DVD's raw ISO dump falls back to ImgBurn when
-   Redumper isn't found. *@
+   is available. DVD's raw ISO dump falls back to ArchivSector-OD's
+   own reader when Redumper isn't found. *@
 
 @implements IDisposable
 @using System.Threading.Tasks
@@ -669,7 +669,7 @@
                 else
                 {
                     <button class="modal-btn" @onclick="ManualFullBackup">MakeMKV Decrypted Backup (not a raw sector ISO)</button>
-                    <button class="modal-btn" @onclick='() => StartGated(() => RunRedumperDump("DVD_RawISO", "DVD Raw Sector ISO", "DVD_Movies"))'>Raw Sector ISO Dump (Redumper / ImgBurn)</button>
+                    <button class="modal-btn" @onclick='() => StartGated(() => RunRedumperDump("DVD_RawISO", "DVD Raw Sector ISO", "DVD_Movies"))'>Raw Sector ISO Dump (Redumper / own reader)</button>
                 }
                 <button class="modal-btn" @onclick="ManualMovieOnly">Movie-Only MKV</button>
                 <button class="modal-btn cancel" @onclick="CloseModeDialog">Cancel</button>
@@ -2159,20 +2159,18 @@
         var config = ConfigService.Load();
         var exe = RedumperService.FindExecutable(config.RedumperPathOverride);
 
-        string? imgBurnFallbackExe = null;
-        if (exe is null && folderPrefix == "DVD_RawISO")
-        {
-            AddLog($"{operationLabel}: redumper.exe not found, checking for ImgBurn fallback");
-            imgBurnFallbackExe = ImgBurnService.FindExecutable(config.ImgBurnPathOverride);
-        }
+        // Beta 6: a DVD raw-ISO dump no longer needs ImgBurn -- when
+        // Redumper isn't found, ArchivSector-OD's own reader does it
+        // (with live progress and Cancel).
+        bool useOwnReader = exe is null && folderPrefix == "DVD_RawISO";
+        if (useOwnReader)
+            AddLog($"{operationLabel}: redumper.exe not found -- using ArchivSector-OD's own reader");
 
-        if (exe is null && imgBurnFallbackExe is null)
+        if (exe is null && !useOwnReader)
         {
             redumperResult = new RedumperService.DumpResult
             {
-                ErrorMessage = folderPrefix == "DVD_RawISO"
-                    ? "Neither redumper.exe nor ImgBurn.exe were found -- checked Settings overrides, PATH, and standard install locations for both."
-                    : "redumper.exe not found -- checked Settings override, PATH, and C:\\redumper\\redumper.exe."
+                ErrorMessage = "redumper.exe not found -- checked Settings override, PATH, and C:\\redumper\\redumper.exe."
             };
             AddLog(redumperResult.ErrorMessage!);
             StateHasChanged();
@@ -2286,18 +2284,48 @@
         }
         else
         {
-            runningKind = "imgburn";
-            runningLabel = "Reading DVD via ImgBurn (fallback -- no live progress or Cancel support for this step)…";
-            progressPercent = null;
-            AddLog($"{operationLabel}: dump started (ImgBurn fallback)");
+            // Beta 6: no Redumper -- read the DVD to an ISO with
+            // ArchivSector-OD's own reader, with live progress and Cancel.
+            runningKind = "iso";
+            runningLabel = "Reading the DVD to an ISO (ArchivSector-OD's own reader)…";
+            progressPercent = 0;
+            isoProgressText = "Reading…";
+            AddLog($"{operationLabel}: dump started (own reader)");
             StateHasChanged();
 
-            var imgResult = await Task.Run(() => ImgBurnService.ReadDiscToIso(imgBurnFallbackExe!, DriveLetter, outputFolder, isoName));
+            try { Directory.CreateDirectory(outputFolder); } catch { }
+            var ownIsoPath = Path.Combine(outputFolder, $"{isoName}.iso");
+            isoCts = new CancellationTokenSource();
+            var readProgress = new System.Progress<ArchivSector_OD.Burning.DiscReader.Progress>(p => InvokeAsync(() =>
+            {
+                progressPercent = p.Percent >= 0 ? (int)p.Percent : null;
+                long done = p.SectorsDone * (long)ArchivSector_OD.Burning.DiscReader.SectorSize;
+                long tot = p.TotalSectors * (long)ArchivSector_OD.Burning.DiscReader.SectorSize;
+                isoProgressText = p.TotalSectors > 0
+                    ? $"{FormatGb(done)} / {FormatGb(tot)} ({(int)p.Percent}%) · {p.BytesPerSec / (1024 * 1024):0} MB/s"
+                    : "Reading…";
+                StateHasChanged();
+            }));
+            ArchivSector_OD.Burning.DiscReader.Result read;
+            try
+            {
+                read = await ArchivSector_OD.Burning.DiscReader.ReadAsync(new ArchivSector_OD.Burning.DiscReader.Options
+                {
+                    DriveLetter = DriveLetter,
+                    OutputPath = ownIsoPath,
+                    Retries = 3,
+                    ContinueOnErrors = false,
+                }, readProgress, isoCts.Token, line => AddLog($"{operationLabel}: {line}"));
+            }
+            catch (Exception ex) { read = new ArchivSector_OD.Burning.DiscReader.Result { Message = ex.Message }; }
+            finally { isoCts.Dispose(); isoCts = null; }
+
+            if (read.Cancelled) wasCancelled = true;
             redumperResult = new RedumperService.DumpResult
             {
-                Success = imgResult.Success,
-                IsoPath = imgResult.IsoPath,
-                ErrorMessage = imgResult.ErrorMessage,
+                Success = read.Ok,
+                IsoPath = read.IsoPath,
+                ErrorMessage = read.Ok ? null : read.Message,
             };
         }
 

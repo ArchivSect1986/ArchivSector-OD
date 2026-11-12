@@ -39,7 +39,7 @@
         <button class="nav-btn @(mode == "music" ? "active" : "")" @onclick='() => mode = "music"'>🎵 Music CD</button>
         <button class="nav-btn @(mode == "read" ? "active" : "")" @onclick='() => mode = "read"'>📀 Read disc</button>
         <button class="nav-btn @(mode == "copy" ? "active" : "")" @onclick='() => mode = "copy"'>🔁 Copy disc</button>
-        <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'>✔ Verify disc</button>
+        <button class="nav-btn @(mode == "verify" ? "active" : "")" @onclick='() => mode = "verify"'><span style="color: var(--success);">✔</span> Verify disc</button>
         <button class="nav-btn @(mode == "accuraterip" ? "active" : "")" @onclick='() => mode = "accuraterip"'>🎯 AccurateRip</button>
         <button class="nav-btn @(mode == "info" ? "active" : "")" @onclick='() => mode = "info"'>🔎 Drive info</button>
         @* Beta 4: today's log, without going back to the drive bays, and the
