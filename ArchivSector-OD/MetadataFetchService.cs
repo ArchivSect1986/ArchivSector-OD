@@ -427,9 +427,10 @@ namespace ArchivSector_OD
             public MetadataResult? Metadata;
         }
 
-        public static CachedArt? GetCachedArt(string cacheKey)
+        public static CachedArt? GetCachedArt(string cacheKey) => ReadCachedArtFromDir(GetArtCacheDir(cacheKey));
+
+        private static CachedArt? ReadCachedArtFromDir(string dir)
         {
-            var dir = GetArtCacheDir(cacheKey);
             var metaPath = Path.Combine(dir, "metadata.json");
             if (!File.Exists(metaPath)) return null;
 
@@ -450,10 +451,74 @@ namespace ArchivSector_OD
             }
         }
 
-        public static async Task<CachedArt> SaveArtworkAndMetadata(string cacheKey, MetadataResult metadata)
+        // Beta 6: fold a disc's version year into the cache key ("Title (2017)")
+        // so remakes cache to separate folders instead of overwriting one shared
+        // poster. No year -- or anything that isn't a plausible 4-digit year --
+        // keeps the plain key, and a year already present isn't doubled.
+        public static string VersionedCacheKey(string baseKey, string? year)
+        {
+            if (string.IsNullOrWhiteSpace(year)) return baseKey;
+            var y = year.Trim();
+            if (!Regex.IsMatch(y, @"^(?:18|19|20)\d{2}$")) return baseKey;
+            return baseKey.Contains(y) ? baseKey : $"{baseKey} ({y})";
+        }
+
+        // Beta 6: choose which cached art to show on insert, when the disc's year
+        // isn't known yet. Prefer an exact (legacy, no-year) folder; otherwise
+        // reuse a cached version only when exactly one "baseKey (YYYY)" folder
+        // exists. If two or more do (e.g. Beauty and the Beast 1991 AND 2017),
+        // return null so the caller re-fetches and the fetched year decides.
+        public static CachedArt? GetCachedArtResolved(string baseKey, string? discTag = null)
+        {
+            var exact = GetCachedArt(baseKey);
+            if (exact is not null) return exact;
+
+            if (!Directory.Exists(ArtCacheRoot)) return null;
+            var safeBase = SanitizeForFilesystem(baseKey);
+            var rx = new Regex("^" + Regex.Escape(safeBase) + @" \((?:18|19|20)\d{2}\)$");
+            var matches = Directory.EnumerateDirectories(ArtCacheRoot)
+                .Where(d => rx.IsMatch(Path.GetFileName(d)))
+                .ToList();
+
+            if (matches.Count == 1) return ReadCachedArtFromDir(matches[0]);
+
+            // Several versions cached (e.g. 1991 and 2017): the title can't pick
+            // one, so match this disc's stamp to the folder it was saved for.
+            if (matches.Count > 1 && !string.IsNullOrWhiteSpace(discTag))
+            {
+                var tag = discTag.Trim();
+                var hit = matches.FirstOrDefault(d => string.Equals(ReadDiscTag(d), tag, StringComparison.OrdinalIgnoreCase));
+                if (hit is not null) return ReadCachedArtFromDir(hit);
+            }
+
+            // Can't tell which version this disc is -> let the caller re-fetch.
+            return null;
+        }
+
+        private static string? ReadDiscTag(string dir)
+        {
+            try
+            {
+                var f = Path.Combine(dir, "disc_id.txt");
+                return File.Exists(f) ? File.ReadAllText(f).Trim() : null;
+            }
+            catch { return null; }
+        }
+
+        public static async Task<CachedArt> SaveArtworkAndMetadata(string cacheKey, MetadataResult metadata, string? discTag = null)
         {
             var dir = GetArtCacheDir(cacheKey);
             Directory.CreateDirectory(dir);
+
+            // Beta 6: stamp the folder with something unique to THIS disc (its
+            // serial, or failing that its size) so that when two same-titled
+            // versions are cached (Beauty and the Beast 1991 AND 2017), the right
+            // one can be matched back to the disc in the drive after a restart.
+            if (!string.IsNullOrWhiteSpace(discTag))
+            {
+                try { await File.WriteAllTextAsync(Path.Combine(dir, "disc_id.txt"), discTag.Trim()); }
+                catch { /* best-effort -- falls back to "ambiguous, re-fetch" */ }
+            }
 
             var coverPath = "";
             if (!string.IsNullOrWhiteSpace(metadata.FullImageUrl))

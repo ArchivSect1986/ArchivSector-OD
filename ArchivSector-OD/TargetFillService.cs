@@ -107,6 +107,7 @@ namespace ArchivSector_OD
             public bool TooBig;                 // payload doesn't fit on one disc
             public string Message = "";
             public List<string> Outputs = new();
+            public List<string> IsoPaths = new();     // beta 6: full paths of the .iso images built, for "Build & burn"
             public List<string> Notes = new();
         }
 
@@ -1160,6 +1161,7 @@ namespace ArchivSector_OD
                         ExportDiscLabel(pngPath, o.Media, head, bins[d].Size, num, discs);
                         Track(targetDir, pngPath, "artifact");
                         r.Outputs.Add($"{Path.GetFileName(isoPath)} ({FormatBytes(new FileInfo(isoPath).Length)})");
+                        r.IsoPaths.Add(isoPath);
                     }
                     finally
                     {
@@ -1220,6 +1222,7 @@ namespace ArchivSector_OD
                     ExportDiscLabel(png, o.Media, 0, payload, d + 1, folders.Count);
                     Track(targetDir, png, "artifact");
                     r.Outputs.Add($"{Path.GetFileName(iso)} ({FormatBytes(new FileInfo(iso).Length)})");
+                    r.IsoPaths.Add(iso);
                 }
                 Chime(o);
                 r.Ok = true;

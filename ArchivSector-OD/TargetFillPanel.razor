@@ -277,6 +277,8 @@
             <div class="tf2-keys">
                 <button class="tf2-key primary" @onclick="RunIso" disabled="@(busy || !HasFolder || Medium.IsUsb)"
                         title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds ready-to-burn .iso images; your files aren't changed")">💿 Generate .ISO Image</button>
+                <button class="tf2-key primary" @onclick="RunIsoBurn" disabled="@(busy || !HasFolder || Medium.IsUsb)"
+                        title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds the .iso, then sends it straight to the Burn tab")">🔥 Build &amp; Burn</button>
                 <button class="tf2-key" @onclick="RunFiller" disabled="@(busy || !HasFolder)" title="Adds filler files to this folder so it burns to exactly 100%">🧩 Generate Split Filler</button>
                 <button class="tf2-key danger" @onclick="RunClean" disabled="@(busy || !HasFolder)">🧹 Clean Fillers</button>
                 <button class="tf2-key" @onclick="RunImgBurn" disabled="@(busy || !HasFolder || Medium.IsUsb)"
@@ -701,6 +703,10 @@ else
             <button class="bay-btn game" style="width: auto; padding: 0 18px;" @onclick="RunIso" disabled="@(busy || !HasFolder || Medium.IsUsb)"
                     title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds ready-to-burn .iso images; your files aren't changed")">
                 💿 Generate .ISO Image
+            </button>
+            <button class="bay-btn game" style="width: auto; padding: 0 18px;" @onclick="RunIsoBurn" disabled="@(busy || !HasFolder || Medium.IsUsb)"
+                    title="@(Medium.IsUsb ? "ISO images are for discs" : "Builds the .iso, then sends it straight to the Burn tab")">
+                🔥 Build &amp; Burn
             </button>
             <button class="bay-btn bd" style="width: auto; padding: 0 18px;" @onclick="RunFiller" disabled="@(busy || !HasFolder)"
                     title="Adds filler files to this folder so it burns to exactly 100%">
@@ -1652,7 +1658,7 @@ else
                       "[No]   Copy the files into Disc_01, Disc_02… folders, each padded to full.\n" +
                       "[Cancel]  Do nothing.",
                       "Auto-Span Multi-Disc", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-        if (ans == MessageBoxResult.Yes) { await RunIsoCore(skipFolderPrompt: true, f); return; }
+        if (ans == MessageBoxResult.Yes) { await RunIsoCore(skipFolderPrompt: true, f, thenBurn: false); return; }
         if (ans != MessageBoxResult.No) { ShowResult(false, "Cancelled."); await ApplyPendingRequest(); return; }
 
         var old = TargetFillService.PreviousDiscFolders(f);
@@ -1666,12 +1672,16 @@ else
         if (span is not null) await Finish(span, o, f);
     }
 
-    private Task RunIso() => RunIsoCore(skipFolderPrompt: false, folder);
+    private Task RunIso() => RunIsoCore(skipFolderPrompt: false, folder, thenBurn: false);
+
+    // Beta 6: Build & burn -- build the padded ISO(s) exactly like Generate
+    // .ISO Image, then hand each finished image to the Burn tab's queue.
+    private Task RunIsoBurn() => RunIsoCore(skipFolderPrompt: false, folder, thenBurn: true);
 
     // Generate .ISO Image, with TargetFill Pro's two questions: build one
     // ISO per existing Disc_NN folder? and, for a multi-disc set, the
     // per-disc summary before building.
-    private async Task RunIsoCore(bool skipFolderPrompt, string f)
+    private async Task RunIsoCore(bool skipFolderPrompt, string f, bool thenBurn = false)
     {
         var o = CurrentOptions();
         if (!skipFolderPrompt)
@@ -1685,7 +1695,7 @@ else
                 if (ans == MessageBoxResult.Yes)
                 {
                     var rf = await RunJob(() => TargetFillService.BuildIsoFromDiscFolders(f, o, Progress));
-                    if (rf is not null) await Finish(rf, o, f);
+                    if (rf is not null) await Finish(rf, o, f, thenBurn);
                     return;
                 }
             }
@@ -1707,7 +1717,7 @@ else
         }
 
         var r = await RunJob(() => TargetFillService.BuildIso(f, o, Progress));
-        if (r is not null) await Finish(r, o, f);
+        if (r is not null) await Finish(r, o, f, thenBurn);
     }
 
     private async Task RunClean()
@@ -1945,7 +1955,7 @@ else
         await SetFolder(p);
     }
 
-    private async Task Finish(TargetFillService.Result r, TargetFillService.Options o, string f)
+    private async Task Finish(TargetFillService.Result r, TargetFillService.Options o, string f, bool thenBurn = false)
     {
         ShowResult(r.Ok, r.Message, r.Outputs, r.Notes);
         if (r.Ok && o.Catalog)
@@ -1954,6 +1964,22 @@ else
             try { TargetFillService.RecordHistory(title, o.Media.Label, f); } catch { /* history is best-effort */ }
         }
         await Rescan();
+
+        // Beta 6: Build & burn -- send every ISO just built to the Burn tab. It
+        // queues one request at a time, so for a multi-disc set we space them out
+        // and let the user burn each, swapping discs between them.
+        if (thenBurn && r.Ok && r.IsoPaths.Count > 0)
+        {
+            if (r.IsoPaths.Count > 1)
+                Progress($"Sending {r.IsoPaths.Count} ISO images to the Burn tab — burn them one at a time, swapping discs.");
+            for (int i = 0; i < r.IsoPaths.Count; i++)
+            {
+                BurnHandoff.Request(r.IsoPaths[i]);
+                if (i < r.IsoPaths.Count - 1) await Task.Delay(200);
+            }
+            return;   // the handoff switches to the Burn tab
+        }
+
         await ApplyPendingRequest();
     }
 

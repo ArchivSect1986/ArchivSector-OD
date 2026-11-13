@@ -129,7 +129,7 @@
                     {
                         <span class="tray-message" style="color: var(--success); cursor: pointer;"
                               @onclick="OpenArtCacheFolder" title="Click to open cached artwork folder">
-                            ✓ Cached: @cachedArt.Metadata.Title (@cachedArt.Metadata.Source)
+                            ✓ Cached: @CoverTitle(cachedArt.Metadata) (@cachedArt.Metadata.Source)
                         </span>
                         @if (!string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
                         {
@@ -217,7 +217,7 @@
                     {
                         <span class="tray-message" style="color: var(--success); cursor: pointer;"
                               @onclick="OpenArtCacheFolder" title="Click to open cached artwork folder">
-                            ✓ Cached: @cachedArt.Metadata.Title (@cachedArt.Metadata.Source)
+                            ✓ Cached: @CoverTitle(cachedArt.Metadata) (@cachedArt.Metadata.Source)
                         </span>
                         @if (!string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
                         {
@@ -333,7 +333,7 @@
                 {
                     <span class="tray-message" style="color: var(--success); cursor: pointer;"
                           @onclick="OpenArtCacheFolder" title="Click to open cached artwork folder">
-                        ✓ Cached: @cachedArt.Metadata.Title (@cachedArt.Metadata.Source)
+                        ✓ Cached: @CoverTitle(cachedArt.Metadata) (@cachedArt.Metadata.Source)
                     </span>
                     @if (!string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
                     {
@@ -341,14 +341,16 @@
                               @onclick="() => showMetadataDetails = !showMetadataDetails">
                             @(showMetadataDetails ? "▾ Hide details" : "▸ Show details")
                         </span>
+                        @* beta 6: the detail sits in the info column, right under the
+                           toggle, instead of full-width below the poster. *@
+                        @if (showMetadataDetails)
+                        {
+                            <p class="bay-subtitle" style="margin: 2px 0 0;">@cachedArt.Metadata.Detail</p>
+                        }
                     }
                 }
             </div>
         </div>
-        @if (showMetadataDetails && cachedArt?.Metadata is not null && !string.IsNullOrWhiteSpace(cachedArt.Metadata.Detail))
-        {
-            <p class="bay-subtitle" style="margin: 0 0 8px; max-width: 100%;">@cachedArt.Metadata.Detail</p>
-        }
     }
     }
 
@@ -668,7 +670,7 @@
                 }
                 else
                 {
-                    <button class="modal-btn" @onclick="ManualFullBackup">MakeMKV Decrypted Backup (not a raw sector ISO)</button>
+                    <button class="modal-btn" @onclick="ManualFullBackup">🔓 Decrypted ISO (via MakeMKV)</button>
                     <button class="modal-btn" @onclick='() => StartGated(() => RunRedumperDump("DVD_RawISO", "DVD Raw Sector ISO", "DVD_Movies"))'>Raw Sector ISO Dump (Redumper / own reader)</button>
                 }
                 <button class="modal-btn" @onclick="ManualMovieOnly">Movie-Only MKV</button>
@@ -845,6 +847,51 @@
     // Where to save art: the lookup key, or the label as a last resort
     // (saved, but never auto-loaded for another disc).
     private string ArtCacheName => ArtCacheKey ?? VolumeTitle;
+
+    // Beta 6: the cache-folder key for fetched artwork. The disc's own key (real
+    // label or serial) when it has one -- so it matches the lookup -- otherwise
+    // the fetched title, so discs with a shared generic label (XBOX360,
+    // PS4VOLUME, DVDVIDEO...) each still land in their own folder instead of
+    // piling into one.
+    private string ArtSaveKeyBase(string? fetchedTitle, string fallback)
+        => ArtCacheKey ?? (string.IsNullOrWhiteSpace(fetchedTitle) ? fallback : fetchedTitle!.Trim());
+
+    // Beta 6: something unique to THIS physical disc -- its serial, or failing
+    // that its size -- so two same-titled versions (Beauty and the Beast 1991
+    // and 2017) can be told apart and matched back to their art after a restart.
+    private string DiscTag =>
+        ReadVolumeSerial(DriveLetter) is string vsn ? vsn
+        : !string.IsNullOrWhiteSpace(Serial) ? Serial.Trim()
+        : !string.IsNullOrWhiteSpace(CapacityLabel) ? CapacityLabel.Trim()
+        : "";
+
+    // Beta 6: the disc's Volume Serial Number -- an ID written into the disc's
+    // file system when it was mastered. It's the same on every copy of a given
+    // release and differs between releases (1991 vs 2017 Beauty and the Beast),
+    // so it pins each disc to its own cached artwork across restarts. Present on
+    // movie discs too, unlike the game-only Serial above. Windows shows it as
+    // "XXXX-XXXX"; we prefix "VSN-" so the tag is self-describing.
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern bool GetVolumeInformation(
+        string rootPathName,
+        System.Text.StringBuilder? volumeNameBuffer, int volumeNameSize,
+        out uint volumeSerialNumber,
+        out uint maximumComponentLength,
+        out uint fileSystemFlags,
+        System.Text.StringBuilder? fileSystemNameBuffer, int fileSystemNameSize);
+
+    private static string? ReadVolumeSerial(string driveLetter)
+    {
+        try
+        {
+            var letter = (driveLetter ?? "").TrimEnd(':', '\\', ' ');
+            if (letter.Length == 0) return null;
+            if (GetVolumeInformation(letter + ":\\", null, 0, out uint serial, out _, out _, null, 0) && serial != 0)
+                return $"VSN-{(serial >> 16) & 0xFFFF:X4}-{serial & 0xFFFF:X4}";
+        }
+        catch { /* no disc / drive not ready -- fall back to the game serial or size */ }
+        return null;
+    }
     private string EffectiveGameSystem =>
         !string.IsNullOrWhiteSpace(GameSystem) ? GameSystem : logGameSystem ?? "";
 
@@ -1010,7 +1057,7 @@
             album.Length > 0 && artist.Length > 0 ? $"{artist} - {album}" : album.Length > 0 ? album : artist);
         if (!string.IsNullOrWhiteSpace(musicCacheKey))
         {
-            cachedArt = MetadataFetchService.GetCachedArt(musicCacheKey);
+            cachedArt = MetadataFetchService.GetCachedArtResolved(musicCacheKey, DiscTag);
             LoadCoverDataUri();
             if (!hasCachedCover && ConfigService.Load().AutoFetchMetadataArt)
                 _ = AutoFetchAlbumArt(album, artist, musicCacheKey);
@@ -1139,10 +1186,10 @@
             }
 
             var top = results[0];
-            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(ArtCacheName, top);
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(top.Title, VolumeTitle), top.Year), top, DiscTag);
             LoadCoverDataUri();
             AddLog(hasCachedCover
-                ? $"Auto-fetch: saved \"{top.Title}\" ({top.Source})"
+                ? $"Auto-fetch: saved \"{CoverTitle(top)}\" ({top.Source})"
                 : $"Auto-fetch: saved metadata for \"{top.Title}\" but no cover image was available -- will retry next insert.");
             StateHasChanged();
         }
@@ -1186,9 +1233,9 @@
         }
 
         AddLog($"Metadata search: saving \"{chosen.Title}\" ({chosen.Source}) to art cache");
-        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(ArtCacheName, chosen);
+        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(chosen.Title, VolumeTitle), chosen.Year), chosen, DiscTag);
         LoadCoverDataUri();
-        AddLog($"Metadata saved: {MetadataFetchService.GetArtCacheDir(ArtCacheName)}");
+        AddLog($"Metadata saved: {MetadataFetchService.GetArtCacheDir(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(chosen.Title, VolumeTitle), chosen.Year))}");
         StateHasChanged();
     }
 
@@ -1197,7 +1244,10 @@
         if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
         try
         {
-            var dir = MetadataFetchService.GetArtCacheDir(ArtCacheName);
+            var key = cachedArt?.Metadata is { } cm
+                ? MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(cm.Title, VolumeTitle), cm.Year)
+                : ArtCacheName;
+            var dir = MetadataFetchService.GetArtCacheDir(key);
             if (Directory.Exists(dir))
                 Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
         }
@@ -1489,9 +1539,9 @@
             if (results.Count == 0) results = preferSgdb ? await FromRawg() : await FromSgdb();
             if (results.Count == 0) { AddLog("Cover art: no results for '" + query + "'."); return; }
             var top = results[0];
-            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(name, top);
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(top.Title, name), top.Year), top, DiscTag);
             LoadCoverDataUri();
-            AddLog(hasCachedCover ? "Cover art: saved '" + top.Title + "' (" + top.Source + ")" : "Cover art: '" + top.Title + "' has no cover image.");
+            AddLog(hasCachedCover ? "Cover art: saved '" + CoverTitle(top) + "' (" + top.Source + ")" : "Cover art: '" + top.Title + "' has no cover image.");
             StateHasChanged();
         }
         catch (Exception ex)
@@ -1513,7 +1563,7 @@
             var results = await MetadataFetchService.SearchItunesAlbum(query);
             if (results.Count == 0) { AddLog("Album art: no iTunes match for '" + query + "'."); return; }
             var top = results[0];
-            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(cacheKey, top);
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(cacheKey, top.Year), top, DiscTag);
             LoadCoverDataUri();
             AddLog(hasCachedCover ? "Album art: saved '" + top.Title + "' (iTunes)" : "Album art: '" + top.Title + "' had no cover image.");
             await InvokeAsync(StateHasChanged);
@@ -2212,7 +2262,7 @@
             AddLog($"Destination: {categoryDir}");
         }
         var fallbackName = $"{folderPrefix}_{DriveLetter}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
-        var isoName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
+        var isoName = WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
 
         if (folderPrefix == "Game")
         {
@@ -2402,8 +2452,8 @@
         ResetResultState();
         selectedMode = kind == "bd"
             ? "Blu-ray / 4K UHD (Full Backup)"
-            : "DVD Movie Disc (MakeMKV Decrypted Backup)";
-        var opLabel = kind == "bd" ? "Blu-ray Full Backup" : "DVD MakeMKV Backup";
+            : "DVD Movie Disc (Decrypted ISO via MakeMKV)";
+        var opLabel = kind == "bd" ? "Blu-ray Full Backup" : "DVD Decrypted ISO";
         runningKind = "makemkv";
         isResolving = true;
         AddLog($"{opLabel}: resolving MakeMKV disc index");
@@ -2436,9 +2486,12 @@
         // Beta 5: the single-file ISO is built by ArchivSector-OD itself
         // (UDF 2.50, like ImgBurn), with progress and Cancel. ImgBurn is
         // only a fallback now, if it's installed and the own build fails.
-        var imgBurnExe = kind == "bd" ? ImgBurnService.FindExecutable(config.ImgBurnPathOverride) : null;
-        if (kind == "bd")
-            AddLog("Blu-ray Full Backup: the decrypted disc becomes a single-file ISO afterwards (stage 2/2, ArchivSector-OD's own ISO builder)");
+        // Beta 6: DVDs now finish like Blu-rays -- decrypt, then build a real
+        // single-file ISO -- so ImgBurn is the fallback for both, not just BD.
+        var imgBurnExe = ImgBurnService.FindExecutable(config.ImgBurnPathOverride);
+        AddLog(kind == "bd"
+            ? "Blu-ray Full Backup: the decrypted disc becomes a single-file ISO afterwards (stage 2/2, ArchivSector-OD's own ISO builder)"
+            : "DVD Decrypted ISO: the decrypted disc becomes a single-file ISO afterwards (stage 2/2, ArchivSector-OD's own ISO builder)");
 
         var indexResult = await Task.Run(() => MakeMkvService.ResolveDiscIndex(exe, DriveLetter));
         makeMkvResult = indexResult;
@@ -2461,7 +2514,7 @@
             AddLog($"Destination: {categoryDir}");
         }
         var fallbackName = $"{DriveLetter}_{folderTag}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
-        var baseName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
+        var baseName = WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
 
         if (config.UnattendedAutoStart)
         {
@@ -2476,23 +2529,47 @@
 
         var outputFolder = Path.Combine(categoryDir, baseName);
 
-        var destinationOverride = kind == "dvd"
-            ? Path.Combine(outputFolder, $"{baseName}.iso")
-            : null;
+        // Beta 6: both BD and DVD decrypt into a temp folder first, then the
+        // own ISO builder turns it into one .iso. (Previously DVD pointed
+        // MakeMKV straight at a ".iso" destination, which only ever produced a
+        // decrypted VIDEO_TS folder, never a true single-file image.)
+        var decryptTarget = Path.Combine(outputFolder, "_temp_decrypt");
 
-        var decryptTarget = kind == "bd"
-            ? Path.Combine(outputFolder, "_temp_decrypt")
-            : outputFolder;
+        // A cancelled or failed earlier attempt leaves this temp folder behind, so
+        // clear it before starting.
+        try
+        {
+            if (Directory.Exists(decryptTarget)) Directory.Delete(decryptTarget, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"[WARNING] Couldn't clear the leftover temp folder ({ex.Message}); MakeMKV may refuse it.");
+        }
+
+        // MakeMKV's DVD backup makes a finished ISO by itself (confirmed on real
+        // discs: it even refuses a pre-made destination folder -- "folder already
+        // contains a backup"). So for DVD we point MakeMKV straight at the final
+        // .iso path and it writes the decrypted image there -- no _temp_decrypt
+        // step. Blu-ray still decrypts into the pre-made _temp_decrypt folder,
+        // which IsoBuilder then assembles into one ISO. Stage 2 handles both:
+        // a folder is assembled, a single image file is moved into place only if
+        // it isn't already at the final name (it is, for DVD, so it's a no-op).
+        var dvdIsoPath = Path.Combine(outputFolder, $"{baseName}.iso");
+        var backupWorkingFolder = kind == "dvd" ? outputFolder : decryptTarget;
+        string? destinationOverride = kind == "dvd" ? dvdIsoPath : null;
 
         runningLabel = kind == "bd"
             ? $"Backing up (disc index {indexResult.DiscIndex})… this may take a while"
             : $"MakeMKV decrypted backup (disc index {indexResult.DiscIndex})… this may take a while";
         isRunning = true;
-        StartProgressTimer(decryptTarget, capacity);
+        // Watch the folder MakeMKV writes into: the movie folder for DVD (its image
+        // file grows there), the _temp_decrypt subfolder for BD -- so the bar tracks
+        // the decrypt instead of sitting at 0%.
+        StartProgressTimer(backupWorkingFolder, capacity);
         StateHasChanged();
 
         backupResult = await Task.Run(() =>
-            MakeMkvService.RunBackup(exe, indexResult.DiscIndex!, decryptTarget, destinationOverride, p => currentProcess = p));
+            MakeMkvService.RunBackup(exe, indexResult.DiscIndex!, backupWorkingFolder, destinationOverride, p => currentProcess = p));
         NoteLibreDrive(backupResult.LibreDriveLine);
 
         StopProgressTimer();
@@ -2503,17 +2580,98 @@
             AddLog($"{opLabel}: cancelled, cleaning up");
             await CleanUpCancelledFolder(decryptTarget);
         }
-        else if (kind == "bd" && backupResult.Success)
+        else if (backupResult.Success)
         {
-            AddLog("Blu-ray Full Backup: MakeMKV decrypt complete, building the single-file ISO (stage 2/2)");
-            runningLabel = "Building the single-file ISO (stage 2/2)…";
+            AddLog((kind == "bd" ? "Blu-ray Full Backup" : "DVD Decrypted ISO") + ": MakeMKV decrypt complete (stage 2/2)");
             runningKind = "iso";
             isRunning = true;
             progressPercent = 0;
-            isoProgressText = "Reading the folder…";
             StateHasChanged();
 
             var isoPath = Path.Combine(outputFolder, $"{baseName}.iso");
+
+            // Beta 6: what did MakeMKV actually produce? Blu-ray (and DVD when it
+            // writes a folder) leaves a VIDEO_TS/BDMV folder we assemble into one
+            // ISO. But a DVD via LibreDrive writes the whole decrypted disc as a
+            // single image FILE -- that already IS the ISO, so we just move it into
+            // place and skip the folder-to-ISO build entirely. (This is what finally
+            // makes DVD end with a single .iso like the Blu-ray path.)
+            var payloadDir = FindDecryptedPayload(decryptTarget, outputFolder);
+            var singleImage = payloadDir is null ? FindBackupImageFile(decryptTarget, outputFolder) : null;
+
+            if (singleImage is not null)
+            {
+                AddLog($"MakeMKV produced a single-file image ({FormatGb(new FileInfo(singleImage).Length)}): {singleImage}");
+                runningLabel = "Finalizing the ISO…";
+                progressPercent = null;
+                StateHasChanged();
+
+                string? finalImage = null;
+                try
+                {
+                    if (!string.Equals(singleImage, isoPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (File.Exists(isoPath)) File.Delete(isoPath);
+                        File.Move(singleImage, isoPath);
+                    }
+                    finalImage = isoPath;
+                }
+                catch (Exception ex)
+                {
+                    finalImage = File.Exists(isoPath) ? isoPath : singleImage;
+                    AddLog($"[WARNING] Couldn't rename the image to the final name ({ex.Message}); it's at {finalImage}.");
+                }
+
+                // Clear the temp decrypt folders/files, keep only the finished ISO.
+                try
+                {
+                    foreach (var d in Directory.EnumerateDirectories(outputFolder))
+                    { try { Directory.Delete(d, recursive: true); } catch { /* best-effort */ } }
+                    foreach (var f in Directory.EnumerateFiles(outputFolder))
+                    { if (!string.Equals(f, isoPath, StringComparison.OrdinalIgnoreCase)) { try { File.Delete(f); } catch { /* best-effort */ } } }
+                }
+                catch { /* best-effort */ }
+
+                isRunning = false;
+                if (finalImage is not null)
+                {
+                    AddLog($"ISO complete: {finalImage}");
+                    lastOutputFolder = finalImage;
+                    await VerifyOutput(finalImage);
+                    NotifyIfEnabled(config, true, opLabel, finalImage);
+                    RecordHistory(opLabel, finalImage, lastSha1, lastMd5, lastRedumpMatch);
+                    OnRipSucceeded(config);
+                    AutoEjectIfEnabled(config, DriveLetter);
+                }
+                lastAction = RunFullBackup;
+                StateHasChanged();
+                return;
+            }
+
+            // Folder case (Blu-ray, or DVD when it writes a VIDEO_TS folder): build
+            // a single ISO from the decrypted folder.
+            runningLabel = "Building the single-file ISO (stage 2/2)…";
+            isoProgressText = "Reading the folder…";
+            StateHasChanged();
+
+            var payloadRoot = payloadDir ?? decryptTarget;
+            if (!string.Equals(payloadRoot, decryptTarget, StringComparison.OrdinalIgnoreCase))
+                AddLog($"MakeMKV wrote the decrypted files to: {payloadRoot} -- building the ISO from there.");
+
+            // If MakeMKV left an empty _temp_decrypt behind, drop it so it doesn't
+            // end up inside the ISO.
+            if (!string.Equals(payloadRoot, decryptTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                try { if (Directory.Exists(decryptTarget) && !Directory.EnumerateFileSystemEntries(decryptTarget).Any()) Directory.Delete(decryptTarget); }
+                catch { /* best-effort */ }
+            }
+            // Build to a temp file that is NOT inside the folder being imaged (the
+            // payload can be the movie folder itself), then move it into place so the
+            // growing .iso is never folded back into its own source.
+            var buildTempName = $"{baseName}.__building__";
+            var buildTempIso = Path.Combine(categoryDir, $"{buildTempName}.iso");
+            try { if (File.Exists(buildTempIso)) File.Delete(buildTempIso); } catch { /* best-effort */ }
+
             isoCts = new CancellationTokenSource();
             var isoProgress = new System.Progress<ArchivSector_OD.Burning.IsoBuilder.Progress>(p => InvokeAsync(() =>
             {
@@ -2528,19 +2686,21 @@
             {
                 built = await ArchivSector_OD.Burning.IsoBuilder.BuildAsync(new ArchivSector_OD.Burning.IsoBuilder.Options
                 {
-                    SourceFolder = decryptTarget,
-                    OutputPath = isoPath,
+                    SourceFolder = payloadRoot,
+                    OutputPath = buildTempIso,
                     VolumeLabel = baseName,
-                    FileSystem = ArchivSector_OD.Burning.IsoBuilder.FileSystemChoice.UdfOnly,   // a Blu-ray disc's own file system
+                    FileSystem = kind == "bd"
+                        ? ArchivSector_OD.Burning.IsoBuilder.FileSystemChoice.UdfOnly          // Blu-ray's own file system (UDF 2.50)
+                        : ArchivSector_OD.Burning.IsoBuilder.FileSystemChoice.IsoJolietUdf,    // DVD-Video: ISO9660 + Joliet + UDF bridge
                     Target = ArchivSector_OD.Burning.IsoBuilder.MediaTarget.Any,
-                    BluRay = true,                                      // UDF 2.50, any size (BD-66/100 too)
+                    BluRay = kind == "bd",                              // UDF 2.50 (BD-66/100 too) for Blu-ray only
                 }, isoProgress, isoCts.Token, line => AddLog(line));
             }
             catch (Exception ex) { built = new ArchivSector_OD.Burning.IsoBuilder.Result { Message = ex.Message }; }
             finally { isoCts.Dispose(); isoCts = null; }
 
             // The own build failed (not cancelled) and ImgBurn is installed: let ImgBurn try.
-            string? finalIso = built.Ok ? built.IsoPath ?? isoPath : null;
+            string? finalIso = built.Ok ? built.IsoPath ?? buildTempIso : null;
             string? failure = built.Ok ? null : built.Message;
             if (!built.Ok && !wasCancelled && imgBurnExe is not null)
             {
@@ -2549,7 +2709,7 @@
                 runningKind = "imgburn";
                 progressPercent = null;
                 StateHasChanged();
-                var imgBurnResult = await Task.Run(() => ImgBurnService.BuildSingleIso(imgBurnExe, decryptTarget, outputFolder, baseName));
+                var imgBurnResult = await Task.Run(() => ImgBurnService.BuildSingleIso(imgBurnExe, payloadRoot, categoryDir, buildTempName));
                 if (imgBurnResult.Success) { finalIso = imgBurnResult.IsoPath; failure = null; }
                 else failure = imgBurnResult.ErrorMessage;
             }
@@ -2557,14 +2717,44 @@
 
             if (wasCancelled)
             {
-                AddLog($"{opLabel}: ISO build cancelled; the decrypted folder is kept: {decryptTarget}");
+                AddLog($"{opLabel}: ISO build cancelled; the decrypted folder is kept: {payloadRoot}");
+                try { if (File.Exists(buildTempIso)) File.Delete(buildTempIso); } catch { /* best-effort */ }
                 trimMessage = "ISO build cancelled: the decrypted folder was kept";
-                lastOutputFolder = decryptTarget;
+                lastOutputFolder = payloadRoot;
             }
             else if (finalIso is not null)
             {
+                // Move the finished ISO from its temp build path to the real name.
+                try
+                {
+                    if (File.Exists(isoPath)) File.Delete(isoPath);
+                    File.Move(finalIso, isoPath);
+                    finalIso = isoPath;
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"[WARNING] Built the ISO but couldn't move it into place ({ex.Message}); it's at {finalIso}.");
+                }
+
                 AddLog($"ISO complete: {finalIso}");
-                try { Directory.Delete(decryptTarget, recursive: true); } catch { /* best-effort cleanup */ }
+
+                // Remove the decrypted working files but keep the finished ISO. The
+                // payload can be a _temp_decrypt subfolder (delete it whole) or the
+                // movie folder itself (delete just the VIDEO_TS/BDMV it dropped there).
+                try { if (Directory.Exists(decryptTarget)) Directory.Delete(decryptTarget, recursive: true); } catch { /* best-effort */ }
+                if (!string.Equals(payloadRoot, outputFolder, StringComparison.OrdinalIgnoreCase))
+                {
+                    try { if (Directory.Exists(payloadRoot)) Directory.Delete(payloadRoot, recursive: true); } catch { /* best-effort */ }
+                }
+                else
+                {
+                    foreach (var marker in new[] { "VIDEO_TS", "BDMV" })
+                    {
+                        try { var d = Path.Combine(outputFolder, marker); if (Directory.Exists(d)) Directory.Delete(d, recursive: true); }
+                        catch { /* best-effort */ }
+                    }
+                }
+
                 lastOutputFolder = finalIso;
                 await VerifyOutput(finalIso);
                 NotifyIfEnabled(config, true, opLabel, finalIso);
@@ -2574,11 +2764,12 @@
             }
             else
             {
+                try { if (File.Exists(buildTempIso)) File.Delete(buildTempIso); } catch { /* best-effort */ }
                 AddLog($"[WARNING] No ISO was made: {failure} -- keeping the decrypted folder instead.");
                 trimMessage = "⚠ The ISO couldn't be built: the decrypted folder was kept as the backup";
-                lastOutputFolder = decryptTarget;
+                lastOutputFolder = payloadRoot;
                 NotifyIfEnabled(config, false, opLabel, "ISO build failed, folder kept");
-                RecordHistory(opLabel, decryptTarget);
+                RecordHistory(opLabel, payloadRoot);
             }
         }
         else
@@ -2688,7 +2879,7 @@
         if (config.AutoCategorize)
             categoryDir = Path.Combine(categoryDir, "MKV");
         var fallbackName = $"{DriveLetter}_{kindForFolder}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
-        var suggestedName = FileNamingService.BuildOutputName(VolumeTitle, fallbackName);
+        var suggestedName = WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
 
         // 1. Every film's tracks and name first (beta 4: several films on one
         // disc), so the extracting can then run on its own.
@@ -2864,6 +3055,74 @@
         StateHasChanged();
     }
 
+    // Beta 6: show the release year beside a fetched title so remakes are
+    // distinguishable (e.g. Beauty and the Beast 1991 vs the 2017 live-action).
+    private static string CoverTitle(MetadataFetchService.MetadataResult m)
+        => string.IsNullOrWhiteSpace(m.Year) ? m.Title : $"{m.Title} ({m.Year})";
+
+    // Beta 6: fold the fetched movie's year into the output name so the two
+    // versions don't collide on disk. Movie categories only, and only when the
+    // fetched artwork actually carries a year the name doesn't already contain.
+    private string WithFetchedYear(string baseName)
+    {
+        if (Category != DiscCategory.Dvd && Category != DiscCategory.BluRay) return baseName;
+        var year = cachedArt?.Metadata?.Year;
+        if (string.IsNullOrWhiteSpace(year)) return baseName;
+        if (baseName.Contains(year)) return baseName;
+        return $"{baseName} ({year})";
+    }
+
+    // Beta 6: when MakeMKV writes the decrypted disc as one big image file
+    // (DVD via LibreDrive) instead of a VIDEO_TS/BDMV folder, locate that file:
+    // the expected path if it's a file, else the largest file (>= 256 MB) found
+    // anywhere under the output folder. Null if there's no such single image.
+    private static string? FindBackupImageFile(string preferred, string searchRoot)
+    {
+        try
+        {
+            if (File.Exists(preferred)) return preferred;
+            if (!Directory.Exists(searchRoot)) return null;
+
+            string? best = null;
+            long bestSize = 256L * 1024 * 1024;   // ignore small odds and ends
+            foreach (var f in Directory.EnumerateFiles(searchRoot, "*", SearchOption.AllDirectories))
+            {
+                try { var len = new FileInfo(f).Length; if (len > bestSize) { bestSize = len; best = f; } }
+                catch { /* skip unreadable */ }
+            }
+            return best;
+        }
+        catch { return null; }
+    }
+
+    // Beta 6: MakeMKV decides where it drops the decrypted VIDEO_TS (DVD) or
+    // BDMV (Blu-ray) -- usually the folder we hand it, but for a DVD it may
+    // write straight into the parent movie folder instead. Return the folder
+    // that directly contains that structure: the preferred temp folder if it
+    // already holds it, otherwise the first VIDEO_TS/BDMV found anywhere under
+    // the output folder. Null if no disc structure turns up at all.
+    private static string? FindDecryptedPayload(string preferred, string searchRoot)
+    {
+        static bool HasStructure(string d) =>
+            Directory.Exists(d) &&
+            (Directory.Exists(Path.Combine(d, "VIDEO_TS")) || Directory.Exists(Path.Combine(d, "BDMV")));
+
+        if (HasStructure(preferred)) return preferred;
+
+        if (Directory.Exists(searchRoot))
+        {
+            foreach (var marker in new[] { "VIDEO_TS", "BDMV" })
+            {
+                foreach (var hit in Directory.EnumerateDirectories(searchRoot, marker, SearchOption.AllDirectories))
+                {
+                    var parent = Path.GetDirectoryName(hit);
+                    if (!string.IsNullOrEmpty(parent)) return parent;
+                }
+            }
+        }
+        return null;
+    }
+
     private static async Task CleanUpCancelledFolder(string folder)
     {
         await Task.Delay(500);
@@ -2922,7 +3181,7 @@
                 // Generic labels (DVD_ROM, PS4VOLUME...) are shared by many
                 // discs, so saved art is only loaded under a real name or
                 // a serial -- otherwise one game's cover showed for all.
-                cachedArt = ArtCacheKey is null ? null : MetadataFetchService.GetCachedArt(ArtCacheKey);
+                cachedArt = ArtCacheKey is null ? null : MetadataFetchService.GetCachedArtResolved(ArtCacheKey, DiscTag);
                 LoadCoverDataUri();
 
                 if (!hasCachedCover && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd))
