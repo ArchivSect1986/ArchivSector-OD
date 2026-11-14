@@ -109,9 +109,12 @@ namespace ArchivSector_OD
                 if (proc is null)
                     return new DiscIndexResult { ErrorMessage = "Failed to start makemkvcon." };
 
+                // Drain stderr on a background thread while we read stdout, so a
+                // disc that floods stderr can't fill the pipe buffer and deadlock.
+                var stderrTask = Task.Run(() => proc.StandardError.ReadToEnd());
                 string stdout = proc.StandardOutput.ReadToEnd();
-                string stderr = proc.StandardError.ReadToEnd();
                 bool exited = proc.WaitForExit(30000);
+                string stderr = exited ? stderrTask.Result : "";
                 if (!exited)
                 {
                     try { proc.Kill(); } catch { }
@@ -183,9 +186,14 @@ namespace ArchivSector_OD
 
                 onProcessStarted?.Invoke(proc);
 
+                // Drain stderr on a background thread while we read stdout. A
+                // protected or scratched disc floods stderr with read-error
+                // messages; reading the two streams in sequence lets that pipe
+                // buffer fill, which blocks makemkvcon and hangs the rip forever.
+                var stderrTask = Task.Run(() => proc.StandardError.ReadToEnd());
                 string stdout = proc.StandardOutput.ReadToEnd();
-                string stderr = proc.StandardError.ReadToEnd();
                 proc.WaitForExit();
+                string stderr = stderrTask.Result;
 
                 var libreLine = FindLibreDriveLine(stdout);
 
@@ -251,6 +259,9 @@ namespace ArchivSector_OD
             using var proc = Process.Start(psi);
             if (proc is null) return new List<TitleInfo>();
 
+            // Drain stderr too, or a chatty disc fills the unread pipe buffer
+            // and deadlocks the scan.
+            _ = Task.Run(() => { try { proc.StandardError.ReadToEnd(); } catch { } });
             string stdout = proc.StandardOutput.ReadToEnd();
             proc.WaitForExit(240000);
 
@@ -362,9 +373,12 @@ namespace ArchivSector_OD
 
                 onProcessStarted?.Invoke(proc);
 
+                // Drain stderr on a background thread while we read stdout, so a
+                // disc that floods stderr can't deadlock the extraction.
+                var stderrTask = Task.Run(() => proc.StandardError.ReadToEnd());
                 string stdout = proc.StandardOutput.ReadToEnd();
-                string stderr = proc.StandardError.ReadToEnd();
                 proc.WaitForExit();
+                string stderr = stderrTask.Result;
 
                 var libreLine = FindLibreDriveLine(stdout);
 

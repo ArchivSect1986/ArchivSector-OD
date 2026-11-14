@@ -41,6 +41,7 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 * **History showed drive names with the drive's padding and revision letter** ("ASUS DRW-24F1ST   d"). New rips are recorded with the tidy name ("ASUS DRW-24F1ST"), and older rows are shown that way too (the history file itself isn't changed).
 * **The burn summary card** showed no disc type and a wrong average speed ("156.3x") once the disc had been burned.
 * **A white flash at start-up on .NET 10.** The new .NET 10 window could show one white frame before the dark screen was drawn; the window now stays hidden until its first picture is ready, so it opens straight into its theme.
+* **A MakeMKV rip could freeze at 0% on a copy-protected disc.** The disc floods MakeMKV's error output with read messages; the app read that output only after the normal output had finished, so once it filled up both sides waited on each other forever. Both are now read at the same time (Full Backup, Movie-Only, and the disc and title scans before them).
 
 ### ✅ Tested
 * **BD-R DL (50 GB) is burned by the own writer:** a 42 GB Blu-ray backup on a Verbatim BD-R DL at 6x, and the disc matched the ISO sector for sector.
