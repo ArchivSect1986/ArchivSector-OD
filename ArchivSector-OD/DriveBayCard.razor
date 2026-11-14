@@ -125,6 +125,13 @@
             {
                 <div class="fp-artrow">
                     <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">🎨 Fetch Metadata &amp; Artwork</button>
+                    @if (!hasCachedCover && artVersionsFound > 1)
+                    {
+                        <span class="tray-message" style="color: var(--warning, #f5b84d); cursor: pointer; text-decoration: underline;"
+                              @onclick="FetchMetadata" title="Several films share this title -- choose the one on this disc">
+                            ⚠ @artVersionsFound versions found — pick one
+                        </span>
+                    }
                     @if (hasCachedCover && cachedArt?.Metadata is not null)
                     {
                         <span class="tray-message" style="color: var(--success); cursor: pointer;"
@@ -213,6 +220,13 @@
             {
                 <div class="fp-artrow">
                     <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">🎨 Fetch Metadata &amp; Artwork</button>
+                    @if (!hasCachedCover && artVersionsFound > 1)
+                    {
+                        <span class="tray-message" style="color: var(--warning, #f5b84d); cursor: pointer; text-decoration: underline;"
+                              @onclick="FetchMetadata" title="Several films share this title -- choose the one on this disc">
+                            ⚠ @artVersionsFound versions found — pick one
+                        </span>
+                    }
                     @if (hasCachedCover && cachedArt?.Metadata is not null)
                     {
                         <span class="tray-message" style="color: var(--success); cursor: pointer;"
@@ -329,6 +343,13 @@
                 <button class="bay-btn tray-btn" style="width: auto;" @onclick="FetchMetadata">
                     🎨 Fetch Metadata &amp; Artwork
                 </button>
+                @if (!hasCachedCover && artVersionsFound > 1)
+                {
+                    <span class="tray-message" style="color: var(--warning, #f5b84d); cursor: pointer; text-decoration: underline;"
+                          @onclick="FetchMetadata" title="Several films share this title -- choose the one on this disc">
+                        ⚠ @artVersionsFound versions found — pick one
+                    </span>
+                }
                 @if (hasCachedCover && cachedArt?.Metadata is not null)
                 {
                     <span class="tray-message" style="color: var(--success); cursor: pointer;"
@@ -739,6 +760,9 @@
     private bool libreDriveSeen = false;
 
     private MetadataFetchService.CachedArt? cachedArt = null;
+    // Beta 6: set when the movie auto-fetch finds the same title from several
+    // years (Beauty and the Beast 1991 / 2017) and won't guess between them.
+    private int artVersionsFound = 0;
     private string? coverDataUri = null;
     private bool hasCachedCover => !string.IsNullOrEmpty(cachedArt?.CoverPath);
     private bool showMetadataDetails = false;
@@ -856,14 +880,70 @@
     private string ArtSaveKeyBase(string? fetchedTitle, string fallback)
         => ArtCacheKey ?? (string.IsNullOrWhiteSpace(fetchedTitle) ? fallback : fetchedTitle!.Trim());
 
+    // Beta 6: the folder name for fetched art. Movies and music: the disc's key
+    // plus the year, as before ("BEAUTY_AND_THE_BEAST (1991)"). Games: the
+    // readable title first, with the disc label in brackets so the next insert
+    // still finds it ("NHL 13 (2012) [14719]") -- disc labels on game discs are
+    // often just a code. When the label already IS the title, no brackets.
+    private string ArtSaveKey(MetadataFetchService.MetadataResult m, string fallback)
+    {
+        if (Category != DiscCategory.Game)
+            return MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(m.Title, fallback), m.Year);
+
+        var title = string.IsNullOrWhiteSpace(m.Title) ? fallback : m.Title.Trim();
+        var named = MetadataFetchService.VersionedCacheKey(title, m.Year);
+        return ArtCacheKey is null || string.Equals(ArtCacheKey.Trim(), title, StringComparison.OrdinalIgnoreCase)
+            ? named
+            : $"{named} [{ArtCacheKey.Trim()}]";
+    }
+
     // Beta 6: something unique to THIS physical disc -- its serial, or failing
     // that its size -- so two same-titled versions (Beauty and the Beast 1991
     // and 2017) can be told apart and matched back to their art after a restart.
-    private string DiscTag =>
-        ReadVolumeSerial(DriveLetter) is string vsn ? vsn
-        : !string.IsNullOrWhiteSpace(Serial) ? Serial.Trim()
-        : !string.IsNullOrWhiteSpace(CapacityLabel) ? CapacityLabel.Trim()
-        : "";
+    // Beta 6: art_cache is split by kind -- Game_Art\<platform> (Xbox 360, PS3,
+    // PS4...), Movie_Art for DVD/Blu-ray, Music_Art for album covers. Art cached
+    // before this lives in the art_cache root and is still found there.
+    private const string MusicArtFolder = "Music_Art";
+    private string? ArtSubfolder => Category switch
+    {
+        DiscCategory.Game => MetadataFetchService.GameArtSubfolder(EffectiveGameSystem),
+        DiscCategory.Dvd or DiscCategory.BluRay => "Movie_Art",
+        DiscCategory.Audio => MusicArtFolder,
+        _ => null,
+    };
+
+    private string DiscTag
+    {
+        get
+        {
+            var vsn = ReadVolumeSerial(DriveLetter);
+            if (vsn is not null)
+            {
+                // Xbox game discs show Windows only a small "put this in your
+                // console" partition, which can be near-identical between games;
+                // pairing the ID with the disc size keeps two games apart.
+                return Category == DiscCategory.Game && !string.IsNullOrWhiteSpace(CapacityLabel)
+                    ? $"{vsn}@{CapacityLabel.Trim()}"
+                    : vsn;
+            }
+            if (!string.IsNullOrWhiteSpace(Serial)) return Serial.Trim();
+            if (!string.IsNullOrWhiteSpace(CapacityLabel)) return CapacityLabel.Trim();
+            return "";
+        }
+    }
+
+    // Beta 6: the disc ID when it's a real one (Volume Serial Number or game
+    // serial) -- good enough to find the disc's art on its own. Size alone isn't.
+    private string? DiscIdForLookup
+    {
+        get
+        {
+            var t = DiscTag;
+            if (t.StartsWith("VSN-", StringComparison.Ordinal)) return t;
+            if (!string.IsNullOrWhiteSpace(Serial) && t == Serial.Trim()) return t;
+            return null;
+        }
+    }
 
     // Beta 6: the disc's Volume Serial Number -- an ID written into the disc's
     // file system when it was mastered. It's the same on every copy of a given
@@ -1057,7 +1137,7 @@
             album.Length > 0 && artist.Length > 0 ? $"{artist} - {album}" : album.Length > 0 ? album : artist);
         if (!string.IsNullOrWhiteSpace(musicCacheKey))
         {
-            cachedArt = MetadataFetchService.GetCachedArtResolved(musicCacheKey, DiscTag);
+            cachedArt = MetadataFetchService.GetCachedArtResolved(musicCacheKey, DiscTag, MusicArtFolder);
             LoadCoverDataUri();
             if (!hasCachedCover && ConfigService.Load().AutoFetchMetadataArt)
                 _ = AutoFetchAlbumArt(album, artist, musicCacheKey);
@@ -1159,6 +1239,7 @@
 
     private async Task AutoFetchArtSilently()
     {
+        artVersionsFound = 0;
         if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
         var config = ConfigService.Load();
         if (!config.AutoFetchMetadataArt) return;
@@ -1186,7 +1267,20 @@
             }
 
             var top = results[0];
-            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(top.Title, VolumeTitle), top.Year), top, DiscTag);
+
+            // Beta 6: if TMDB has the same title from several years (a remake,
+            // a re-release), the disc label can't tell us which one this is --
+            // don't guess. Flag it on the card and let the user pick.
+            var versions = SameTitleVersions(results, query);
+            if (versions.Count > 1)
+            {
+                artVersionsFound = versions.Count;
+                AddLog($"Auto-fetch: {versions.Count} films are called \"{top.Title}\" ({string.Join(", ", versions)}) -- not guessing. Click \"{versions.Count} versions found\" on the card to pick the one on this disc.");
+                StateHasChanged();
+                return;
+            }
+
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(ArtSaveKey(top, VolumeTitle), top, DiscTag, ArtSubfolder);
             LoadCoverDataUri();
             AddLog(hasCachedCover
                 ? $"Auto-fetch: saved \"{CoverTitle(top)}\" ({top.Source})"
@@ -1233,9 +1327,16 @@
         }
 
         AddLog($"Metadata search: saving \"{chosen.Title}\" ({chosen.Source}) to art cache");
-        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(chosen.Title, VolumeTitle), chosen.Year), chosen, DiscTag);
+        var previousDir = !string.IsNullOrEmpty(cachedArt?.CoverPath) ? Path.GetDirectoryName(cachedArt!.CoverPath) : null;
+        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(ArtSaveKey(chosen, VolumeTitle), chosen, DiscTag, ArtSubfolder);
+        // Re-picked a different version for this disc? The old folder shouldn't
+        // keep claiming it, or the next insert could land on the wrong one.
+        var newDir = !string.IsNullOrEmpty(cachedArt.CoverPath) ? Path.GetDirectoryName(cachedArt.CoverPath) : null;
+        if (previousDir is not null && newDir is not null && !string.IsNullOrWhiteSpace(DiscTag)
+            && !string.Equals(previousDir, newDir, StringComparison.OrdinalIgnoreCase))
+            MetadataFetchService.RemoveDiscTag(previousDir, DiscTag);
         LoadCoverDataUri();
-        AddLog($"Metadata saved: {MetadataFetchService.GetArtCacheDir(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(chosen.Title, VolumeTitle), chosen.Year))}");
+        AddLog($"Metadata saved: {MetadataFetchService.GetArtCacheDir(ArtSaveKey(chosen, VolumeTitle), ArtSubfolder)}");
         StateHasChanged();
     }
 
@@ -1244,10 +1345,16 @@
         if (string.IsNullOrWhiteSpace(VolumeTitle)) return;
         try
         {
-            var key = cachedArt?.Metadata is { } cm
-                ? MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(cm.Title, VolumeTitle), cm.Year)
-                : ArtCacheName;
-            var dir = MetadataFetchService.GetArtCacheDir(key);
+            // Open the folder the shown cover actually came from -- old-style and
+            // new-style folder names both work that way.
+            string? dir = !string.IsNullOrEmpty(cachedArt?.CoverPath) ? Path.GetDirectoryName(cachedArt!.CoverPath) : null;
+            if (dir is null || !Directory.Exists(dir))
+            {
+                var key = cachedArt?.Metadata is { } cm ? ArtSaveKey(cm, VolumeTitle) : ArtCacheName;
+                dir = MetadataFetchService.GetArtCacheDir(key, ArtSubfolder);
+                // Art saved before beta 6 grouped it by kind is still in the root.
+                if (!Directory.Exists(dir)) dir = MetadataFetchService.GetArtCacheDir(key);
+            }
             if (Directory.Exists(dir))
                 Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
         }
@@ -1504,6 +1611,7 @@
     // Cover art for a named game from RAWG (needs a free RAWG key in Settings).
     private async Task AutoFetchGameArt(string name)
     {
+        artVersionsFound = 0;
         var config = ConfigService.Load();
         if (!config.AutoFetchMetadataArt) return;
         bool hasRawg = !string.IsNullOrWhiteSpace(config.RawgApiKey);
@@ -1539,7 +1647,20 @@
             if (results.Count == 0) results = preferSgdb ? await FromRawg() : await FromSgdb();
             if (results.Count == 0) { AddLog("Cover art: no results for '" + query + "'."); return; }
             var top = results[0];
-            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(ArtSaveKeyBase(top.Title, name), top.Year), top, DiscTag);
+
+            // Beta 6: same title from several years (a remake or reboot)? Don't
+            // guess -- flag it on the card and let the user pick. RAWG gives years;
+            // SteamGridDB doesn't, so its results can't be told apart this way.
+            var versions = SameTitleVersions(results, query);
+            if (versions.Count > 1)
+            {
+                artVersionsFound = versions.Count;
+                AddLog($"Cover art: {versions.Count} games are called '{top.Title}' ({string.Join(", ", versions)}) -- not guessing. Click \"{versions.Count} versions found\" on the card to pick the one on this disc.");
+                StateHasChanged();
+                return;
+            }
+
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(ArtSaveKey(top, name), top, DiscTag, ArtSubfolder);
             LoadCoverDataUri();
             AddLog(hasCachedCover ? "Cover art: saved '" + CoverTitle(top) + "' (" + top.Source + ")" : "Cover art: '" + top.Title + "' has no cover image.");
             StateHasChanged();
@@ -1563,7 +1684,7 @@
             var results = await MetadataFetchService.SearchItunesAlbum(query);
             if (results.Count == 0) { AddLog("Album art: no iTunes match for '" + query + "'."); return; }
             var top = results[0];
-            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(cacheKey, top.Year), top, DiscTag);
+            cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(MetadataFetchService.VersionedCacheKey(cacheKey, top.Year), top, DiscTag, MusicArtFolder);
             LoadCoverDataUri();
             AddLog(hasCachedCover ? "Album art: saved '" + top.Title + "' (iTunes)" : "Album art: '" + top.Title + "' had no cover image.");
             await InvokeAsync(StateHasChanged);
@@ -2688,7 +2809,9 @@
                 {
                     SourceFolder = payloadRoot,
                     OutputPath = buildTempIso,
-                    VolumeLabel = baseName,
+                    // The disc's own label, not the file name -- the file name now
+                    // carries " (1991)", which the 32-character limit chopped to "_1".
+                    VolumeLabel = string.IsNullOrWhiteSpace(VolumeTitle) ? baseName : VolumeTitle,
                     FileSystem = kind == "bd"
                         ? ArchivSector_OD.Burning.IsoBuilder.FileSystemChoice.UdfOnly          // Blu-ray's own file system (UDF 2.50)
                         : ArchivSector_OD.Burning.IsoBuilder.FileSystemChoice.IsoJolietUdf,    // DVD-Video: ISO9660 + Joliet + UDF bridge
@@ -3055,6 +3178,22 @@
         StateHasChanged();
     }
 
+    // Beta 6: the distinct release years among results whose title matches the
+    // top result's exactly (ignoring case and punctuation). More than one means
+    // the title alone is ambiguous. A year typed in the search ("(1991)") already
+    // picks the version, so then there's nothing to ask.
+    private static List<string> SameTitleVersions(List<MetadataFetchService.MetadataResult> results, string query)
+    {
+        if (results.Count < 2 || MetadataFetchService.SplitYear(query).Year is not null) return new();
+        static string Norm(string t) => new string((t ?? "").ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+        var want = Norm(results[0].Title);
+        return results.Where(r => Norm(r.Title) == want && !string.IsNullOrWhiteSpace(r.Year))
+                      .Select(r => r.Year.Trim())
+                      .Distinct()
+                      .OrderBy(y => y)
+                      .ToList();
+    }
+
     // Beta 6: show the release year beside a fetched title so remakes are
     // distinguishable (e.g. Beauty and the Beast 1991 vs the 2017 live-action).
     private static string CoverTitle(MetadataFetchService.MetadataResult m)
@@ -3156,6 +3295,7 @@
             ResetResultState();
             lastAction = null;
             cachedArt = null;
+            artVersionsFound = 0;
             coverDataUri = null;
             showMetadataDetails = false;
             BatchSyncService.RemoveQueued(DriveLetter);
@@ -3181,7 +3321,12 @@
                 // Generic labels (DVD_ROM, PS4VOLUME...) are shared by many
                 // discs, so saved art is only loaded under a real name or
                 // a serial -- otherwise one game's cover showed for all.
-                cachedArt = ArtCacheKey is null ? null : MetadataFetchService.GetCachedArtResolved(ArtCacheKey, DiscTag);
+                artVersionsFound = 0;
+                cachedArt = ArtCacheKey is null ? null : MetadataFetchService.GetCachedArtResolved(ArtCacheKey, DiscTag, ArtSubfolder);
+                // Beta 6: no match by label (or no usable label, like DVD_ROM)? Try
+                // the disc's own ID -- once art is picked for a disc it sticks.
+                if (cachedArt is null && DiscIdForLookup is string discId)
+                    cachedArt = MetadataFetchService.FindCachedArtByDiscId(discId, ArtSubfolder);
                 LoadCoverDataUri();
 
                 if (!hasCachedCover && (Category == DiscCategory.BluRay || Category == DiscCategory.Dvd))

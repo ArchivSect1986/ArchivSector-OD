@@ -418,8 +418,37 @@ namespace ArchivSector_OD
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "ArchivSector-OD", "art_cache");
 
-        public static string GetArtCacheDir(string cacheKey) =>
-            Path.Combine(ArtCacheRoot, SanitizeForFilesystem(cacheKey));
+        // Beta 6: an optional subfolder under art_cache (e.g. "Game_Art\Xbox 360")
+        // so game art is grouped by platform instead of one flat folder.
+        private static string CacheBase(string? subfolder)
+        {
+            if (string.IsNullOrWhiteSpace(subfolder)) return ArtCacheRoot;
+            var parts = subfolder.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(SanitizeForFilesystem);
+            return Path.Combine(new[] { ArtCacheRoot }.Concat(parts).ToArray());
+        }
+
+        public static string GetArtCacheDir(string cacheKey, string? subfolder = null) =>
+            Path.Combine(CacheBase(subfolder), SanitizeForFilesystem(cacheKey));
+
+        // Beta 6: where a game's art goes -- Game_Art\<platform>, with short
+        // names for the platforms the app detects and "Other" when it can't tell.
+        public static string GameArtSubfolder(string? system)
+        {
+            var sys = (system ?? "").Trim();
+            var name = sys switch
+            {
+                "" => "Other",
+                "PlayStation 1" or "PlayStation" => "PS1",
+                "PlayStation 2" => "PS2",
+                "PlayStation 3" => "PS3",
+                "PlayStation 4" => "PS4",
+                "PlayStation 5" => "PS5",
+                "Original Xbox" => "Xbox",
+                _ => sys,
+            };
+            return Path.Combine("Game_Art", name);
+        }
 
         public class CachedArt
         {
@@ -427,7 +456,8 @@ namespace ArchivSector_OD
             public MetadataResult? Metadata;
         }
 
-        public static CachedArt? GetCachedArt(string cacheKey) => ReadCachedArtFromDir(GetArtCacheDir(cacheKey));
+        public static CachedArt? GetCachedArt(string cacheKey, string? subfolder = null) =>
+            ReadCachedArtFromDir(GetArtCacheDir(cacheKey, subfolder));
 
         private static CachedArt? ReadCachedArtFromDir(string dir)
         {
@@ -468,16 +498,33 @@ namespace ArchivSector_OD
         // reuse a cached version only when exactly one "baseKey (YYYY)" folder
         // exists. If two or more do (e.g. Beauty and the Beast 1991 AND 2017),
         // return null so the caller re-fetches and the fetched year decides.
-        public static CachedArt? GetCachedArtResolved(string baseKey, string? discTag = null)
+        public static CachedArt? GetCachedArtResolved(string baseKey, string? discTag = null, string? subfolder = null)
         {
-            var exact = GetCachedArt(baseKey);
+            // Look in the subfolder first (e.g. Game_Art\Xbox 360); art saved
+            // before beta 6 grouped it lives in the art_cache root, so fall back.
+            var found = ResolveIn(CacheBase(subfolder), baseKey, discTag);
+            if (found is null && !string.IsNullOrWhiteSpace(subfolder))
+                found = ResolveIn(ArtCacheRoot, baseKey, discTag);
+            return found;
+        }
+
+        private static CachedArt? ResolveIn(string baseDir, string baseKey, string? discTag)
+        {
+            var exact = ReadCachedArtFromDir(Path.Combine(baseDir, SanitizeForFilesystem(baseKey)));
             if (exact is not null) return exact;
 
-            if (!Directory.Exists(ArtCacheRoot)) return null;
+            if (!Directory.Exists(baseDir)) return null;
             var safeBase = SanitizeForFilesystem(baseKey);
             var rx = new Regex("^" + Regex.Escape(safeBase) + @" \((?:18|19|20)\d{2}\)$");
-            var matches = Directory.EnumerateDirectories(ArtCacheRoot)
-                .Where(d => rx.IsMatch(Path.GetFileName(d)))
+            // Also game folders named "Title (Year) [disc label]" -- the readable
+            // title comes first, the disc label in brackets is what finds it again.
+            var tagSuffix = " [" + safeBase + "]";
+            var matches = Directory.EnumerateDirectories(baseDir)
+                .Where(d =>
+                {
+                    var n = Path.GetFileName(d);
+                    return rx.IsMatch(n) || n.EndsWith(tagSuffix, StringComparison.OrdinalIgnoreCase);
+                })
                 .ToList();
 
             if (matches.Count == 1) return ReadCachedArtFromDir(matches[0]);
@@ -487,7 +534,7 @@ namespace ArchivSector_OD
             if (matches.Count > 1 && !string.IsNullOrWhiteSpace(discTag))
             {
                 var tag = discTag.Trim();
-                var hit = matches.FirstOrDefault(d => string.Equals(ReadDiscTag(d), tag, StringComparison.OrdinalIgnoreCase));
+                var hit = matches.FirstOrDefault(d => ReadDiscTags(d).Contains(tag, StringComparer.OrdinalIgnoreCase));
                 if (hit is not null) return ReadCachedArtFromDir(hit);
             }
 
@@ -495,19 +542,61 @@ namespace ArchivSector_OD
             return null;
         }
 
-        private static string? ReadDiscTag(string dir)
+        // Beta 6: find cached art by the disc's own ID alone -- for discs whose
+        // label can't be used (DVD_ROM, XBOX360...) or that were filed under a
+        // readable name. Looks in the subfolder, then the art_cache root. If more
+        // than one folder carries the same ID, it isn't unique enough to trust,
+        // so return null and let the caller fetch instead of showing a wrong cover.
+        public static CachedArt? FindCachedArtByDiscId(string discId, string? subfolder = null)
+        {
+            if (string.IsNullOrWhiteSpace(discId)) return null;
+            var id = discId.Trim();
+            var bases = new List<string> { CacheBase(subfolder) };
+            if (!string.IsNullOrWhiteSpace(subfolder)) bases.Add(ArtCacheRoot);
+            foreach (var b in bases)
+            {
+                if (!Directory.Exists(b)) continue;
+                var hits = Directory.EnumerateDirectories(b)
+                    .Where(d => ReadDiscTags(d).Contains(id, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+                if (hits.Count == 1) return ReadCachedArtFromDir(hits[0]);
+                if (hits.Count > 1) return null;
+            }
+            return null;
+        }
+
+        // Beta 6: take a disc's ID off a folder -- used when the user re-picks a
+        // different version for the same disc, so the old folder stops claiming it.
+        public static void RemoveDiscTag(string dir, string discTag)
+        {
+            try
+            {
+                var tags = ReadDiscTags(dir);
+                var t = discTag.Trim();
+                if (tags.RemoveAll(x => string.Equals(x, t, StringComparison.OrdinalIgnoreCase)) == 0) return;
+                var f = Path.Combine(dir, "disc_id.txt");
+                if (tags.Count == 0) File.Delete(f); else File.WriteAllLines(f, tags);
+            }
+            catch { /* best-effort */ }
+        }
+
+        // disc_id.txt holds one disc ID per line: the same version can be on
+        // more than one disc (the 2017 film on DVD AND Blu-ray), and every one of
+        // them should find this folder.
+        private static List<string> ReadDiscTags(string dir)
         {
             try
             {
                 var f = Path.Combine(dir, "disc_id.txt");
-                return File.Exists(f) ? File.ReadAllText(f).Trim() : null;
+                if (!File.Exists(f)) return new();
+                return File.ReadAllLines(f).Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
             }
-            catch { return null; }
+            catch { return new(); }
         }
 
-        public static async Task<CachedArt> SaveArtworkAndMetadata(string cacheKey, MetadataResult metadata, string? discTag = null)
+        public static async Task<CachedArt> SaveArtworkAndMetadata(string cacheKey, MetadataResult metadata, string? discTag = null, string? subfolder = null)
         {
-            var dir = GetArtCacheDir(cacheKey);
+            var dir = GetArtCacheDir(cacheKey, subfolder);
             Directory.CreateDirectory(dir);
 
             // Beta 6: stamp the folder with something unique to THIS disc (its
@@ -516,7 +605,15 @@ namespace ArchivSector_OD
             // one can be matched back to the disc in the drive after a restart.
             if (!string.IsNullOrWhiteSpace(discTag))
             {
-                try { await File.WriteAllTextAsync(Path.Combine(dir, "disc_id.txt"), discTag.Trim()); }
+                try
+                {
+                    // Add this disc's ID to the folder's list (don't replace it), so
+                    // a second disc of the same version doesn't push the first out.
+                    var tags = ReadDiscTags(dir);
+                    var t = discTag.Trim();
+                    if (!tags.Contains(t, StringComparer.OrdinalIgnoreCase)) tags.Add(t);
+                    await File.WriteAllLinesAsync(Path.Combine(dir, "disc_id.txt"), tags);
+                }
                 catch { /* best-effort -- falls back to "ambiguous, re-fetch" */ }
             }
 
