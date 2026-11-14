@@ -4,9 +4,9 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
-## v4.0.0-beta5 - in progress
+## v4.0.0-beta5 - 2026-11-20 (pre-release)
 
-The fifth test version of v4.0, being worked on. Everything below is new since Beta 4.
+The fifth test version of v4.0. Everything below is new since Beta 4. This one is mostly about **a new Settings window**, **a summary card at the end of every burn**, **Blu-ray Full Backup to a single ISO without ImgBurn**, and moving to **.NET 10**.
 
 ### ✨ Added
 * **⚙ A new Settings window.** Sections down the left (General, Appearance, Programs, Burning, Online lookups, Batch & drives, Redump checks, About & updates), shown one at a time, with a line of help under every setting.
@@ -45,11 +45,15 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 
 ### ✅ Tested
 * **BD-R DL (50 GB) is burned by the own writer:** a 42 GB Blu-ray backup on a Verbatim BD-R DL at 6x, and the disc matched the ISO sector for sector.
+* **Blu-ray Full Backup to a single ISO without ImgBurn:** a 38.6 GB Blu-ray was decrypted by MakeMKV and turned into one ISO by ArchivSector-OD itself, and the temporary decrypted folder was cleaned up afterwards.
 
 ### ⚠ Known issues
 * **DVD-R DL** isn't written by the own writer yet: ImgBurn or Windows takes over for it. (DVD-R DL blanks are rare now; DVD+R DL is written by the own writer.)
 * **The start of a BD-R DL's second layer can be hard for some drives to read back.** On the test disc, the verify straight after burning found 23 unreadable sectors just after the layer change in the burning drive, while the same disc read perfectly in another drive. Other programs see the same thing (ImgBurn users report it with Verbatim BD-R DL discs). If a BD-R DL's verify fails only just past sector 12,219,392, check it in another drive before giving up on it.
 * **A drive can stop answering when told to start writing on a BD-R DL** (seen once on one of two identical drives, with ImgBurn too). The own writer now stops by itself and says the disc is still blank: try another drive or disc.
+
+### Reporting a problem
+Same as before: open an issue on GitHub with **Burn → Drive info → 📋 Copy report**, the disc type and brand, and that day's log from `%AppData%\ArchivSector-OD\Logs`.
 
 ---
 
