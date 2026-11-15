@@ -42,6 +42,7 @@ The fifth test version of v4.0. Everything below is new since Beta 4. This one i
 * **The burn summary card** showed no disc type and a wrong average speed ("156.3x") once the disc had been burned.
 * **A white flash at start-up on .NET 10.** The new .NET 10 window could show one white frame before the dark screen was drawn; the window now stays hidden until its first picture is ready, so it opens straight into its theme.
 * **A MakeMKV rip could freeze at 0% on a copy-protected disc.** The disc floods MakeMKV's error output with read messages; the app read that output only after the normal output had finished, so once it filled up both sides waited on each other forever. Both are now read at the same time (Full Backup, Movie-Only, and the disc and title scans before them).
+* **Desktop icons stopped responding while ArchivSector-OD was minimized** (new in Beta 5: Beta 4 didn't do it). Since the move to .NET 10, the app's page is drawn in a see-through window of its own, which Windows left over the desktop when the app was minimized, so it caught the mouse until the app was restored or closed. It's now hidden while the app is minimized; rips and burns carry on as before.
 
 ### ✅ Tested
 * **BD-R DL (50 GB) is burned by the own writer:** a 42 GB Blu-ray backup on a Verbatim BD-R DL at 6x, and the disc matched the ISO sector for sector.
