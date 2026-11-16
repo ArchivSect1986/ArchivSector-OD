@@ -34,12 +34,17 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 ### 🐛 Fixed
 * **Two films with the same disc label shared one poster**, and the last one picked replaced the other (now each disc keeps its own, above).
 * **The Live log was squished** into a thin strip on some window sizes.
+* **A line the app marks as a warning showed as an error** in the log (amber, not red, now), such as Movie-Only's "couldn't precisely trim" note.
 
 ### ✅ Tested
 * **DVD Decrypted ISO:** a DVD movie straight to a single ISO.
 * **TargetFill Build & Burn:** built the ISO and burned it from the Burn tab.
 * **Blu-ray Full Backup:** a 38.6 GB Blu-ray to one ISO, the temporary decrypted folder cleaned up.
 * **Artwork per disc:** four *Beauty and the Beast* discs (two 1991, two 2017) each came back with the right poster after restarts and re-inserts; a DVD_ROM game disc found its cover again by its ID.
+* **SRT subtitles:** a Blu-ray's two English PGS tracks read by Subtitle Edit's OCR and saved as `.eng.srt` and `.eng.2.srt` next to the MKV (about a minute each), and **✍ Exact** opened the MKV in Subtitle Edit. The buttons were still there after the disc was ejected.
+* **Burn queue summary card:** a 703 MB CD-RW burned from the queue, verified, and its summary copied.
+* **No artwork lookup for a generic label:** an Xbox 360 disc labelled DVD_ROM was skipped, with no unrelated cover.
+* **The desktop works while the app is minimized**, maximized first (the fix from Beta 5).
 
 ### ⚠ Known issues
 * **SRT subtitles are read by OCR**, which can misread a letter now and then: check them, or use **✍ Exact**. Subtitle Edit's command line reads with the OCR language last picked in its own window; if it has never done OCR on the PC, open it once and OCR any subtitle with Tesseract first.
