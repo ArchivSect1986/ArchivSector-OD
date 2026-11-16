@@ -26,6 +26,7 @@ namespace ArchivSector_OD
         public string RedumperPathOverride { get; set; } = "";
         public string ImgBurnPathOverride { get; set; } = "";
         public string MkvmergePathOverride { get; set; } = "";
+        public string SubtitleEditPathOverride { get; set; } = "";   // beta 6: Subtitle Edit, for SRT subtitles from a Movie-Only MKV
         public string RawgApiKey { get; set; } = "";
         public string SteamGridDbApiKey { get; set; } = "";   // beta 6: game box-art fallback when RAWG is down
         public string GameArtSource { get; set; } = "RAWG";   // beta 6: which game art source to try first ("RAWG" or "SteamGridDB"); the other is the fallback

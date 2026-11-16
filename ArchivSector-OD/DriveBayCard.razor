@@ -596,7 +596,11 @@
             <div class="progress-fill" style="width: @(progressPercent?.ToString() ?? "0")%"></div>
         </div>
         <p class="bay-subtitle" style="margin-top: 4px;">
-            @if (progressPercent is null)
+            @if (runningKind == "srt")
+            {
+                <text>@srtProgressText</text>
+            }
+            else if (progressPercent is null)
             {
                 <text>Working… (no live progress available for this step)</text>
             }
@@ -634,6 +638,28 @@
                 title="Sends this ISO to the Burn tab's queue, ready to burn to a blank disc">
             🔥 Burn this ISO
         </button>
+    }
+
+    @* Beta 6: SRT subtitles from the Movie-Only MKV(s), with Subtitle Edit. *@
+    @if (CanMakeSrt)
+    {
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
+            <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="MakeSrtSubtitles"
+                    title="Reads the MKV's subtitles (pictures on DVD and Blu-ray) with Subtitle Edit's OCR and saves each one as an .srt next to the MKV. The MKV isn't changed.">
+                📝 Make SRT subtitles
+            </button>
+            @if (movieOnlyMkvs.Count == 1)
+            {
+                <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="OpenMkvInSubtitleEdit"
+                        title="Opens the MKV in Subtitle Edit's own window. Its OCR asks about each letter shape it doesn't know: slower, but exact. Save the result as .srt next to the MKV.">
+                    ✍ Exact: open in Subtitle Edit
+                </button>
+            }
+        </div>
+    }
+    @if (srtMessage is not null && !isRunning)
+    {
+        <p class="bay-subtitle" style="margin-top: 4px; color: @srtColour;">@srtMessage</p>
     }
 
     @* v3.3: burning an ISO to a blank disc. Always mounted so a running
@@ -795,6 +821,10 @@
     private RedumperService.DumpResult? redumperResult = null;
     private int selectedTitleSeconds = 0;
     private int movieOnlyCount = 0;   // films extracted in one go (beta 4: a disc with more than one film)
+    private List<string> movieOnlyMkvs = new();   // beta 6: the finished MKVs of the last Movie-Only, for SRT subtitles
+    private string? srtMessage;
+    private string srtColour = "var(--text-secondary)";
+    private string srtProgressText = "";
     private Func<Task>? lastAction = null;
     private string? lastOutputFolder = null;
     private string? trimMessage = null;
@@ -856,6 +886,8 @@
         "BD_ROM", "BDROM", "BD-ROM", "BDVIDEO", "BD_VIDEO", "BLURAY", "BLU-RAY",
         "CD_ROM", "CDROM", "CD-ROM", "VIDEO_TS", "PS4VOLUME", "PS5VOLUME",
         "XBOX360", "XBOX 360", "XBOX", "XBOXONE", "AUDIO CD", "AUDIO_CD", "NO NAME", "NONAME", "UNTITLED", "UNKNOWN",
+        // Beta 6: what the app itself shows for a disc with no name at all.
+        "UNLABELED",
     };
 
     private static bool IsGenericLabel(string? label) =>
@@ -1244,6 +1276,15 @@
         var config = ConfigService.Load();
         if (!config.AutoFetchMetadataArt) return;
 
+        // Beta 6: a generic label (UNLABELED, DVD_VIDEO, BDROM...) isn't the
+        // film's name, and searching for it found unrelated films ("UNLABELED"
+        // matched "Unlabeled. Five Belgian Graphic Design Archives").
+        if (IsGenericLabel(VolumeTitle))
+        {
+            AddLog($"Auto-fetch skipped: \"{VolumeTitle}\" isn't the film's name (many discs use it). Use 🎨 Fetch Metadata & Artwork to pick it.");
+            return;
+        }
+
         // TMDB-only: the iTunes no-key fallback was removed after it
         // stopped returning movie results at all. With no TMDB key,
         // auto-fetch just skips and says why in the log.
@@ -1614,6 +1655,13 @@
         artVersionsFound = 0;
         var config = ConfigService.Load();
         if (!config.AutoFetchMetadataArt) return;
+        // Beta 6: a generic label (DVD_ROM, XBOX360, PS4VOLUME...) isn't the
+        // game's name: searching for it only finds unrelated games.
+        if (IsGenericLabel(name))
+        {
+            AddLog($"Cover art skipped: \"{name}\" isn't the game's name (many discs use it). Use 🎨 Fetch Metadata & Artwork to pick it.");
+            return;
+        }
         bool hasRawg = !string.IsNullOrWhiteSpace(config.RawgApiKey);
         bool hasSgdb = !string.IsNullOrWhiteSpace(config.SteamGridDbApiKey);
         if (!hasRawg && !hasSgdb)
@@ -1859,6 +1907,140 @@
         BurnHandoff.Request(isoPath);
     }
 
+    // ---- SRT subtitles (beta 6) ----
+    // After a Movie-Only rip: each subtitle track of the MKV(s) becomes an .srt
+    // next to it, read by Subtitle Edit's OCR (SubtitleEditService). The MKV
+    // keeps its own subtitles, so nothing is lost if the OCR misreads a letter.
+
+    private bool CanMakeSrt =>
+        !isRunning && !isVerifying && !healthRunning && !burnRunning
+        && movieOnlyResult?.Success == true && movieOnlyMkvs.Count > 0 && movieOnlyMkvs.All(File.Exists);
+
+    // Subtitle Edit from Settings or its usual install folders; asked for (and
+    // remembered) the first time it isn't found.
+    private string? FindOrAskSubtitleEdit(AppConfig config)
+    {
+        var exe = SubtitleEditService.FindExecutable(config.SubtitleEditPathOverride);
+        if (exe is not null) return exe;
+        var owner = System.Windows.Application.Current?.MainWindow;
+        const string msg = "SRT subtitles are made by Subtitle Edit, a free program (subtitleedit.github.io) that isn't included with ArchivSector-OD.\n\n" +
+            "Is it installed? Click Yes to show where SubtitleEdit.exe is, or No to cancel.";
+        var ask = owner is null
+            ? System.Windows.MessageBox.Show(msg, "Subtitle Edit", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question)
+            : System.Windows.MessageBox.Show(owner, msg, "Subtitle Edit", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question);
+        if (ask != System.Windows.MessageBoxResult.Yes) return null;
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Where is SubtitleEdit.exe?",
+            Filter = "Subtitle Edit (SubtitleEdit.exe)|SubtitleEdit.exe|Programs (*.exe)|*.exe",
+        };
+        if ((owner is null ? dlg.ShowDialog() : dlg.ShowDialog(owner)) != true) return null;
+        config.SubtitleEditPathOverride = dlg.FileName;
+        ConfigService.Save(config);
+        AddLog($"SRT: Subtitle Edit set to {dlg.FileName} (it's in Settings → Programs too)");
+        return dlg.FileName;
+    }
+
+    private async Task MakeSrtSubtitles()
+    {
+        if (!CanMakeSrt) return;
+        var config = ConfigService.Load();
+        var mkvmergeExe = MkvmergeService.FindExecutable(config.MkvmergePathOverride);
+        var mkvextractExe = SubtitleEditService.FindMkvextract(mkvmergeExe);
+        if (mkvmergeExe is null || mkvextractExe is null)
+        {
+            srtMessage = "⚠ SRT subtitles need MKVToolNix (mkvmerge and mkvextract): install it and set mkvmerge in Settings → Programs.";
+            srtColour = "var(--amber)";
+            AddLog("[WARNING] SRT: " + srtMessage);
+            return;
+        }
+        var seExe = FindOrAskSubtitleEdit(config);
+        if (seExe is null) return;
+
+        var mkvs = movieOnlyMkvs.ToList();
+        wasCancelled = false;
+        srtMessage = null;
+        runningKind = "srt";
+        runningLabel = "Making SRT subtitles with Subtitle Edit…";
+        srtProgressText = "Reading the subtitle tracks…";
+        progressPercent = null;
+        isRunning = true;
+        StateHasChanged();
+        AddLog($"SRT: making .srt files for {mkvs.Count} MKV(s) with Subtitle Edit");
+
+        var made = new List<string>();
+        var problems = new List<string>();
+        for (int i = 0; i < mkvs.Count && !wasCancelled; i++)
+        {
+            var mkv = mkvs[i];
+            string which = mkvs.Count > 1 ? $"{Path.GetFileName(mkv)}: " : "";
+            SubtitleEditService.Outcome outcome;
+            try
+            {
+                outcome = await Task.Run(() => SubtitleEditService.MakeSrts(seExe, mkvmergeExe, mkvextractExe, mkv,
+                    () => wasCancelled,
+                    p => currentProcess = p,
+                    line => InvokeAsync(() => { srtProgressText = which + line + " (OCR can take a few minutes per track)"; StateHasChanged(); }),
+                    line => InvokeAsync(() => AddLog(line))));
+            }
+            catch (Exception ex)
+            {
+                outcome = new SubtitleEditService.Outcome();
+                outcome.Problems.Add(ex.Message);
+            }
+            made.AddRange(outcome.Made);
+            problems.AddRange(outcome.Problems.Select(pr => which + pr));
+            if (outcome.Cancelled) wasCancelled = true;
+        }
+
+        isRunning = false;
+        runningKind = "makemkv";
+        currentProcess = null;
+        foreach (var pr in problems) AddLog("[WARNING] SRT: " + pr);
+
+        if (wasCancelled)
+        {
+            srtMessage = $"SRT stopped. {(made.Count > 0 ? $"{made.Count} .srt file(s) were already saved next to the MKV." : "")}".Trim();
+            srtColour = "var(--text-secondary)";
+        }
+        else if (made.Count > 0)
+        {
+            srtMessage = $"📝 {made.Count} .srt file(s) saved next to the MKV ({string.Join(", ", made.Select(Path.GetFileName))}). " +
+                         "OCR can misread a letter now and then: give them a quick look, or use ✍ Exact for a perfect copy." +
+                         (problems.Count > 0 ? $" {problems.Count} track(s) didn't convert (see the log)." : "");
+            srtColour = problems.Count > 0 ? "var(--amber)" : "var(--success)";
+        }
+        else
+        {
+            srtMessage = "⚠ No .srt was made: " + (problems.Count > 0 ? problems[0] : "nothing to convert") +
+                         ". If Subtitle Edit has never done OCR on this PC, open it once, OCR any subtitle with Tesseract, then try again.";
+            srtColour = "var(--amber)";
+        }
+        AddLog("SRT: " + srtMessage);
+        wasCancelled = false;
+        StateHasChanged();
+    }
+
+    private void OpenMkvInSubtitleEdit()
+    {
+        if (movieOnlyMkvs.Count == 0) return;
+        var config = ConfigService.Load();
+        var seExe = FindOrAskSubtitleEdit(config);
+        if (seExe is null) return;
+        var mkv = movieOnlyMkvs[0];
+        if (SubtitleEditService.OpenInSubtitleEdit(seExe, mkv))
+        {
+            AddLog($"SRT: opened {Path.GetFileName(mkv)} in Subtitle Edit (exact OCR); save the result as .srt next to the MKV");
+            srtMessage = "✍ Opened in Subtitle Edit: pick a subtitle track, let its OCR run (it asks about letters it doesn't know), then File → Save as .srt next to the MKV.";
+            srtColour = "var(--text-secondary)";
+        }
+        else
+        {
+            srtMessage = "⚠ Subtitle Edit couldn't be started. Check its path in Settings → Programs.";
+            srtColour = "var(--amber)";
+        }
+    }
+
     // ---- Game disc naming ----
 
     private void OnGameNameInput(ChangeEventArgs e)
@@ -2089,6 +2271,8 @@
         backupResult = null;
         movieOnlyResult = null;
         movieOnlyCount = 0;
+        movieOnlyMkvs = new();
+        srtMessage = null;
         redumperResult = null;
         wasCancelled = false;
         notBuiltMessage = null;
@@ -3148,6 +3332,7 @@
 
             if (result.Success && finalMkvPath is not null)
             {
+                movieOnlyMkvs.Add(finalMkvPath);
                 await VerifyMovieOnlyOutput(finalMkvPath);
             }
 

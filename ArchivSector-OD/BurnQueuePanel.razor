@@ -16,6 +16,9 @@
     the queue from Explorer (FileDrop). The list of images still to burn is
     kept in %AppData%\ArchivSector-OD\burn-queue.txt and put back when the
     app starts again.
+    Beta 6: each burned disc gets the same summary card as the burn screen
+    (▸ Summary under it, with 📋 Copy), and a finished queue can be copied
+    as one summary for every disc.
 *@
 
 <div class="bay-card" data-file-drop="@(running ? null : "burn-queue")">
@@ -48,16 +51,40 @@
         <div style="display: flex; flex-direction: column; gap: 6px;">
             @foreach (var it in items)
             {
-                <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary);">
-                    <span style="width: 18px; text-align: center;">@Icon(it)</span>
-                    <span style="flex: 1; min-width: 0; overflow-wrap: anywhere;" title="@it.Path">
-                        <strong>@Path.GetFileName(it.Path)</strong>
-                        <span style="display: block; font-size: 12px; color: var(--text-secondary);">@Line(it)</span>
-                    </span>
-                    @if (!running)
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary);">
+                        <span style="width: 18px; text-align: center;">@Icon(it)</span>
+                        <span style="flex: 1; min-width: 0; overflow-wrap: anywhere;" title="@it.Path">
+                            <strong>@Path.GetFileName(it.Path)</strong>
+                            <span style="display: block; font-size: 12px; color: var(--text-secondary);">@Line(it)</span>
+                            @if (it.Summary is not null)
+                            {
+                                <span style="display: block; font-size: 12px; cursor: pointer; color: var(--accent, var(--text-secondary));" @onclick="() => it.ShowSummary = !it.ShowSummary">@(it.ShowSummary ? "▾ Hide summary" : "▸ Summary")</span>
+                            }
+                        </span>
+                        @if (!running)
+                        {
+                            <button class="shortcut-btn" @onclick="() => MoveUp(it)" disabled="@(items.IndexOf(it) == 0)" title="Burn this one earlier">▲</button>
+                            <button class="shortcut-btn" @onclick="() => { items.Remove(it); }" title="Take it off the list (the file isn't touched)">✖</button>
+                        }
+                    </div>
+                    @if (it.Summary is BurnSummary.Info info && it.ShowSummary)
                     {
-                        <button class="shortcut-btn" @onclick="() => MoveUp(it)" disabled="@(items.IndexOf(it) == 0)" title="Burn this one earlier">▲</button>
-                        <button class="shortcut-btn" @onclick="() => { items.Remove(it); }" title="Take it off the list (the file isn't touched)">✖</button>
+                        @* Beta 6: the same summary card as the burn screen, for this disc. *@
+                        <div style="display: flex; flex-direction: column; gap: 6px; margin-left: 26px;">
+                            <strong style="font-size: 12px; color: @BurnSummary.Colour(info);">@BurnSummary.Icon(info) @(info.Result?.Message)</strong>
+                            <div style="display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); background: var(--bg-panel-alt);">
+                                @foreach (var row in BurnSummary.Rows(info))
+                                {
+                                    <span style="color: var(--text-muted); white-space: nowrap;">@row.Label</span>
+                                    <span style="color: @row.Colour; overflow-wrap: anywhere;">@row.Value</span>
+                                }
+                            </div>
+                            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                                <button class="shortcut-btn" @onclick="() => CopyOne(it)" title="Copies this disc's summary, for a forum post or a bug report">@(it.Copied ? "✓ Copied" : "📋 Copy summary")</button>
+                                <button class="shortcut-btn" @onclick="LogService.OpenToday" title="Today's log, with every step of this burn">📄 Open log</button>
+                            </div>
+                        </div>
                     }
                 </div>
             }
@@ -158,7 +185,13 @@
 
         @if (summary is not null)
         {
-            <span style="font-size: 12px; margin-top: 6px; display: block; color: @SummaryColor;">@SummaryIcon @summary</span>
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px;">
+                <span style="font-size: 12px; color: @SummaryColor;">@SummaryIcon @summary</span>
+                @if (!running && items.Any(i => i.Summary is not null))
+                {
+                    <button class="shortcut-btn" @onclick="CopyQueue" title="Copies a summary of every disc in this queue, for a forum post or a bug report">@(queueCopied ? "✓ Copied" : "📋 Copy queue summary")</button>
+                }
+            </div>
         }
     }
 </div>
@@ -184,6 +217,10 @@
         // Layer break file (beta 4): an image and where its layer 0 ends.
         public DvdLayerFile? Dvd;
         public bool IsDvd => DvdLayerFile.IsDvdFile(Path);
+        // Beta 6: the summary card of this disc's burn (null until it's burned or tried).
+        public BurnSummary.Info? Summary;
+        public bool ShowSummary;
+        public bool Copied;
     }
 
     // A queue item from a file: an ISO, or a BIN/CUE CD image (its size is the sectors it fills).
@@ -481,7 +518,7 @@
 
     private void ResetList()
     {
-        foreach (var i in items) { i.State = ItemState.Waiting; i.Detail = null; }
+        foreach (var i in items) { i.State = ItemState.Waiting; i.Detail = null; i.Summary = null; i.ShowSummary = false; }
         summary = null;
     }
 
@@ -513,6 +550,7 @@
         running = true;
         stopAfterCurrent = false;
         summary = null;
+        queueStarted = DateTime.Now;
         total = todo.Count;
         cts = new CancellationTokenSource();
         var ct = cts.Token;
@@ -532,6 +570,8 @@
                 current = n + 1;
                 it.State = ItemState.Working;
                 it.Detail = null;
+                it.Summary = null;
+                it.ShowSummary = false;
                 stepPercent = -1;
                 phaseIndex = 0;
 
@@ -639,16 +679,33 @@
                 status = $"Burning {Path.GetFileName(it.Path)} to {blank.MediaType}";
                 stepText = imgBurn ? "Burning with ImgBurn (progress in its window)…" : "Preparing…";
                 Ui();
+                // Beta 6: this disc's summary card, remembered as the burn starts.
+                var info = new BurnSummary.Info
+                {
+                    ImagePath = it.Path,
+                    ImageBytes = it.Bytes,
+                    Disc = blank.MediaType,
+                    DriveLetter = letter,
+                    DriveModel = model,
+                    Engine = direct ? "ArchivSector-OD's own writer" : imgBurn ? "ImgBurn" : "Windows",
+                    SpeedChosen = speedX,
+                    OneX = BurnSummary.OneXFor(blank.MediaType),
+                };
                 var reporter = new Progress<BurnEngine.Progress>(p =>
                 {
                     stepText = p.Phase + "…";
                     NotePhase(p.Phase);
                     stepPercent = p.Percent;
+                    // Our own writer handed over to another program.
+                    if (p.Phase.StartsWith("Switching to")) info.Switched = true;
                     Ui();
                 });
                 var r = await BurnService.BurnAsync(letter, it.Path, doVerify, Path.GetFileNameWithoutExtension(it.Path), model, reporter, ct, imgBurn, doDelete && !it.IsCue && !it.IsDvd, direct, speedX);
                 stepPercent = -1;
                 LogService.Write($"{letter}:", "Burn queue: " + it.Path + " — " + r.Message);
+                info.Result = r;
+                info.Time = DateTime.Now;
+                it.Summary = info;
 
                 if (!r.Burned)
                 {
@@ -674,6 +731,7 @@
                         stepPercent = -1;
                         if (health is not null)
                         {
+                            info.Health = health;
                             detail += " " + BurnService.HealthLine(health);
                             if (health.Verdict == DiscHealthService.Level.Damaged) good = false;
                         }
@@ -723,6 +781,45 @@
         Ui();
         // The Burn tab still shows the drive as "in use" from its last scan.
         if (!disposed) await Finished.InvokeAsync(letter);
+    }
+
+    // ---- Copy summary (beta 6) ----
+    private DateTime queueStarted;
+    private bool queueCopied;
+
+    private async Task CopyOne(QueueItem it)
+    {
+        if (it.Summary is null) return;
+        try { System.Windows.Clipboard.SetText(BurnSummary.Text(it.Summary)); } catch { return; }
+        it.Copied = true;
+        StateHasChanged();
+        await Task.Delay(1500);
+        it.Copied = false;
+        StateHasChanged();
+    }
+
+    // Every disc of the last queue: the queue's result, then each disc's summary
+    // (or why it was skipped), in the order they were burned.
+    private async Task CopyQueue()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"ArchivSector-OD v{UpdateCheckService.CurrentVersionDisplay}: burn queue of {queueStarted:yyyy-MM-dd HH:mm}");
+        if (summary is not null) sb.AppendLine(summary);
+        int n = 0;
+        foreach (var it in items.Where(i => i.Summary is not null || i.State == ItemState.Skipped))
+        {
+            n++;
+            sb.AppendLine();
+            sb.AppendLine($"Disc {n}: {Path.GetFileName(it.Path)}");
+            if (it.Summary is not null) sb.Append(BurnSummary.Body(it.Summary));
+            else sb.AppendLine(it.Detail ?? "Skipped");
+        }
+        try { System.Windows.Clipboard.SetText(sb.ToString()); } catch { return; }
+        queueCopied = true;
+        StateHasChanged();
+        await Task.Delay(1500);
+        queueCopied = false;
+        StateHasChanged();
     }
 
     // Leaving the tab never stops a running queue; it carries on.

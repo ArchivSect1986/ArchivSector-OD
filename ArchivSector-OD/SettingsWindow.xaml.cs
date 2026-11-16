@@ -39,6 +39,7 @@ namespace ArchivSector_OD
             RedumperPathBox.Text = config.RedumperPathOverride;
             ImgBurnPathBox.Text = config.ImgBurnPathOverride;
             MkvmergePathBox.Text = config.MkvmergePathOverride;
+            SubtitleEditPathBox.Text = config.SubtitleEditPathOverride;
             BurnerMaxPathBox.Text = config.BurnerMaxPath;
             RawgKeyBox.Password = config.RawgApiKey;
             SteamGridDbKeyBox.Password = config.SteamGridDbApiKey;
@@ -133,6 +134,7 @@ namespace ArchivSector_OD
             ToolStatus(RedumperStatus, RedumperPathBox.Text, RedumperService.FindExecutable, "Download Redumper and point to redumper.exe. Only needed for game dumps.", required: false);
             ToolStatus(ImgBurnStatus, ImgBurnPathBox.Text, ImgBurnService.FindExecutable, "Not installed. That's fine unless you need it for the things above.", required: false);
             ToolStatus(MkvmergeStatus, MkvmergePathBox.Text, MkvmergeService.FindExecutable, "Not installed. Install MKVToolNix to use it.", required: false);
+            ToolStatus(SubtitleEditStatus, SubtitleEditPathBox.Text, SubtitleEditService.FindExecutable, "Not installed. Only needed for SRT subtitles after a Movie-Only rip.", required: false);
 
             string bm = CleanPath(BurnerMaxPathBox.Text);
             if (bm.Length == 0)
@@ -180,7 +182,7 @@ namespace ArchivSector_OD
 
         private void WatchForChanges()
         {
-            foreach (var box in new[] { OutputFolderBox, MakeMkvPathBox, RedumperPathBox, ImgBurnPathBox, MkvmergePathBox, BurnerMaxPathBox, MaxConcurrentBox })
+            foreach (var box in new[] { OutputFolderBox, MakeMkvPathBox, RedumperPathBox, ImgBurnPathBox, MkvmergePathBox, SubtitleEditPathBox, BurnerMaxPathBox, MaxConcurrentBox })
                 box.TextChanged += (_, _) => Changed();
             foreach (var box in new[] { RawgKeyBox, TmdbKeyBox, SteamGridDbKeyBox })
                 box.PasswordChanged += (_, _) => Changed();
@@ -365,6 +367,9 @@ namespace ArchivSector_OD
         private void BrowseMkvmergeButton_Click(object sender, RoutedEventArgs e) =>
             BrowseExe(MkvmergePathBox, "Where is mkvmerge.exe (in MKVToolNix's folder)?", "mkvmerge (mkvmerge.exe)|mkvmerge.exe");
 
+        private void BrowseSubtitleEditButton_Click(object sender, RoutedEventArgs e) =>
+            BrowseExe(SubtitleEditPathBox, "Where is SubtitleEdit.exe?", "Subtitle Edit (SubtitleEdit.exe)|SubtitleEdit.exe");
+
         private void BrowseBurnerMaxButton_Click(object sender, RoutedEventArgs e) =>
             BrowseExe(BurnerMaxPathBox, "Where is BurnerMax.exe (the BurnerMAX Payload Tool)?", "BurnerMAX (BurnerMax.exe)|BurnerMax.exe");
 
@@ -415,6 +420,7 @@ namespace ArchivSector_OD
             c.RedumperPathOverride = CleanPath(RedumperPathBox.Text);
             c.ImgBurnPathOverride = CleanPath(ImgBurnPathBox.Text);
             c.MkvmergePathOverride = CleanPath(MkvmergePathBox.Text);
+            c.SubtitleEditPathOverride = CleanPath(SubtitleEditPathBox.Text);
             c.BurnerMaxPath = CleanPath(BurnerMaxPathBox.Text);
             c.RawgApiKey = RawgKeyBox.Password.Trim();
             c.SteamGridDbApiKey = SteamGridDbKeyBox.Password.Trim();

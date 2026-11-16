@@ -346,6 +346,18 @@
                     </Grid>
                     <TextBlock x:Name="MkvmergeStatus" Style="{StaticResource Status}"/>
 
+                    <TextBlock Style="{StaticResource Label}" Text="Subtitle Edit (SubtitleEdit.exe), optional"/>
+                    <TextBlock Style="{StaticResource Help}" Text="Free, from subtitleedit.github.io. Turns a Movie-Only MKV's subtitles (pictures on DVD and Blu-ray) into .srt text files next to it, with its OCR. Needs mkvmerge too."/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="SubtitleEditPathBox"/>
+                        <Button Grid.Column="1" Content="📂 Browse…" Margin="8,0,0,0" Click="BrowseSubtitleEditButton_Click"/>
+                    </Grid>
+                    <TextBlock x:Name="SubtitleEditStatus" Style="{StaticResource Status}"/>
+
                     <TextBlock Style="{StaticResource Label}" Text="BurnerMAX Payload Tool (BurnerMax.exe), optional"/>
                     <TextBlock Style="{StaticResource Help}" Text="Your own copy (it isn't included). Raises a DVD+R DL's capacity for Xbox 360 XGD3 games; the Burn tab opens it when one needs it."/>
                     <Grid>
