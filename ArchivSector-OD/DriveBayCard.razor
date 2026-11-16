@@ -1923,7 +1923,7 @@
         var exe = SubtitleEditService.FindExecutable(config.SubtitleEditPathOverride);
         if (exe is not null) return exe;
         var owner = System.Windows.Application.Current?.MainWindow;
-        const string msg = "SRT subtitles are made by Subtitle Edit, a free program (subtitleedit.github.io) that isn't included with ArchivSector-OD.\n\n" +
+        const string msg = "SRT subtitles are made by Subtitle Edit, a free program (github.com/SubtitleEdit/subtitleedit) that isn't included with ArchivSector-OD.\n\n" +
             "Is it installed? Click Yes to show where SubtitleEdit.exe is, or No to cancel.";
         var ask = owner is null
             ? System.Windows.MessageBox.Show(msg, "Subtitle Edit", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question)
