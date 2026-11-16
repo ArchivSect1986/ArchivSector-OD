@@ -6,7 +6,7 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ## v4.0.0-beta5 - 2026-11-20 (pre-release)
 
-The fifth test version of v4.0. Everything below is new since Beta 4. This one is mostly about **a new Settings window**, **a summary card at the end of every burn**, **Blu-ray Full Backup to a single ISO without ImgBurn**, and moving to **.NET 10**.
+The fifth test version of v4.0. Everything below is new since Beta 4. This one is mostly about **a new Settings window**, **a summary card at the end of a burn**, **Blu-ray Full Backup to a single ISO without ImgBurn**, and moving to **.NET 10**.
 
 ### ✨ Added
 * **⚙ A new Settings window.** Sections down the left (General, Appearance, Programs, Burning, Online lookups, Batch & drives, Redump checks, About & updates), shown one at a time, with a line of help under every setting.
@@ -17,7 +17,7 @@ The fifth test version of v4.0. Everything below is new since Beta 4. This one i
 * **Every separate window follows the theme** picked in 🎨 (colours, font and corners) and changes with it while it's open: Settings, History, ISO Verifier, the Live log pop-out, Fetch Metadata & Artwork, and the title and track pickers for Movie-Only. History's table no longer stays white.
 * **⧉ Pop out the Live log** into its own window, to watch a burn from another tab, over another program or on a second monitor. It follows the theme as well.
 * **Book type in Drive info** (what a burned DVD tells players it is: a DVD+R burned as a DVD-ROM says so), and the size of layer 0 on a dual-layer disc. The burn log records the book type after a DVD+R burn.
-* **A summary card at the end of every burn:** the image and its size, the disc and drive, the writer, the speed chosen and the average reached, how long it took, and what the verify found: ✓ every sector matches, or how many sectors differ or can't be read and where. **📋 Copy summary** puts it on the clipboard for a forum post or bug report, and **📄 Open log** opens the full log.
+* **A summary card at the end of a burn from the burn screen:** the image and its size, the disc and drive, the writer, the speed chosen and the average reached, how long it took, and what the verify found: ✓ every sector matches, or how many sectors differ or can't be read and where. **📋 Copy summary** puts it on the clipboard for a forum post or bug report, and **📄 Open log** opens the full log.
 * **Drive info shows how many layers a blank Blu-ray has** (a BD-R DL reports itself as a plain BD-R, so it's worked out from its size): 1, 2 (50 GB), or 3 and 4 for BDXL.
 * **Copy disc recognises a movie disc** (a DVD-Video or Blu-ray movie): a bought one is copy-protected and an exact copy won't play, so it points to the drive bay's Full Backup, then burning the ISO it makes. A Blu-ray with AACS isn't copied; a DVD-Video can still be copied when it's a home-made disc.
 * **A BD-R DL whose verify fails just after the layer change** (sector 12,219,392) gets a hint to check it in another drive first: some drives read the start of the second layer poorly.
