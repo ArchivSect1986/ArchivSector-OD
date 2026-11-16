@@ -4,9 +4,52 @@ All notable changes to **ArchivSector-OD** will be documented in this file. This
 
 ---
 
-## v4.0.0-beta5 - in progress
+## v4.0.0-beta6 - in progress
 
-The fifth test version of v4.0, being worked on. Everything below is new since Beta 4.
+The sixth test version of v4.0, being worked on. Everything below is new since Beta 5. This one is mostly about **artwork** (album covers, a second source for game covers, and the right poster for every disc), **DVD Decrypted ISO**, **TargetFill Build & Burn**, **SRT subtitles** and **new drive bay layouts**.
+
+### ✨ Added
+* **🔓 DVD Decrypted ISO (via MakeMKV):** the DVD menu's MakeMKV button now makes a single decrypted `.iso` straight away (MakeMKV writes the finished DVD image itself), with a progress bar. The raw sector dump (Redumper) is still there for an exact copy.
+* **🔥 TargetFill Build & Burn:** a new button beside **Generate .ISO Image** builds the padded ISO and sends it straight to the Burn tab. A set that needs several discs sends every ISO, one after another.
+* **🔥 Burn this ISO** on the drive card after a Blu-ray Full Backup or a raw ISO dump: sends the finished ISO to the Burn tab's queue.
+* **📝 SRT subtitles after a Movie-Only rip.** A DVD's or Blu-ray's subtitles are pictures, so they're read with the OCR of **Subtitle Edit** (free, a separate download, set in **Settings → 🛠 Programs**). **📝 Make SRT subtitles** saves every subtitle track as an `.srt` next to the MKV (`Movie.eng.srt`, `Movie.eng.forced.srt`…), the names Plex, Jellyfin and VLC pick up; **✍ Exact: open in Subtitle Edit** opens the MKV in Subtitle Edit's own window, where its OCR asks about any letter it doesn't know. The MKV itself isn't changed. Needs MKVToolNix (mkvmerge and mkvextract) too.
+* **🎵 Album covers for music CDs**, found on iTunes from the CD-Text's album and artist.
+* **🎮 SteamGridDB for game covers**, as well as RAWG: add its free key in **Settings → 🌐 Online lookups** and choose which one is tried first (the other is the fallback). It's in the Fetch Metadata & Artwork window too.
+* **The film's year** beside its title on the drive card, and in the name of the ISO it makes ("Beauty and the Beast (2017).iso").
+* **"N versions found — pick one":** when the automatic lookup finds the same title from several years (a remake, a re-release), it no longer guesses: the drive card asks you to pick the one on this disc.
+* **Each disc keeps its own artwork.** Once a poster is picked for a disc, it's remembered by the disc's own ID (its volume serial number), so the right one comes back after a restart or the next time the disc goes in, even when two different films share a disc label (the 1991 and 2017 *Beauty and the Beast*) or the label means nothing (DVD_ROM).
+* **📚 Burn queue summary cards:** each burned disc in the queue gets the same summary card as the burn screen (**▸ Summary**, with **📋 Copy summary**), and **📋 Copy queue summary** copies the whole queue: every disc, and why any were skipped.
+* **New drive bay layouts:** **Classic**, **Faceplate** (two or three per row) and **Card** (cover art with an artwork row). The button in the Drive Bays header switches between them. Cover art shows as a framed tile, with a labelled placeholder when there's none.
+* **A new TargetFill screen** (on by default): a green main button, a red **🧹 Clean Fillers**, and **✕ Clear** to forget the chosen folder (nothing on disk is changed).
+* **🎨 Ultraviolet**, a new theme. **Console** is the theme new installs start in (yours stays as it is).
+
+### 🔧 Changed
+* **The artwork folder is sorted by kind:** `art_cache\Game_Art\<console>` (PS1 to PS5, Xbox, Xbox 360, Xbox One, Other), `Movie_Art` and `Music_Art`. Art saved by earlier versions is still found. Game folders are named "Title (Year) [disc label]" ("NHL 13 (2012) [14719]") instead of only the disc's label, and the "Cached" link opens the folder the cover came from.
+* **No automatic artwork lookup for a disc with no real name** (UNLABELED, DVD_VIDEO, BDROM, DVD_ROM, XBOX360…): searching for those found unrelated films and games. The log says it was skipped; 🎨 Fetch Metadata & Artwork still finds it by hand.
+* **A DVD raw ISO read without Redumper** uses ArchivSector-OD's own reader, with live progress and Cancel, instead of ImgBurn.
+* **A Blu-ray ISO's volume label** is the disc's own label, so the year in the file name doesn't get it cut off at 32 characters.
+* **Only the open tab scrolls:** the header and footer stay put. Rip progress bars are drawn as lit segments, and the Verify disc tab has a green ✔.
+* **The film's description** sits under its **Show details** link, beside the poster instead of under it.
+
+### 🐛 Fixed
+* **Two films with the same disc label shared one poster**, and the last one picked replaced the other (now each disc keeps its own, above).
+* **The Live log was squished** into a thin strip on some window sizes.
+
+### ✅ Tested
+* **DVD Decrypted ISO:** a DVD movie straight to a single ISO.
+* **TargetFill Build & Burn:** built the ISO and burned it from the Burn tab.
+* **Blu-ray Full Backup:** a 38.6 GB Blu-ray to one ISO, the temporary decrypted folder cleaned up.
+* **Artwork per disc:** four *Beauty and the Beast* discs (two 1991, two 2017) each came back with the right poster after restarts and re-inserts; a DVD_ROM game disc found its cover again by its ID.
+
+### ⚠ Known issues
+* **SRT subtitles are read by OCR**, which can misread a letter now and then: check them, or use **✍ Exact**. Subtitle Edit's command line reads with the OCR language last picked in its own window; if it has never done OCR on the PC, open it once and OCR any subtitle with Tesseract first.
+* Everything listed for Beta 5 below still applies.
+
+---
+
+## v4.0.0-beta5 - 2026-11-20 (pre-release)
+
+The fifth test version of v4.0. Everything below is new since Beta 4. This one is mostly about **a new Settings window**, **a summary card at the end of a burn**, **Blu-ray Full Backup to a single ISO without ImgBurn**, and moving to **.NET 10**.
 
 ### ✨ Added
 * **⚙ A new Settings window.** Sections down the left (General, Appearance, Programs, Burning, Online lookups, Batch & drives, Redump checks, About & updates), shown one at a time, with a line of help under every setting.
@@ -17,7 +60,7 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 * **Every separate window follows the theme** picked in 🎨 (colours, font and corners) and changes with it while it's open: Settings, History, ISO Verifier, the Live log pop-out, Fetch Metadata & Artwork, and the title and track pickers for Movie-Only. History's table no longer stays white.
 * **⧉ Pop out the Live log** into its own window, to watch a burn from another tab, over another program or on a second monitor. It follows the theme as well.
 * **Book type in Drive info** (what a burned DVD tells players it is: a DVD+R burned as a DVD-ROM says so), and the size of layer 0 on a dual-layer disc. The burn log records the book type after a DVD+R burn.
-* **A summary card at the end of every burn:** the image and its size, the disc and drive, the writer, the speed chosen and the average reached, how long it took, and what the verify found: ✓ every sector matches, or how many sectors differ or can't be read and where. **📋 Copy summary** puts it on the clipboard for a forum post or bug report, and **📄 Open log** opens the full log.
+* **A summary card at the end of a burn from the burn screen:** the image and its size, the disc and drive, the writer, the speed chosen and the average reached, how long it took, and what the verify found: ✓ every sector matches, or how many sectors differ or can't be read and where. **📋 Copy summary** puts it on the clipboard for a forum post or bug report, and **📄 Open log** opens the full log.
 * **Drive info shows how many layers a blank Blu-ray has** (a BD-R DL reports itself as a plain BD-R, so it's worked out from its size): 1, 2 (50 GB), or 3 and 4 for BDXL.
 * **Copy disc recognises a movie disc** (a DVD-Video or Blu-ray movie): a bought one is copy-protected and an exact copy won't play, so it points to the drive bay's Full Backup, then burning the ISO it makes. A Blu-ray with AACS isn't copied; a DVD-Video can still be copied when it's a home-made disc.
 * **A BD-R DL whose verify fails just after the layer change** (sector 12,219,392) gets a hint to check it in another drive first: some drives read the start of the second layer poorly.
@@ -41,14 +84,20 @@ The fifth test version of v4.0, being worked on. Everything below is new since B
 * **History showed drive names with the drive's padding and revision letter** ("ASUS DRW-24F1ST   d"). New rips are recorded with the tidy name ("ASUS DRW-24F1ST"), and older rows are shown that way too (the history file itself isn't changed).
 * **The burn summary card** showed no disc type and a wrong average speed ("156.3x") once the disc had been burned.
 * **A white flash at start-up on .NET 10.** The new .NET 10 window could show one white frame before the dark screen was drawn; the window now stays hidden until its first picture is ready, so it opens straight into its theme.
+* **A MakeMKV rip could freeze at 0% on a copy-protected disc.** The disc floods MakeMKV's error output with read messages; the app read that output only after the normal output had finished, so once it filled up both sides waited on each other forever. Both are now read at the same time (Full Backup, Movie-Only, and the disc and title scans before them).
+* **Desktop icons stopped responding while ArchivSector-OD was minimized** (new in Beta 5: Beta 4 didn't do it). Since the move to .NET 10, the app's page is drawn in a see-through window of its own, which Windows left over the desktop when the app was minimized, so it caught the mouse until the app was restored or closed. It's now hidden while the app is minimized; rips and burns carry on as before.
 
 ### ✅ Tested
 * **BD-R DL (50 GB) is burned by the own writer:** a 42 GB Blu-ray backup on a Verbatim BD-R DL at 6x, and the disc matched the ISO sector for sector.
+* **Blu-ray Full Backup to a single ISO without ImgBurn:** a 38.6 GB Blu-ray was decrypted by MakeMKV and turned into one ISO by ArchivSector-OD itself, and the temporary decrypted folder was cleaned up afterwards.
 
 ### ⚠ Known issues
 * **DVD-R DL** isn't written by the own writer yet: ImgBurn or Windows takes over for it. (DVD-R DL blanks are rare now; DVD+R DL is written by the own writer.)
 * **The start of a BD-R DL's second layer can be hard for some drives to read back.** On the test disc, the verify straight after burning found 23 unreadable sectors just after the layer change in the burning drive, while the same disc read perfectly in another drive. Other programs see the same thing (ImgBurn users report it with Verbatim BD-R DL discs). If a BD-R DL's verify fails only just past sector 12,219,392, check it in another drive before giving up on it.
 * **A drive can stop answering when told to start writing on a BD-R DL** (seen once on one of two identical drives, with ImgBurn too). The own writer now stops by itself and says the disc is still blank: try another drive or disc.
+
+### Reporting a problem
+Same as before: open an issue on GitHub with **Burn → Drive info → 📋 Copy report**, the disc type and brand, and that day's log from `%AppData%\ArchivSector-OD\Logs`.
 
 ---
 
