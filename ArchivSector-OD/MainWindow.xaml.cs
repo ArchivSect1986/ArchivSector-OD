@@ -29,6 +29,7 @@ namespace ArchivSector_OD
             InitializeComponent();
 
             Background = new System.Windows.Media.SolidColorBrush(bg);
+            StateChanged += (_, _) => OnWindowStateChanged();
             blazorWebView.Opacity = 0;
             void ShowPage() { if (blazorWebView.Opacity < 1) blazorWebView.Opacity = 1; }
             // In case the page never says it has loaded: show it anyway.
@@ -123,6 +124,95 @@ namespace ArchivSector_OD
             try { int v = on ? 1 : 0; return DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref v, sizeof(int)) == 0; }
             catch { return false; }
         }
+
+        // Beta 5 (.NET 10): the page is drawn by WebView2 in a window of its
+        // own (an invisible, see-through window over the app's page, owned
+        // by WebView2's msedgewebview2 process, not by this window). Windows
+        // doesn't hide it when the app is minimized, so it stayed over the
+        // desktop at the app's size and caught the mouse: desktop icons
+        // stopped responding until the app was restored or closed (beta 4,
+        // on .NET 8, drew the page inside this window, so it never happened).
+        // So while minimized, the web view is hidden, which tells WebView2 to
+        // hide its window; if that window is still showing, it's hidden
+        // directly, and shown again when the app comes back. Nothing in the
+        // app stops while it's hidden: rips, burns and the log carry on.
+        private readonly List<IntPtr> hiddenWebViewWindows = new();
+
+        private void OnWindowStateChanged()
+        {
+            if (WindowState == WindowState.Minimized)
+            {
+                try { blazorWebView.Visibility = Visibility.Hidden; } catch { }
+                // After WebView2 has had its turn to hide its own window.
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(HideStrayWebViewWindows));
+            }
+            else
+            {
+                ShowHiddenWebViewWindows();
+                try { blazorWebView.Visibility = Visibility.Visible; } catch { }
+            }
+        }
+
+        private void HideStrayWebViewWindows()
+        {
+            if (WindowState != WindowState.Minimized) return;
+            uint browserPid;
+            try { browserPid = (uint)blazorWebView.WebView.CoreWebView2.BrowserProcessId; }
+            catch { return; }
+            if (browserPid == 0) return;
+
+            var found = new List<IntPtr>();
+            try
+            {
+                EnumWindows((h, _) =>
+                {
+                    GetWindowThreadProcessId(h, out uint pid);
+                    if (pid != browserPid || !IsWindowVisible(h) || IsIconic(h)) return true;
+                    if (GetWindow(h, GW_OWNER) != IntPtr.Zero) return true;
+                    var cls = new System.Text.StringBuilder(64);
+                    GetClassName(h, cls, cls.Capacity);
+                    if (cls.ToString().StartsWith("Chrome_WidgetWin", StringComparison.Ordinal)) found.Add(h);
+                    return true;
+                }, IntPtr.Zero);
+            }
+            catch { return; }
+
+            foreach (var h in found)
+            {
+                try { if (ShowWindow(h, SW_HIDE) || !IsWindowVisible(h)) hiddenWebViewWindows.Add(h); }
+                catch { }
+            }
+        }
+
+        private void ShowHiddenWebViewWindows()
+        {
+            foreach (var h in hiddenWebViewWindows)
+            {
+                try { if (IsWindow(h)) ShowWindow(h, SW_SHOWNA); }
+                catch { }
+            }
+            hiddenWebViewWindows.Clear();
+        }
+
+        private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder className, int maxCount);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hwnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hwnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool IsWindow(IntPtr hwnd);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hwnd, int command);
+        private const uint GW_OWNER = 4;
+        private const int SW_HIDE = 0, SW_SHOWNA = 8;
 
         // "archivsector-drop:<zone>" with the dropped files attached: their
         // paths go to the panel that owns the zone (FileDrop). Every other
