@@ -247,6 +247,9 @@ namespace ArchivSector_OD
         private static char Level(string text)
         {
             bool Has(string w) => text.Contains(w, StringComparison.OrdinalIgnoreCase);
+            // Beta 6: a line the app itself marks as a warning stays one, even
+            // when it says "couldn't" (which otherwise means an error).
+            if (text.Contains("[WARNING]", StringComparison.Ordinal)) return 'W';
             if (Has("lookup failed") || Has("timed out")) return 'W';
             // Beta 5: a raised-capacity disc this drive misreads isn't a bad
             // disc (Verify disc says so), so it's a warning, not an error.

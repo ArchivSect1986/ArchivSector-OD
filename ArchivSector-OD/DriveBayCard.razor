@@ -645,7 +645,7 @@
     {
         <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px;">
             <button class="bay-btn tray-btn" style="width: auto; flex: 1;" @onclick="MakeSrtSubtitles"
-                    title="Reads the MKV's subtitles (pictures on DVD and Blu-ray) with Subtitle Edit's OCR and saves each one as an .srt next to the MKV. The MKV isn't changed.">
+                    title="@(string.Join(", ", movieOnlyMkvs.Select(Path.GetFileName))): reads the MKV's subtitles (pictures on DVD and Blu-ray) with Subtitle Edit's OCR and saves each one as an .srt next to the MKV. The MKV isn't changed.">
                 📝 Make SRT subtitles
             </button>
             @if (movieOnlyMkvs.Count == 1)
@@ -1912,9 +1912,11 @@
     // next to it, read by Subtitle Edit's OCR (SubtitleEditService). The MKV
     // keeps its own subtitles, so nothing is lost if the OCR misreads a letter.
 
+    // The MKVs stay on offer after the disc comes out (Auto-eject takes it out
+    // as soon as the rip is done), until the next rip starts on this bay.
     private bool CanMakeSrt =>
         !isRunning && !isVerifying && !healthRunning && !burnRunning
-        && movieOnlyResult?.Success == true && movieOnlyMkvs.Count > 0 && movieOnlyMkvs.All(File.Exists);
+        && movieOnlyMkvs.Count > 0 && movieOnlyMkvs.All(File.Exists);
 
     // Subtitle Edit from Settings or its usual install folders; asked for (and
     // remembered) the first time it isn't found.
@@ -3477,7 +3479,14 @@
         if (previousMediaPresent && !MediaPresent)
         {
             burnedDiscInDrive = false;
+            // Beta 6: the last Movie-Only's MKVs (and the SRT result) outlive the
+            // disc: they're on the hard drive, and Auto-eject takes the disc out
+            // as soon as the rip is done.
+            var keepMkvs = movieOnlyMkvs;
+            var keepSrt = (srtMessage, srtColour);
             ResetResultState();
+            movieOnlyMkvs = keepMkvs;
+            (srtMessage, srtColour) = keepSrt;
             lastAction = null;
             cachedArt = null;
             artVersionsFound = 0;
