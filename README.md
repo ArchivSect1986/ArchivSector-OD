@@ -8,20 +8,28 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 
 ## 🚀 Key Features
 
-* 💿 **Blu-ray, 4K UHD & DVD Backup:** Direct 1:1 backup (MakeMKV decrypt for Blu-ray/UHD, Redumper/ImgBurn for DVD) or Movie-Only MKV extraction that pulls just the main title.
+* 💿 **Blu-ray, 4K UHD & DVD Backup:** Direct 1:1 backup (MakeMKV decrypt for Blu-ray/UHD; for DVD, a decrypted ISO made by MakeMKV or an exact raw sector dump with Redumper) or Movie-Only MKV extraction that pulls just the main title (or several films from one disc, each as its own MKV). A Blu-ray/UHD Full Backup comes out as a single ISO built by ArchivSector-OD itself (UDF 2.50, the file system Blu-ray players need, at any size up to BD-100), with no ImgBurn needed.
 * 🎚️ **Per-Track Audio/Subtitle Selection:** Choose exactly which audio and subtitle tracks to keep in Movie-Only MKV output, with language, codec, bitrate, and channel info shown per track — trimmed reliably via mkvmerge. The output file name can be edited before extraction starts.
+* 📝 **SRT Subtitles:** After a Movie-Only rip, every subtitle track (pictures on DVD and Blu-ray) can be turned into an `.srt` text file next to the MKV (`Movie.eng.srt`, `Movie.eng.forced.srt`…), read with the OCR of your own copy of Subtitle Edit, or opened in Subtitle Edit's window for its exact, letter-by-letter OCR. The MKV keeps its own subtitles.
 * 🤖 **Unattended Operation:** Optional unattended mode that auto-starts ripping upon physical disc insertion — movies and DVDs always go Full Backup, with the rip-mode prompt, destination folder, and file name all auto-filled (saved as "Title (2)" instead of overwriting if that name already exists) — plus a Batch Queue Mode that auto-continues to the next disc after each one finishes, with a per-drive session counter. Multi-Drive Batch Sync can cap how many drive bays rip at once, queuing extra discs until a slot frees up.
 * 📁 **Automated File Organization:** Auto-categorizes movie and game sub-folders (`\BluRay_Movies\`, `\DVD_Movies\`, and `\Games\<console>\`), with full backups sorted by disc size (`BD-25`/`BD-50`/`DVD-5`/`DVD-9`) and Movie-Only MKVs in their own `MKV` folder.
 * 🔒 **Data Integrity Verification:** Automatically generates SHA1 and MD5 checksums for every archive, with optional verification against imported Redump DAT files and an honest match/no-match/not-applicable status reported at completion.
 * 📊 **Archival History:** A searchable, filterable log of every rip, with a stats summary (total rips, Redump match rate, total data archived, breakdown by system) and the ability to export a filtered view to its own CSV.
 * 🎮 **Game Disc Archival:** Dedicated Redumper-driven pipeline for game discs. PlayStation 1/2/3/4 and Xbox One discs are recognized automatically and sorted into a folder per console, with PlayStation serial numbers recorded and the real game name read from PS3, PS4 and Xbox One discs. PS4 and Xbox One dumps are encrypted exact copies for preservation and Redump verification; they can't be played or installed directly. Original Xbox discs are recognized as soon as they're inserted. Xbox 360 discs (and any Original Xbox disc the app can't tell beforehand) are identified from Redumper's log once the dump finishes, on a drive that can read them such as one with OmniDrive firmware, and moved into their own console folder. PC game discs and other unrecognized data discs can be dumped too, CDs come out as `.bin` + `.cue`, and music CDs (including burned CDs of MP3s) can be copied exactly into their own folder. Each dump can be named before, during, or after it rips, or it names itself: from a matching Redump DAT (any console), or from the game itself for Original Xbox discs, with cover art fetched automatically.
-* 🖼️ **Metadata & Artwork:** Automatic lookup of movie titles/artwork on disc insertion via TMDB, plus manual search for movies (TMDB) and games (RAWG). Add a year in brackets to pick the right version of a film. Both use free API keys.
+* 🖼️ **Metadata & Artwork:** Movie posters and details from TMDB, game covers from RAWG or SteamGridDB, and album covers for music CDs from iTunes (found from the CD-Text), looked up automatically when a disc goes in, or searched by hand. The film's year is shown and goes into the ISO's name. When several films or games share a title, the drive card asks which one is on the disc instead of guessing, and each disc remembers its own artwork by its ID, even when two films share a disc label. Artwork is kept in `art_cache` sorted by kind (games by console, movies, music). TMDB, RAWG and SteamGridDB use free API keys; iTunes needs none.
 * 💡 **LibreDrive Detection:** Drive bays show OmniDrive-compatible drive models, and automatically confirm LibreDrive mode when MakeMKV reports it during a rip.
-* 🎯 **TargetFill Built In:** Everything from TargetFill Pro, in its own tab. Fill a CD, DVD, Blu-ray or USB drive to exactly 100% with your data protected in the middle tracks. Build ready-to-burn ISOs (split across several discs when needed) with a SHA-256 manifest, an on-disc verifier, optional PAR2 recovery files and printable disc labels, or send any finished rip straight to TargetFill to burn an archival backup copy. Also available from the right-click menu of any folder, with a batch mode for building many folders' ISOs in one go, and a tool that pads ISOs you already have to 100% of a disc.
-* 🔥 **Disc Burning:** A Burn tab with ArchivSector-OD's own writer, which talks to the drive directly and uses the whole disc: CD-R/RW, DVD±R, DVD±RW, DVD+R DL, BD-R and BD-RE, at the speed you choose, then verified byte for byte against the ISO. Burn one ISO or a queue of them (drag and drop, kept between runs), burn BIN/CUE CD images (data and music, like Redumper dumps, two-session Enhanced CDs, CD-Text and hidden tracks), make a music CD from WAV, FLAC, MP3, M4A/AAC or WMA files, copy a disc (data discs, music CDs, games with music tracks, and Enhanced CDs) with one drive or two, build an ISO from a folder, read a disc to an ISO or BIN/CUE (with an optional secure read and automatic read offset for music), check a music CD against AccurateRip, verify a disc burned earlier, erase rewritable discs, and see exactly what your drive and disc report (including who made the disc). Xbox 360 game backups of games you own can be burned too: ImgBurn .dvd layer break files, the right XGD2/XGD3 layer break set automatically, a check of the game's security data before burning, and help raising a disc's capacity for XGD3 games with your own copy of BurnerMAX. ImgBurn or Windows' built-in burning engine can be used instead, and ImgBurn takes over automatically for a disc the own writer can't burn.
+* 🎯 **TargetFill Built In:** Everything from TargetFill Pro, in its own tab. Fill a CD, DVD, Blu-ray or USB drive to exactly 100% with your data protected in the middle tracks. Build ready-to-burn ISOs (split across several discs when needed), or **Build & Burn** to send them straight to the Burn tab, with a SHA-256 manifest, an on-disc verifier, optional PAR2 recovery files and printable disc labels, or send any finished rip straight to TargetFill to burn an archival backup copy. Also available from the right-click menu of any folder, with a batch mode for building many folders' ISOs in one go, and a tool that pads ISOs you already have to 100% of a disc.
+* 🔥 **Disc Burning:** A Burn tab with ArchivSector-OD's own writer, which talks to the drive directly and uses the whole disc: CD-R/RW, DVD±R, DVD±RW, DVD+R DL, BD-R (including 50 GB BD-R DL) and BD-RE, at the speed you choose (with the speed the drive really set shown in the log), then verified byte for byte against the ISO. Every burn ends with a summary card: the disc, drive, speed, time taken and what the verify found, with a button to copy it for a forum post or bug report (in the burn queue, under each disc, plus a summary of the whole queue). A Live log shows every drive's progress as it happens, and can be popped out into its own window. Burn one ISO or a queue of them (drag and drop, kept between runs), burn BIN/CUE CD images (data and music, like Redumper dumps, two-session Enhanced CDs, CD-Text and hidden tracks), make a music CD from WAV, FLAC, MP3, M4A/AAC or WMA files, copy a disc (data discs, music CDs, games with music tracks, and Enhanced CDs) with one drive or two, build an ISO from a folder, read a disc to an ISO or BIN/CUE (with an optional secure read and automatic read offset for music), check a music CD against AccurateRip, verify a disc burned earlier, erase rewritable discs, and see exactly what your drive and disc report (including who made the disc). Xbox 360 game backups of games you own can be burned too: ImgBurn .dvd layer break files, the right XGD2/XGD3 layer break set automatically, a check of the game's security data before burning, and help raising a disc's capacity for XGD3 games with your own copy of BurnerMAX (once you close it, the disc is checked again and the burn carries on by itself). ImgBurn or Windows' built-in burning engine can be used instead, and ImgBurn takes over automatically for a disc the own writer can't burn.
+* 🎨 **Themes & Layouts:** Twelve themes (Midnight, Nova, Console, Studio Light, Rack, Library, Swiss, Power Table, Neon, Ultraviolet, Catalog and Big Tiles), each with its own colours, fonts and corners, followed by every window of the app, plus holiday themes that come on by themselves for their week (can be turned off). The drive bays can be shown three ways: Classic, Faceplate (each drive drawn like a real drive front) or Card (with cover art).
 * 🔬 **Disc Health Check:** Reads every sector of a disc (Blu-ray, DVD or CD, including music CDs) and shows a live map of slow or unreadable areas from the inner to the outer edge, so you can spot a disc starting to fail and back it up in time. Saves a report and records the result in History. Read-only.
 * ⚡ **Smart Workflow Automation:** Duplicate-output warnings, a completion sound and Windows notification, and physical optical tray auto-ejection upon completion.
 * 🔄 **One-Click Updates:** Checks GitHub for a new version at startup (can be turned off in Settings). With one click it downloads the update, verifies it, installs it and restarts, keeping your settings and history. It never updates in the middle of a rip, and it offers to fix shortcuts that still open an older copy.
+
+---
+
+## 📅 Release Schedule
+
+New builds come out on the **1st and 3rd Friday of each month** (the following Friday when that's a holiday). A fix for a serious problem can come out in between.
 
 ---
 
@@ -43,11 +51,11 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 To use **ArchivSector-OD**, you must independently download the following third-party utilities. The application relies entirely on your user-defined local file paths to communicate with these external command-line interfaces:
 
 ### 1. MakeMKV
-* **Purpose:** Required for Blu-ray/4K UHD decrypt and backup, and for Movie-Only MKV extraction (DVD and Blu-ray/UHD alike) via `makemkvcon.exe`.
+* **Purpose:** Required for Blu-ray/4K UHD decrypt and backup, the DVD decrypted ISO, and Movie-Only MKV extraction (DVD and Blu-ray/UHD alike) via `makemkvcon.exe`.
 * **Source:** Download exclusively from the [Official MakeMKV Website](https://makemkv.com).
 
 ### 2. mkvmerge (MKVToolNix)
-* **Purpose:** Required for Movie-Only MKV output — performs the actual per-track audio/subtitle trimming as a post-processing pass after MakeMKV's extraction.
+* **Purpose:** Required for Movie-Only MKV output — performs the actual per-track audio/subtitle trimming as a post-processing pass after MakeMKV's extraction. Its `mkvextract.exe` (installed alongside) is also used to make SRT subtitles.
 * **Source:** Download from the [Official MKVToolNix Website](https://mkvtoolnix.download).
 
 ### 3. Redumper
@@ -55,26 +63,31 @@ To use **ArchivSector-OD**, you must independently download the following third-
 * **Source:** Download from official community preservation channels.
 
 ### 4. ImgBurn *(Optional)*
-* **Purpose:** A backup for burning: ArchivSector-OD's own writer burns most discs itself, and ImgBurn takes over automatically for a disc it can't (such as dual-layer DVD-R DL and BD-R DL). Also used as a fallback for DVD raw ISO dumps when Redumper isn't set up, as an optional stage 2 that turns a decrypted Blu-ray/UHD backup into a single-file ISO, and by TargetFill's ImgBurn button.
+* **Purpose:** A backup for burning: ArchivSector-OD's own writer burns most discs itself, and ImgBurn takes over automatically for a disc it can't (such as dual-layer DVD-R DL). Also used as a fallback for turning a decrypted Blu-ray/UHD backup into a single-file ISO if ArchivSector-OD's own ISO build fails, and by TargetFill's ImgBurn button.
 * **Source:** Download from the official ImgBurn repository.
 
 ### 5. BurnerMAX Payload Tool *(Optional)*
 * **Purpose:** Only for burning Xbox 360 XGD3 game backups, which need a DVD+R DL's capacity raised first. ArchivSector-OD opens it for you when it's needed, and asks where it is the first time. It only works on some drives.
 * **Source:** A third-party community tool; it isn't included with or linked from ArchivSector-OD.
 
-### 6. par2cmdline *(Optional)*
+### 6. Subtitle Edit *(Optional)*
+* **Purpose:** Only for SRT subtitles after a Movie-Only rip: its OCR reads the picture subtitles of DVDs and Blu-rays. Set it in **Settings → 🛠 Programs**, or ArchivSector-OD asks where it is the first time. Open it once and OCR any subtitle with Tesseract before the first use, so its OCR is set up.
+* **Source:** [Subtitle Edit on GitHub](https://github.com/SubtitleEdit/subtitleedit).
+
+### 7. par2cmdline *(Optional)*
 * **Purpose:** Only for TargetFill's PAR2 recovery files option. Put `par2.exe` next to `ArchivSector-OD.exe`.
 * **Source:** [par2cmdline releases on GitHub](https://github.com/Parchive/par2cmdline/releases).
 
-### 7. API Keys *(Optional, free)*
+### 8. API Keys *(Optional, free)*
 * **TMDB** ([themoviedb.org](https://www.themoviedb.org)) for movie titles and artwork.
 * **RAWG** ([rawg.io/apidocs](https://rawg.io/apidocs)) for game titles and artwork.
+* **SteamGridDB** ([steamgriddb.com](https://www.steamgriddb.com)) for game box art, as well as or instead of RAWG.
 
 ---
 
 ## ⚙️ Initial Setup Guide
 
-1. **Launch the App:** Unzip the release folder and run `ArchivSector-OD.exe`. If Windows shows a blue **"Windows protected your PC"** screen, click **More info → Run anyway**. Windows SmartScreen shows this for any program that isn't signed with a paid certificate; it doesn't mean anything was found wrong with it. Then click **⚙️ Settings** to open the **System Settings & Archival Preferences** window.
-2. **Set Target Directory:** Configure your **Default Output Base Folder** to your preferred storage drive.
-3. **Link External Utilities:** Paste or browse to the exact file paths for your local installations of `makemkvcon64.exe`, `mkvmerge.exe`, `redumper.exe`, and (optionally) `ImgBurn.exe`.
-4. **Add API Keys (optional):** Paste your free TMDB and/or RAWG API keys to enable metadata and artwork lookup, then click **Save Preferences**.
+1. **Launch the App:** Unzip the release folder and run `ArchivSector-OD.exe`. If Windows shows a blue **"Windows protected your PC"** screen, click **More info → Run anyway**. Windows SmartScreen shows this for any program that isn't signed with a paid certificate; it doesn't mean anything was found wrong with it. Then click the **⚙ Settings** button in the top bar to open the **Settings** window. Its sections are listed down the left, with a line of help under every setting.
+2. **Set Target Directory:** In **📁 General**, set the **Output folder** to your preferred storage drive.
+3. **Link External Utilities:** In **🛠 Programs**, paste or browse to the exact file paths for your local installations of `makemkvcon64.exe`, `mkvmerge.exe`, `redumper.exe`, and (optionally) `ImgBurn.exe` and `SubtitleEdit.exe`.
+4. **Add API Keys (optional):** In **🌐 Online lookups**, paste your free TMDB, RAWG and/or SteamGridDB API keys to enable metadata and artwork lookup (and choose which game source is tried first), then click **💾 Save**.
