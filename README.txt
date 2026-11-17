@@ -1,8 +1,8 @@
-﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 4 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 5 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v4.0 Beta 4**, a test version of v4.0! ⚠️ It's
+Welcome to **ArchivSector-OD v4.0 Beta 5**, a test version of v4.0! ⚠️ It's
 a pre-release: everything should work, but this is the version where you
 help find what doesn't. If you'd rather stay on a finished version, keep
 v3.4.
@@ -23,8 +23,8 @@ handful of improvements on top.
    "More info", then "Run anyway". This is normal for programs that
    aren't signed with a paid certificate, and you'll only see it once.
    (Full explanation under "How to Run" below.)
-3. Open ⚙️ Settings and point it at your tools (MakeMKV, mkvmerge,
-   Redumper, and optionally ImgBurn), then insert a disc.
+3. Open ⚙️ Settings → 🛠 Programs and point it at your tools (MakeMKV,
+   mkvmerge, Redumper, and optionally ImgBurn), then insert a disc.
 
 Coming from v3.x? The app's update check doesn't offer betas, so this one
 is a manual download: unzip it into a NEW folder (keep your v3.4 folder if
@@ -32,7 +32,55 @@ you want to go back). Your settings, history, and cached artwork are kept
 -- they're stored separately in your AppData folder. When v4.0 itself is
 released, the beta offers it to you by itself.
 
-Already on Beta 1, 2 or 3? Replace that folder with this one.
+Already on an earlier beta? Replace that folder with this one.
+
+📅 New builds come out on the 1st and 3rd Friday of each month (the
+following Friday when that's a holiday).
+
+========================================================================
+⚙️ NEW IN V4.0 BETA 5 — SETTINGS, BURN SUMMARY & BLU-RAY ISO WITHOUT IMGBURN
+========================================================================
+
+• ⚙ A new Settings window: sections down the left (General, Appearance,
+  Programs, Burning, Online lookups, Batch & drives, Redump checks,
+  About & updates), shown one at a time, with a line of help under
+  every setting.
+• 🎨 Every separate window follows your theme (Settings, History, ISO
+  Verifier, the pickers...), and changes with it while it's open.
+• ⧉ Pop out the Live log into its own window, to watch a burn from
+  another tab, over another program or on a second monitor.
+• A summary card at the end of a burn from the burn screen: the image,
+  the disc and drive, the writer, the speed chosen and the average
+  reached, how long it took, and what the verify found. 📋 Copy summary
+  puts it on the clipboard for a forum post or a bug report.
+• 💿 Blu-ray Full Backup no longer needs ImgBurn: the decrypted disc is
+  turned into a single ISO by ArchivSector-OD itself (UDF 2.50, the file
+  system Blu-ray players need, at any size), with a progress bar and
+  Cancel. ImgBurn is only used if the app's own build ever fails.
+• 💿 BD-R DL (50 GB) is burned by the own writer: tested with a 42 GB
+  Blu-ray backup on a Verbatim BD-R DL, matched sector for sector.
+• Write speeds tell the truth: a speed the drive only reaches at the
+  outer edge is shown as "up to 8x", and the log and summary card show
+  the speed the drive actually set.
+• Drive info shows a DVD's book type, the layers of a blank Blu-ray,
+  and which write speeds are steady (Speed details).
+• 🎮 BurnerMAX feels built in: after you close it, the DVD+R DL's
+  capacity is checked again by itself and the XGD3 burn carries on.
+• Copy disc recognises a movie disc and points you to the drive bay's
+  Full Backup (a bought disc's exact copy wouldn't play).
+• Both verifies count bad sectors exactly, and stop early on a
+  hopeless disc instead of grinding on for an hour.
+• Now built on .NET 10 (supported until November 2028). Still nothing
+  to install: everything it needs is in the folder.
+• 🐛 Fixed: a MakeMKV rip could freeze at 0% on a copy-protected disc.
+• 🐛 Fixed: desktop icons stopped responding while ArchivSector-OD was
+  minimized (new in the .NET 10 builds, found before release).
+• 🐛 Fixed: a white flash at start-up, Copy in the Live log doubling
+  line breaks, and drive names shown with padding in History.
+
+⚠ Known issues: DVD-R DL still goes to ImgBurn (or Windows). Some drives
+  read the start of a BD-R DL's second layer poorly: if a verify fails
+  just past sector 12,219,392, check the disc in another drive first.
 
 ========================================================================
 🎵 NEW IN V4.0 BETA 4 — MUSIC CDs, ACCURATERIP & XBOX 360 GAMES
@@ -403,8 +451,8 @@ Already on Beta 1, 2 or 3? Replace that folder with this one.
 ========================================================================
 
 💿 Blu-ray / 4K UHD Backup Pipeline (MakeMKV)
-• Direct 1:1 Backup: Full MakeMKV decrypt (AACS/BD+), with an optional
-  ImgBurn stage 2 that builds a single-file ISO.
+• Direct 1:1 Backup: Full MakeMKV decrypt (AACS/BD+), turned into a
+  single-file ISO by ArchivSector-OD itself (ImgBurn only as a fallback).
 • Movie-Only MKV: Pick the main movie title from a list (sorted longest
   first) and extract it into a single, directly-playable .mkv — skips
   menus/extras.
@@ -496,9 +544,9 @@ Already on Beta 1, 2 or 3? Replace that folder with this one.
 • ISO Verifier for checking existing ISO files.
 
 ⚙️ Settings
-• Tool paths, output folder, API keys, and core toggles up front;
-  Auto-Fetch Metadata & Artwork, Batch Queue Mode, and Multi-Drive
-  Batch Sync live in a collapsible "Extra Features" section.
+• A Settings window with sections down the left (General, Appearance,
+  Programs, Burning, Online lookups, Batch & drives, Redump checks,
+  About & updates) and a line of help under every setting.
 • Redump DAT import, config folder shortcut, and a write diagnostic for
   tracking down antivirus/sandbox problems saving files.
 • Check for Updates (also automatic at startup, can be turned off):
@@ -545,10 +593,11 @@ or copy the whole folder.
    certificate — it doesn't mean anything was found wrong with it.
    Click "More info", then "Run anyway". You'll only see this once.
 
-2. Open ⚙️ Settings and point it at your external tools: MakeMKV
-   (makemkvcon64.exe), mkvmerge.exe (MKVToolNix), Redumper, and ImgBurn.
-   MakeMKV is found automatically if it's installed in the usual place.
-   Add a free TMDB and/or RAWG API key if you want artwork.
+2. Open ⚙️ Settings → 🛠 Programs and point it at your external tools:
+   MakeMKV (makemkvcon64.exe), mkvmerge.exe (MKVToolNix), Redumper, and
+   ImgBurn. MakeMKV is found automatically if it's installed in the usual
+   place. Add a free TMDB and/or RAWG API key in 🌐 Online lookups if you
+   want artwork.
 3. Insert a disc — ArchivSector-OD detects your optical drive(s)
    automatically and shows a Drive Bay card for each one.
 
@@ -578,8 +627,8 @@ APIs (tray eject, registry, system sounds), so it only runs on Windows.
 • Music CDs ------------------------------ (1:1 .bin/.cue copy)
 
 Blank discs it burns (own writer, whole disc):
-• CD-R, CD-RW, DVD+R, DVD+R DL, DVD+RW, DVD-R, DVD-RW, BD-R, BD-RE
-  (anything else, e.g. DVD-R DL and BD-R DL, goes to ImgBurn)
+• CD-R, CD-RW, DVD+R, DVD+R DL, DVD+RW, DVD-R, DVD-RW, BD-R, BD-R DL,
+  BD-RE (anything else, e.g. DVD-R DL, goes to ImgBurn)
 • ISO images on any of those, and BIN/CUE images (.bin or .wav) on
   CD-R/CD-RW
 • Music CDs from WAV, FLAC, MP3, M4A/AAC or WMA files (Music CD mode)

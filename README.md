@@ -26,6 +26,12 @@ Developed by **ArchivSect1986**, **ArchivSector-OD** is a powerful automation fr
 
 ---
 
+## 📅 Release Schedule
+
+New builds come out on the **1st and 3rd Friday of each month** (the following Friday when that's a holiday). A fix for a serious problem can come out in between.
+
+---
+
 ## ⚖️ Legal Disclaimer & Compliance Statement
 
 * **No Bundled Software:** This repository contains only original source code written for **ArchivSector-OD**. It does not host, mirror, package, or distribute any third-party binaries or proprietary executables.
