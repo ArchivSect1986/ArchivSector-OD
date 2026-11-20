@@ -71,6 +71,10 @@ following Friday when that's a holiday).
 • New drive bay layouts: Classic, Faceplate (each drive drawn like a
   real drive front) and Card (with cover art). The button in the Drive
   Bays header switches between them.
+• Time left on rips: Movie-Only and Full Backup show the speed, the time
+  so far and about how long is left (the ISO build and the own reader
+  too), a Full Backup shows the file it's copying, and the log records
+  how long each step took.
 • Closing the window while a rip, burn or other job is running asks
   first, and on Yes stops the programs it started (MakeMKV and the rest)
   instead of leaving them running.

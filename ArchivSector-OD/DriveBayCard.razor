@@ -610,13 +610,18 @@
             }
             else if (runningKind == "makemkv")
             {
-                <text>@FormatGb(writtenBytes) / @FormatGb(targetBytes) (@progressPercent%)</text>
+                <text>@FormatGb(writtenBytes) / @FormatGb(targetBytes) (@progressPercent%)@RipTiming</text>
             }
             else if (runningKind == "iso")
             {
                 <text>@isoProgressText</text>
             }
         </p>
+        @if (runningKind == "makemkv" && currentFile is not null)
+        {
+            @* Beta 6: the file a Full Backup is copying right now. *@
+            <p class="bay-subtitle" style="margin-top: 2px; overflow-wrap: anywhere;">📄 Copying @currentFile · @FormatGb(currentFileBytes)</p>
+        }
         <button class="bay-btn cancel-btn" @onclick="CancelRun">✖ Cancel</button>
     }
     else if (lastAction is not null && !showModeDialog && !healthRunning && !burnRunning)
@@ -847,6 +852,15 @@
     private int? progressPercent = null;
     private string? progressFolder = null;
     private Timer? progressTimer;
+    // Beta 6: timing for the progress line (elapsed, speed, time left).
+    private DateTime progressStarted;              // when the step started
+    private DateTime? firstWriteAt;                // when the first bytes appeared (MakeMKV scans first)
+    private readonly Queue<(DateTime At, long Bytes)> speedSamples = new();   // the last ~20 s, for the speed shown
+    // Beta 6: Full Backup only -- the file being written right now (the newest
+    // one in the backup folder), shown under the progress line.
+    private bool showCurrentFile;
+    private string? currentFile;
+    private long currentFileBytes;
     private Process? currentProcess = null;
 
     private bool isTrayBusy = false;
@@ -2294,16 +2308,27 @@
         progressPercent = null;
     }
 
-    private void StartProgressTimer(string folder, long target)
+    private void StartProgressTimer(string folder, long target, bool showFile = false)
     {
+        showCurrentFile = showFile;
+        currentFile = null;
+        currentFileBytes = 0;
         progressFolder = folder;
         targetBytes = target;
         writtenBytes = 0;
         progressPercent = target > 0 ? 0 : null;
+        progressStarted = DateTime.Now;
+        firstWriteAt = null;
+        speedSamples.Clear();
         progressTimer = new Timer(_ => InvokeAsync(() =>
         {
             if (progressFolder is null) return;
-            writtenBytes = MakeMkvService.GetFolderSizeBytes(progressFolder);
+            if (showCurrentFile) (writtenBytes, currentFile, currentFileBytes) = SizeAndNewestFile(progressFolder);
+            else writtenBytes = MakeMkvService.GetFolderSizeBytes(progressFolder);
+            var now = DateTime.Now;
+            if (writtenBytes > 0 && firstWriteAt is null) firstWriteAt = now;
+            speedSamples.Enqueue((now, writtenBytes));
+            while (speedSamples.Count > 2 && now - speedSamples.Peek().At > TimeSpan.FromSeconds(20)) speedSamples.Dequeue();
             progressPercent = targetBytes > 0
                 ? Math.Clamp((int)Math.Round((double)writtenBytes / targetBytes * 100), 0, 100)
                 : (int?)null;
@@ -2313,10 +2338,95 @@
 
     private void StopProgressTimer()
     {
+        // Beta 6: how long the step took and its average speed, in the log.
+        if (progressTimer is not null && firstWriteAt is DateTime first && writtenBytes > 0)
+        {
+            var took = DateTime.Now - progressStarted;
+            var writing = (DateTime.Now - first).TotalSeconds;
+            AddLog($"Took {Dur(took)}: {FormatGb(writtenBytes)}" + (writing > 1 ? $" at {writtenBytes / writing / 1_000_000:0.0} MB/s on average" : ""));
+        }
         progressTimer?.Dispose();
         progressTimer = null;
         progressFolder = null;
+        firstWriteAt = null;
+        speedSamples.Clear();
+        currentFile = null;
+        currentFileBytes = 0;
     }
+
+    // Beta 6: " · 23.1 MB/s (5.1x) · 9 min elapsed · about 19 min left" for the
+    // progress line. The speed is the last ~20 seconds; the time left comes from
+    // the average since the first bytes were written, so it settles after a
+    // minute or so (drives speed up towards the edge and slow on scratches).
+    private string RipTiming
+    {
+        get
+        {
+            var now = DateTime.Now;
+            var parts = new List<string>();
+            if (speedSamples.Count >= 2)
+            {
+                var (t0, b0) = speedSamples.Peek();
+                double secs = (now - t0).TotalSeconds;
+                long last = 0; foreach (var smp in speedSamples) last = smp.Bytes;
+                if (secs > 0 && last > b0)
+                {
+                    double bps = (last - b0) / secs;
+                    double oneX = Category == DiscCategory.BluRay ? 4_500_000 : Category == DiscCategory.Dvd ? 1_385_000 : 0;
+                    parts.Add($"{bps / 1_000_000:0.0} MB/s" + (oneX > 0 ? $" ({bps / oneX:0.0}x)" : ""));
+                }
+            }
+            parts.Add($"{Dur(now - progressStarted)} elapsed");
+            if (firstWriteAt is DateTime first && targetBytes > 0 && writtenBytes > 0)
+            {
+                double writing = (now - first).TotalSeconds;
+                if (writtenBytes >= targetBytes) parts.Add("almost done");
+                else if (writing >= 30)
+                    parts.Add($"about {Dur(TimeSpan.FromSeconds((targetBytes - writtenBytes) / (writtenBytes / writing)))} left");
+                else parts.Add("working out the time left…");
+            }
+            return " · " + string.Join(" · ", parts);
+        }
+    }
+
+    // The folder's total size, and the file written most recently (as a path
+    // inside the folder, e.g. "BDMV\STREAM\00055.m2ts") with its size, in one pass.
+    private static (long Total, string? Newest, long NewestBytes) SizeAndNewestFile(string folder)
+    {
+        long total = 0, newestBytes = 0;
+        string? newest = null;
+        var newestTime = DateTime.MinValue;
+        try
+        {
+            if (!Directory.Exists(folder)) return (0, null, 0);
+            foreach (var f in new DirectoryInfo(folder).EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    total += f.Length;
+                    if (f.LastWriteTimeUtc >= newestTime)
+                    {
+                        newestTime = f.LastWriteTimeUtc;
+                        newest = Path.GetRelativePath(folder, f.FullName);
+                        newestBytes = f.Length;
+                    }
+                }
+                catch { /* a file that vanished or is locked: skip it */ }
+            }
+        }
+        catch { /* folder not there yet */ }
+        return (total, newest, newestBytes);
+    }
+
+    // " · about 12 min left" from what's left and the current speed (ISO build, own reader).
+    private static string TimeLeft(long bytesLeft, double bytesPerSec) =>
+        bytesPerSec > 0 && bytesLeft > 0 ? $" · about {Dur(TimeSpan.FromSeconds(bytesLeft / bytesPerSec))} left" : "";
+
+    // "45 s", "9 min", "1 h 05 min".
+    private static string Dur(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes:00} min"
+        : t.TotalMinutes >= 1 ? $"{(int)Math.Round(t.TotalMinutes)} min"
+        : $"{Math.Max(0, (int)t.TotalSeconds)} s";
 
     private void CancelRun()
     {
@@ -2659,7 +2769,7 @@
                 long done = p.SectorsDone * (long)ArchivSector_OD.Burning.DiscReader.SectorSize;
                 long tot = p.TotalSectors * (long)ArchivSector_OD.Burning.DiscReader.SectorSize;
                 isoProgressText = p.TotalSectors > 0
-                    ? $"{FormatGb(done)} / {FormatGb(tot)} ({(int)p.Percent}%) · {p.BytesPerSec / (1024 * 1024):0} MB/s"
+                    ? $"{FormatGb(done)} / {FormatGb(tot)} ({(int)p.Percent}%) · {p.BytesPerSec / (1024 * 1024):0} MB/s{TimeLeft(tot - done, p.BytesPerSec)}"
                     : "Reading…";
                 StateHasChanged();
             }));
@@ -2872,7 +2982,7 @@
         // Watch the folder MakeMKV writes into: the movie folder for DVD (its image
         // file grows there), the _temp_decrypt subfolder for BD -- so the bar tracks
         // the decrypt instead of sitting at 0%.
-        StartProgressTimer(backupWorkingFolder, capacity);
+        StartProgressTimer(backupWorkingFolder, capacity, showFile: true);
         StateHasChanged();
 
         backupResult = await Task.Run(() =>
@@ -2984,7 +3094,7 @@
             {
                 progressPercent = p.Percent >= 0 ? (int)p.Percent : null;
                 isoProgressText = p.Percent >= 0
-                    ? $"{FormatGb(p.BytesDone)} / {FormatGb(p.TotalBytes)} ({(int)p.Percent}%) · {p.BytesPerSec / (1024 * 1024):0} MB/s"
+                    ? $"{FormatGb(p.BytesDone)} / {FormatGb(p.TotalBytes)} ({(int)p.Percent}%) · {p.BytesPerSec / (1024 * 1024):0} MB/s{TimeLeft(p.TotalBytes - p.BytesDone, p.BytesPerSec)}"
                     : p.Phase + "…";
                 StateHasChanged();
             }));
