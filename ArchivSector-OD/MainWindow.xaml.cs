@@ -104,6 +104,102 @@ namespace ArchivSector_OD
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         private const int DWMWA_CLOAK = 13;
 
+        // Beta 6: closing the window while a rip, burn or other job is running
+        // asks first, saying what would be stopped. On "yes", the programs the
+        // app started (MakeMKV, Redumper, mkvmerge, Subtitle Edit...) are
+        // stopped too, instead of being left running in the background. With
+        // nothing running, the window closes straight away as before.
+        private bool closeConfirmed;
+
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            base.OnClosing(e);
+            if (e.Cancel || closeConfirmed) return;
+
+            List<(string Where, string What)> jobs;
+            try { jobs = RipActivity.Running().Where(j => j.What != "info").ToList(); }
+            catch { return; }
+            if (jobs.Count == 0) return;
+
+            static string Describe(string what) => what switch
+            {
+                "rip" => "a rip (or the ISO or SRT step after it)",
+                "verify" => "the checksums of a rip",
+                "burn" => "burning a disc",
+                "queue" => "a burn queue",
+                "copy" => "copying a disc",
+                "read" => "reading a disc",
+                "verify-disc" => "verifying a disc",
+                "erase" => "erasing a disc",
+                "health" => "a disc health check",
+                "job" => "building an ISO",
+                _ => "a job",
+            };
+            var lines = jobs
+                .Select(j => "• " + (j.Where == "TargetFill" ? "TargetFill" : $"Drive {j.Where}:") + " " + Describe(j.What))
+                .Distinct()
+                .ToList();
+            bool writing = jobs.Any(j => j.What is "burn" or "queue" or "copy" or "erase");
+
+            string msg = "Still running:\n" + string.Join("\n", lines) + "\n\n" +
+                "Closing now stops " + (lines.Count == 1 ? "it" : "them") + ". " +
+                (writing ? "A write-once disc (CD-R, DVD±R, BD-R) that's being burned can't be used again afterwards. " : "") +
+                "Anything unfinished stays in the output folder, incomplete.\n\nClose anyway?";
+            var answer = MessageBox.Show(this, msg, "ArchivSector-OD", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
+            if (answer != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            closeConfirmed = true;
+            LogService.Write("App", "Closed while running: " + string.Join("; ", lines.Select(l => l.TrimStart('•', ' '))));
+            StopChildPrograms();
+        }
+
+        // The programs this app started (and theirs), except WebView2's own,
+        // which closes with the window. Found by their parent process ID.
+        private static void StopChildPrograms()
+        {
+            try
+            {
+                int me = Environment.ProcessId;
+                foreach (var p in System.Diagnostics.Process.GetProcesses())
+                {
+                    using (p)
+                    {
+                        try
+                        {
+                            if (p.Id == me) continue;
+                            var name = p.ProcessName;
+                            if (name.Equals("msedgewebview2", StringComparison.OrdinalIgnoreCase)
+                                || name.Equals("conhost", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (ParentId(p) != me) continue;
+                            p.Kill(entireProcessTree: true);
+                        }
+                        catch { /* gone already, or not ours to stop */ }
+                    }
+                }
+            }
+            catch { /* best effort: the window closes either way */ }
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct ProcessBasicInformation
+        {
+            public IntPtr ExitStatus, PebBaseAddress, AffinityMask, BasePriority, UniqueProcessId, InheritedFromUniqueProcessId;
+        }
+
+        [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+        private static extern int NtQueryInformationProcess(IntPtr process, int infoClass, ref ProcessBasicInformation info, int size, out int returned);
+
+        private static int ParentId(System.Diagnostics.Process p)
+        {
+            var info = new ProcessBasicInformation();
+            int status = NtQueryInformationProcess(p.Handle, 0, ref info, System.Runtime.InteropServices.Marshal.SizeOf<ProcessBasicInformation>(), out _);
+            return status == 0 ? info.InheritedFromUniqueProcessId.ToInt32() : -1;
+        }
+
         protected override void OnSourceInitialized(EventArgs e)
         {
             base.OnSourceInitialized(e);

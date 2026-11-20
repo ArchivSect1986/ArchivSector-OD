@@ -33,6 +33,14 @@ namespace ArchivSector_OD
 
         public static bool AnyBusy => !Busy.IsEmpty;
 
+        // Beta 6: what's running right now, as (drive or "TargetFill", kind)
+        // pairs -- for the question asked when the window is closed.
+        public static List<(string Where, string What)> Running() =>
+            Busy.Keys
+                .Select(k => { int i = k.LastIndexOf(':'); return i < 0 ? (k, "") : (k[..i], k[(i + 1)..]); })
+                .OrderBy(p => p.Item1, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
         // Is anything (rip, checksum, health check, burn) using this drive?
         public static bool IsDriveBusy(string driveLetter)
         {
