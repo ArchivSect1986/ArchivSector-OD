@@ -81,6 +81,8 @@ following Friday when that's a holiday).
 ⚠ Known issues: DVD-R DL still goes to ImgBurn (or Windows). Some drives
   read the start of a BD-R DL's second layer poorly: if a verify fails
   just past sector 12,219,392, check the disc in another drive first.
+  Closing the app while a rip or burn is running stops it without
+  asking: wait for it to finish (a warning comes in Beta 6).
 
 ========================================================================
 🎵 NEW IN V4.0 BETA 4 — MUSIC CDs, ACCURATERIP & XBOX 360 GAMES

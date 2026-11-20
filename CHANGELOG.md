@@ -52,6 +52,7 @@ The fifth test version of v4.0. Everything below is new since Beta 4. This one i
 * **DVD-R DL** isn't written by the own writer yet: ImgBurn or Windows takes over for it. (DVD-R DL blanks are rare now; DVD+R DL is written by the own writer.)
 * **The start of a BD-R DL's second layer can be hard for some drives to read back.** On the test disc, the verify straight after burning found 23 unreadable sectors just after the layer change in the burning drive, while the same disc read perfectly in another drive. Other programs see the same thing (ImgBurn users report it with Verbatim BD-R DL discs). If a BD-R DL's verify fails only just past sector 12,219,392, check it in another drive before giving up on it.
 * **A drive can stop answering when told to start writing on a BD-R DL** (seen once on one of two identical drives, with ImgBurn too). The own writer now stops by itself and says the disc is still blank: try another drive or disc.
+* **Closing the app while a rip or burn is running stops it without asking.** Wait for it to finish first (a burn stopped part-way ruins a write-once disc). A warning comes in Beta 6.
 
 ### Reporting a problem
 Same as before: open an issue on GitHub with **Burn → Drive info → 📋 Copy report**, the disc type and brand, and that day's log from `%AppData%\ArchivSector-OD\Logs`.
