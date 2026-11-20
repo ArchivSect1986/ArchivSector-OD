@@ -1,8 +1,8 @@
-﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 5 | Optical Disc Ripping & Archival Control Center 🌟
+﻿🌟 [BETA] ArchivSector-OD v4.0 Beta 6 | Optical Disc Ripping & Archival Control Center 🌟
 
 Hey everyone! 👋
 
-Welcome to **ArchivSector-OD v4.0 Beta 5**, a test version of v4.0! ⚠️ It's
+Welcome to **ArchivSector-OD v4.0 Beta 6**, a test version of v4.0! ⚠️ It's
 a pre-release: everything should work, but this is the version where you
 help find what doesn't. If you'd rather stay on a finished version, keep
 v3.4.
@@ -24,7 +24,8 @@ handful of improvements on top.
    aren't signed with a paid certificate, and you'll only see it once.
    (Full explanation under "How to Run" below.)
 3. Open ⚙️ Settings → 🛠 Programs and point it at your tools (MakeMKV,
-   mkvmerge, Redumper, and optionally ImgBurn), then insert a disc.
+   mkvmerge, Redumper, and optionally ImgBurn and Subtitle Edit), then
+   insert a disc.
 
 Coming from v3.x? The app's update check doesn't offer betas, so this one
 is a manual download: unzip it into a NEW folder (keep your v3.4 folder if
@@ -36,6 +37,55 @@ Already on an earlier beta? Replace that folder with this one.
 
 📅 New builds come out on the 1st and 3rd Friday of each month (the
 following Friday when that's a holiday).
+
+========================================================================
+🎨 NEW IN V4.0 BETA 6 — ARTWORK, DVD DECRYPTED ISO, SRT SUBTITLES & LAYOUTS
+========================================================================
+
+• 🔓 DVD Decrypted ISO (via MakeMKV): the DVD menu's MakeMKV button makes
+  a single decrypted .iso straight away, with a progress bar.
+• 🔥 TargetFill Build & Burn: builds the padded ISO and sends it straight
+  to the Burn tab (every disc of a multi-disc set, one after another).
+• 🔥 Burn this ISO: on the drive card after a Blu-ray Full Backup or a
+  raw ISO dump, sends the ISO to the Burn tab's queue.
+• 📝 SRT subtitles after a Movie-Only rip: every subtitle track becomes
+  an .srt next to the MKV (Movie.eng.srt...), read by the OCR of your
+  own copy of Subtitle Edit (free, set it in Settings → 🛠 Programs).
+  ✍ Exact opens the MKV in Subtitle Edit for its letter-by-letter OCR.
+  The MKV keeps its own subtitles.
+• 🎵 Album covers for music CDs, found on iTunes from the CD-Text.
+• 🎮 SteamGridDB for game covers, as well as RAWG (free key in
+  Settings → 🌐 Online lookups; choose which one is tried first).
+• The film's year beside its title, and in the ISO's name
+  ("Beauty and the Beast (2017).iso").
+• "N versions found — pick one": when several films or games share a
+  title, the drive card asks instead of guessing.
+• Each disc keeps its own artwork, remembered by the disc's own ID, even
+  when two films share a disc label or the label means nothing
+  (DVD_ROM). Artwork folders are sorted by kind: games by console,
+  movies, music.
+• No automatic lookup for a disc with no real name (UNLABELED,
+  DVD_VIDEO, DVD_ROM...), which used to find unrelated films and games.
+• 📚 Burn queue: each burned disc gets the same summary card as the burn
+  screen (▸ Summary), and 📋 Copy queue summary copies the whole queue.
+• New drive bay layouts: Classic, Faceplate (each drive drawn like a
+  real drive front) and Card (with cover art). The button in the Drive
+  Bays header switches between them.
+• Closing the window while a rip, burn or other job is running asks
+  first, and on Yes stops the programs it started (MakeMKV and the rest)
+  instead of leaving them running.
+• A new TargetFill screen, the 🎨 Ultraviolet theme, and Console as the
+  theme new installs start in.
+• A DVD raw ISO read without Redumper uses ArchivSector-OD's own reader
+  (live progress and Cancel) instead of ImgBurn.
+• 🐛 Fixed: two films with the same disc label shared one poster; the
+  Live log was squished on some window sizes; warning lines showed as
+  errors in the log.
+
+⚠ Known issues: SRT subtitles are read by OCR, which can misread a letter
+  now and then: check them, or use ✍ Exact. If Subtitle Edit has never
+  done OCR on your PC, open it once and OCR any subtitle with Tesseract
+  first. Everything listed for Beta 5 still applies.
 
 ========================================================================
 ⚙️ NEW IN V4.0 BETA 5 — SETTINGS, BURN SUMMARY & BLU-RAY ISO WITHOUT IMGBURN
@@ -464,8 +514,8 @@ following Friday when that's a holiday).
 
 📀 DVD Backup Pipeline
 • Raw Sector ISO Dump: Byte-for-byte disc image via Redumper, falling
-  back to ImgBurn if Redumper isn't set up.
-• MakeMKV Decrypted Backup: a decrypted copy of the disc via MakeMKV.
+  back to ArchivSector-OD's own reader if Redumper isn't set up.
+• Decrypted ISO: a single decrypted .iso of the disc, made by MakeMKV.
 • Movie-Only MKV: Same MakeMKV-driven extraction, title picker, and
   track picker as the Blu-ray pipeline.
 
@@ -528,9 +578,16 @@ following Friday when that's a holiday).
   after it rips.
 
 🖼️ Metadata & Artwork
-• Automatically looks up movie discs on insertion via TMDB and shows the
-  poster on the drive bay. Manual search for movies (TMDB) and games
-  (RAWG). Both need a free API key.
+• Automatically looks up a disc when it goes in and shows its artwork
+  on the drive bay: movie posters from TMDB, game covers from RAWG or
+  SteamGridDB, album covers from iTunes. Manual search for all of them.
+  Each disc remembers its own artwork. TMDB, RAWG and SteamGridDB need
+  a free API key; iTunes needs none.
+
+📝 SRT Subtitles (Movie-Only MKV)
+• Every subtitle track of the MKV saved as an .srt next to it, read by
+  the OCR of your own copy of Subtitle Edit, or opened in Subtitle Edit
+  for its exact, letter-by-letter OCR.
 
 🔔 Notifications & Convenience
 • Windows notification and a completion sound when a rip finishes.
@@ -597,9 +654,10 @@ or copy the whole folder.
 
 2. Open ⚙️ Settings → 🛠 Programs and point it at your external tools:
    MakeMKV (makemkvcon64.exe), mkvmerge.exe (MKVToolNix), Redumper, and
-   ImgBurn. MakeMKV is found automatically if it's installed in the usual
-   place. Add a free TMDB and/or RAWG API key in 🌐 Online lookups if you
-   want artwork.
+   ImgBurn (and Subtitle Edit, for SRT subtitles). MakeMKV is found
+   automatically if it's installed in the usual place. Add a free TMDB,
+   RAWG and/or SteamGridDB API key in 🌐 Online lookups if you want
+   artwork.
 3. Insert a disc — ArchivSector-OD detects your optical drive(s)
    automatically and shows a Drive Bay card for each one.
 
