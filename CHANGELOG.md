@@ -47,6 +47,8 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **Burn queue summary card:** a 703 MB CD-RW burned from the queue, verified, and its summary copied.
 * **No artwork lookup for a generic label:** an Xbox 360 disc labelled DVD_ROM was skipped, with no unrelated cover.
 * **The desktop works while the app is minimized**, maximized first (the fix from Beta 5).
+* **Time left on rips:** a Blu-ray Full Backup said "about 25 min left" two minutes in and finished decrypting 21 minutes after it started (30.97 GB at 26.4 MB/s on average, as the log recorded), with the 📄 line following MakeMKV from file to file; a Movie-Only rip showed its speed and time left the same way.
+* **Closing during a rip asks first:** No kept the rip going; Yes closed the app and stopped MakeMKV with it.
 
 ### ⚠ Known issues
 * **SRT subtitles are read by OCR**, which can misread a letter now and then: check them, or use **✍ Exact**. Subtitle Edit's command line reads with the OCR language last picked in its own window; if it has never done OCR on the PC, open it once and OCR any subtitle with Tesseract first.
