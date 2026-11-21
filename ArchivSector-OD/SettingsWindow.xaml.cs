@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 
 namespace ArchivSector_OD
@@ -13,6 +15,9 @@ namespace ArchivSector_OD
     // menu (app.css), so the window matches the rest of the app, and
     // change with it when another theme is picked while it's open.
     // Save keeps the window open; closing with unsaved changes asks first.
+    // Beta 6: the window is as tall as its tallest section, measured when it
+    // opens, so every setting shows without scrolling, and a setting added
+    // later makes it taller by itself (never taller than the screen).
     public partial class SettingsWindow : Window
     {
         private readonly AppConfig config;
@@ -73,6 +78,10 @@ namespace ArchivSector_OD
 
             Closing += SettingsWindow_Closing;
 
+            // Loaded comes after the first layout and before anything is
+            // drawn, so the window opens straight at its fitted size.
+            Loaded += (_, _) => FitToSections();
+
             // Follows the theme: pick another in the 🎨 menu while this
             // window is open, and it changes as soon as you click back into it.
             Activated += (_, _) =>
@@ -84,6 +93,8 @@ namespace ArchivSector_OD
                     ApplyTheme(ConfigService.Load());
                     RefreshStatuses();
                     SetMessage(MessageText.Text, messageOk);
+                    // Another theme can have another font, so measure again.
+                    Dispatcher.BeginInvoke(new Action(FitToSections), System.Windows.Threading.DispatcherPriority.Loaded);
                 }
                 catch { }
             };
@@ -95,15 +106,115 @@ namespace ArchivSector_OD
 
         // ---- Sections ----
 
+        private FrameworkElement[] Pages() =>
+            new FrameworkElement[] { GeneralPage, AppearancePage, ToolsPage, BurnPage, LookupPage, BatchPage, RedumpPage, AboutPage };
+
         private void Nav_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (Nav.SelectedItem is not ListBoxItem item) return;
             string page = (string)item.Tag;
-            foreach (var p in new FrameworkElement[] { GeneralPage, AppearancePage, ToolsPage, BurnPage, LookupPage, BatchPage, RedumpPage, AboutPage })
+            foreach (var p in Pages())
                 p.Visibility = p.Name == page ? Visibility.Visible : Visibility.Collapsed;
             lastPage = page;
             PageScroll?.ScrollToTop();
         }
+
+        // ---- Window size ----
+
+        // Makes the window as tall as its tallest section needs, so nothing
+        // has to be scrolled to: every section is measured at the width it
+        // has, the tallest one wins, and the window keeps that size while
+        // you click between sections (it doesn't jump about). On a screen
+        // too small for it, it stops at the screen's height and scrolls.
+        // Nothing here names a section's settings, so one added later is
+        // measured like the rest. Dragging the edge still works as before.
+        private void FitToSections()
+        {
+            try
+            {
+                if (WindowState != WindowState.Normal || PageScroll.ActualWidth <= 0) return;
+
+                // The width a section gets: the scroll area minus its padding,
+                // minus room for a scroll bar (so a section is never measured
+                // wider than it can be shown), and no wider than the 760 the
+                // XAML allows.
+                double width = PageScroll.ActualWidth - PageScroll.Padding.Left - PageScroll.Padding.Right
+                               - SystemParameters.VerticalScrollBarWidth;
+                width = Math.Min(width, 760);
+                if (width < 200) return;
+
+                double tallest = 0;
+                foreach (var page in Pages())
+                {
+                    var was = page.Visibility;
+                    page.Visibility = Visibility.Visible;   // a hidden section measures as 0
+                    page.Measure(new Size(width, double.PositiveInfinity));
+                    tallest = Math.Max(tallest, page.DesiredSize.Height);
+                    page.Visibility = was;
+                }
+                if (tallest <= 0) return;
+
+                // Everything around the section: the title bar and borders,
+                // the Close / Save row, and the scroll area's own padding.
+                double around = ActualHeight - PageScroll.ActualHeight + PageScroll.Padding.Top + PageScroll.Padding.Bottom;
+                double wanted = Math.Ceiling(tallest + around + 6);
+
+                Rect screen = WorkArea();
+                double height = Math.Max(MinHeight, Math.Min(wanted, screen.Height));
+                if (Math.Abs(height - ActualHeight) < 2) return;
+
+                // Centred on the main window as before, and kept on the screen.
+                double top;
+                if (Owner is { } owner && owner.WindowState == WindowState.Normal)
+                    top = owner.Top + (owner.ActualHeight - height) / 2;
+                else if (Owner is { } maxed && maxed.WindowState == WindowState.Maximized)
+                    top = screen.Top + (screen.Height - height) / 2;
+                else
+                    top = Top - (height - ActualHeight) / 2;
+
+                Height = height;
+                Top = Math.Max(screen.Top, Math.Min(top, screen.Bottom - height));
+            }
+            catch
+            {
+                // Best effort: the window just keeps the size the XAML gives it.
+            }
+        }
+
+        // The usable part (without the taskbar) of the screen the main
+        // window is on, in the same units as the window's size.
+        private Rect WorkArea()
+        {
+            try
+            {
+                var handle = new WindowInteropHelper(Owner ?? this).Handle;
+                var monitor = MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST);
+                var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+                if (monitor != IntPtr.Zero && GetMonitorInfo(monitor, ref info))
+                {
+                    var toWpf = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
+                    var topLeft = toWpf.Transform(new Point(info.rcWork.Left, info.rcWork.Top));
+                    var bottomRight = toWpf.Transform(new Point(info.rcWork.Right, info.rcWork.Bottom));
+                    return new Rect(topLeft, bottomRight);
+                }
+            }
+            catch { }
+            return SystemParameters.WorkArea;
+        }
+
+        private const uint MONITOR_DEFAULTTONEAREST = 2;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT { public int Left, Top, Right, Bottom; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
 
         // ---- Theme ----
 

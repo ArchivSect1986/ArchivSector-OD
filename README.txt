@@ -80,6 +80,8 @@ following Friday when that's a holiday).
   instead of leaving them running.
 • A new TargetFill screen, the 🎨 Ultraviolet theme, and Console as the
   theme new installs start in.
+• The Settings window opens as tall as its tallest section needs, so
+  every setting shows without scrolling (never taller than the screen).
 • A DVD raw ISO read without Redumper uses ArchivSector-OD's own reader
   (live progress and Cancel) instead of ImgBurn.
 • 🐛 Fixed: two films with the same disc label shared one poster; the

@@ -31,6 +31,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **A DVD raw ISO read without Redumper** uses ArchivSector-OD's own reader, with live progress and Cancel, instead of ImgBurn.
 * **A Blu-ray ISO's volume label** is the disc's own label, so the year in the file name doesn't get it cut off at 32 characters.
 * **Only the open tab scrolls:** the header and footer stay put. Rip progress bars are drawn as lit segments, and the Verify disc tab has a green ✔.
+* **The Settings window fits its settings:** it opens as tall as its tallest section needs, so every setting shows without scrolling (the Programs section has six programs now), and a setting added later makes it taller by itself. On a screen too small for it, it stops at the screen's height and scrolls.
 * **The film's description** sits under its **Show details** link, beside the poster instead of under it.
 
 ### 🐛 Fixed
