@@ -3397,7 +3397,10 @@
         if (config.AutoCategorize)
             categoryDir = Path.Combine(categoryDir, "MKV");
         var fallbackName = $"{DriveLetter}_{kindForFolder}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
-        var suggestedName = WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
+        // Beta 6: named after the film the card shows (its TMDB title and
+        // year) when there is one, instead of the disc's label.
+        var suggestedName = FilmNameFromArtwork()
+            ?? WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
 
         // 1. Every film's tracks and name first (beta 4: several films on one
         // disc), so the extracting can then run on its own.
@@ -3598,6 +3601,22 @@
     // Beta 6: fold the fetched movie's year into the output name so the two
     // versions don't collide on disk. Movie categories only, and only when the
     // fetched artwork actually carries a year the name doesn't already contain.
+    // Beta 6: "Escape Plan - The Extractors (2019)" from the film the card
+    // shows (cached TMDB title and year), ready for a file name: a colon,
+    // which Windows doesn't allow, becomes " - " (the way Plex and Jellyfin
+    // like film names). Null when the card has no film yet.
+    private string? FilmNameFromArtwork()
+    {
+        if (Category != DiscCategory.Dvd && Category != DiscCategory.BluRay) return null;
+        var title = cachedArt?.Metadata?.Title;
+        if (string.IsNullOrWhiteSpace(title)) return null;
+        var name = FileNamingService.SanitizeFilename(System.Text.RegularExpressions.Regex.Replace(title.Trim(), @"\s*:\s*", " - "));
+        var year = cachedArt?.Metadata?.Year?.Trim();
+        if (!string.IsNullOrWhiteSpace(year) && System.Text.RegularExpressions.Regex.IsMatch(year, @"^(18|19|20)\d{2}$") && !name.Contains(year))
+            name = $"{name} ({year})";
+        return name;
+    }
+
     private string WithFetchedYear(string baseName)
     {
         if (Category != DiscCategory.Dvd && Category != DiscCategory.BluRay) return baseName;

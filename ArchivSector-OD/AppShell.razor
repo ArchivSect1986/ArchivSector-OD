@@ -171,11 +171,11 @@
     <footer class="app-footer">
         @if (fillOnly)
         {
-            <span>TargetFill window (opened from the right-click menu) — drive bays are in the main ArchivSector-OD window</span>
+            <span>TargetFill window (opened from the right-click menu) — drive bays are in the main ArchivSector-OD window &nbsp;•&nbsp; v@(UpdateCheckService.CurrentVersionDisplay)</span>
         }
         else
         {
-            <span>Active Bays: @driveStates.Count &nbsp;•&nbsp; Discs Loaded: @LoadedCount/@driveStates.Count &nbsp;•&nbsp; Active Jobs: @BatchSyncService.ActiveCount @(BatchSyncService.QueuedCount > 0 ? $"(+{BatchSyncService.QueuedCount} queued)" : "")</span>
+            <span>Active Bays: @driveStates.Count &nbsp;•&nbsp; Discs Loaded: @LoadedCount/@driveStates.Count &nbsp;•&nbsp; Active Jobs: @BatchSyncService.ActiveCount @(BatchSyncService.QueuedCount > 0 ? $"(+{BatchSyncService.QueuedCount} queued)" : "") &nbsp;•&nbsp; v@(UpdateCheckService.CurrentVersionDisplay)</span>
         }
         <span>ENGINE BUS: READY</span>
     </footer>

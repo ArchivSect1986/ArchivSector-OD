@@ -33,6 +33,9 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **Only the open tab scrolls:** the header and footer stay put. Rip progress bars are drawn as lit segments, and the Verify disc tab has a green ✔.
 * **The Settings window fits its settings:** it opens as tall as its tallest section needs, so every setting shows without scrolling (the Programs section has six programs now), and a setting added later makes it taller by itself. On a screen too small for it, it stops at the screen's height and scrolls.
 * **The film's description** sits under its **Show details** link, beside the poster instead of under it.
+* **The Movie-Only title picker names every title:** a title MakeMKV gives no name (every title on a DVD) shows as "Title 1", "Title 2"… instead of "(unnamed title)", and the longest is marked "· likely the film".
+* **A Movie-Only MKV is named after the film the card shows:** the name box starts with its TMDB title and year ("Escape Plan - The Extractors (2019)") instead of the disc's label ("VVS_LE_TOMBEAU_3_3072_SCN (2019)"). A colon, which Windows doesn't allow in a file name, becomes " - ", the way Plex and Jellyfin like film names. The name can still be changed before the rip starts.
+* **The version number is on the status bar** at the bottom of the window ("Active Bays: 4 • Discs Loaded: 4/4 • Active Jobs: 0 • v3.9.96"), so a screenshot or bug report shows which version it was.
 
 ### 🐛 Fixed
 * **Two films with the same disc label shared one poster**, and the last one picked replaced the other (now each disc keeps its own, above).
@@ -41,6 +44,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **A 4K Blu-ray was given the wrong disc size:** an 89.8 GB BD-100 showed as "BD-128 Quad Layer" on the drive card, and its Full Backup went into a BD-128 folder. Sizes are now measured against what each disc really holds, so it's a BD-100, BD-66 appears for the smaller 4K discs, and a full BD-25 or BD-50 is no longer put one size too high.
 * **"Backup complete" named the deleted working folder** (`…\_temp_decrypt`) after a Blu-ray Full Backup or DVD Decrypted ISO, instead of the finished ISO. It now names the ISO.
 * **A Blu-ray Full Backup or DVD Decrypted ISO said "⚠ No Redump match found"**, which can never match: Redump lists exact raw dumps, and these backups are decrypted. Their checksums are still worked out and saved, and the Redump check now says it doesn't apply (N/A in History).
+* **Odd characters in MakeMKV's track names:** a closed-caption subtitle showed as "CCâ†'Text English" in the track picker. MakeMKV's output is now read as UTF-8, so it shows "CC→Text English", and accented film and track names come through right.
 * **A line the app marks as a warning showed as an error** in the log (amber, not red, now), such as Movie-Only's "couldn't precisely trim" note.
 
 ### ✅ Tested

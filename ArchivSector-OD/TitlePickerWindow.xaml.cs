@@ -23,10 +23,16 @@ namespace ArchivSector_OD
             // Beta 5: the theme picked in the 🎨 menu, followed while open.
             WpfTheme.Follow(this, WpfTheme.Apply(this));
 
-            var rows = titles.Select(t => new TitleRow
+            // Beta 6: a title MakeMKV gives no name (every title on a DVD) is
+            // called "Title 1", "Title 2"... in the list's order, and the first
+            // one, the longest, is marked as likely the film, as the text above
+            // the list explains. It isn't given the film's own name: on a disc
+            // with several long cuts, that could name the wrong one.
+            var rows = titles.Select((t, i) => new TitleRow
             {
                 Title = t,
-                Name = string.IsNullOrWhiteSpace(t.Name) ? "(unnamed title)" : t.Name,
+                Name = (string.IsNullOrWhiteSpace(t.Name) ? $"Title {i + 1}" : t.Name.Trim())
+                       + (i == 0 ? " · likely the film" : ""),
                 Duration = FormatDuration(t.Seconds),
                 SizeGb = $"{t.SizeBytes / (1024.0 * 1024 * 1024):F2} GB"
             }).ToList();

@@ -96,6 +96,10 @@ namespace ArchivSector_OD
                 FileName = exePath,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // Beta 6: makemkvcon writes UTF-8; read as the old Windows
+                // code page, "CC→Text" came out as "CCâ†'Text".
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
@@ -171,6 +175,8 @@ namespace ArchivSector_OD
                     FileName = exePath,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8,   // beta 6: makemkvcon writes UTF-8
+                    StandardErrorEncoding = System.Text.Encoding.UTF8,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 };
@@ -249,6 +255,10 @@ namespace ArchivSector_OD
                 FileName = exePath,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // Beta 6: makemkvcon writes UTF-8; read as the old Windows
+                // code page, "CC→Text" came out as "CCâ†'Text".
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
@@ -358,6 +368,8 @@ namespace ArchivSector_OD
                     FileName = exePath,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8,   // beta 6: makemkvcon writes UTF-8
+                    StandardErrorEncoding = System.Text.Encoding.UTF8,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 };
