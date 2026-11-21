@@ -52,7 +52,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 
 ### ⚠ Known issues
 * **SRT subtitles are read by OCR**, which can misread a letter now and then: check them, or use **✍ Exact**. Subtitle Edit's command line reads with the OCR language last picked in its own window; if it has never done OCR on the PC, open it once and OCR any subtitle with Tesseract first.
-* Everything listed for Beta 5 below still applies.
+* Everything listed for Beta 5 below still applies, except closing the app during a rip or burn: it now asks first (above).
 
 ---
 

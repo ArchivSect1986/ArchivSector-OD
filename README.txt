@@ -89,7 +89,8 @@ following Friday when that's a holiday).
 ⚠ Known issues: SRT subtitles are read by OCR, which can misread a letter
   now and then: check them, or use ✍ Exact. If Subtitle Edit has never
   done OCR on your PC, open it once and OCR any subtitle with Tesseract
-  first. Everything listed for Beta 5 still applies.
+  first. Everything listed for Beta 5 still applies, except closing
+  the app during a rip or burn: it now asks first.
 
 ========================================================================
 ⚙️ NEW IN V4.0 BETA 5 — SETTINGS, BURN SUMMARY & BLU-RAY ISO WITHOUT IMGBURN
@@ -135,8 +136,8 @@ following Friday when that's a holiday).
 ⚠ Known issues: DVD-R DL still goes to ImgBurn (or Windows). Some drives
   read the start of a BD-R DL's second layer poorly: if a verify fails
   just past sector 12,219,392, check the disc in another drive first.
-  Closing the app while a rip or burn is running stops it without
-  asking: wait for it to finish (a warning comes in Beta 6).
+  Closing the app while a rip or burn is running stopped it without
+  asking (fixed in Beta 6: it now asks first).
 
 ========================================================================
 🎵 NEW IN V4.0 BETA 4 — MUSIC CDs, ACCURATERIP & XBOX 360 GAMES
