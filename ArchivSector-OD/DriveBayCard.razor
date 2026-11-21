@@ -2608,7 +2608,10 @@
         }
     }
 
-    private async Task VerifyOutput(string isoPath)
+    // redumpApplies (beta 6): false for a MakeMKV backup (Blu-ray Full Backup,
+    // DVD Decrypted ISO). It's decrypted, so it can never match Redump, which
+    // lists exact raw dumps; the checksums are still worked out and saved.
+    private async Task VerifyOutput(string isoPath, bool redumpApplies = true)
     {
         isVerifying = true;
         AddLog("Computing SHA1/MD5…");
@@ -2628,6 +2631,15 @@
             lastSha1 = sha1;
             lastMd5 = md5 ?? "";
             AddLog($"SHA1: {sha1}");
+
+            if (!redumpApplies)
+            {
+                lastRedumpMatch = "N/A (decrypted backup)";
+                verificationMessage = "ℹ Checksums saved (Redump check N/A: Redump lists exact raw dumps, not decrypted backups)";
+                verificationColor = "var(--text-muted)";
+                AddLog(verificationMessage);
+                return;
+            }
 
             var match = await Task.Run(() => VerificationService.VerifyAgainstRedump(sha1));
             if (match is not null)
@@ -3137,7 +3149,8 @@
                 {
                     AddLog($"ISO complete: {finalImage}");
                     lastOutputFolder = finalImage;
-                    await VerifyOutput(finalImage);
+                    backupResult.OutputFolder = finalImage;   // beta 6: "Backup complete" names the ISO, not the deleted working folder
+                    await VerifyOutput(finalImage, redumpApplies: false);
                     NotifyIfEnabled(config, true, opLabel, finalImage);
                     RecordHistory(opLabel, finalImage, lastSha1, lastMd5, lastRedumpMatch);
                     OnRipSucceeded(config);
@@ -3223,6 +3236,7 @@
                 try { if (File.Exists(buildTempIso)) File.Delete(buildTempIso); } catch { /* best-effort */ }
                 trimMessage = "ISO build cancelled: the decrypted folder was kept";
                 lastOutputFolder = payloadRoot;
+                backupResult.OutputFolder = payloadRoot;
             }
             else if (finalIso is not null)
             {
@@ -3258,7 +3272,8 @@
                 }
 
                 lastOutputFolder = finalIso;
-                await VerifyOutput(finalIso);
+                backupResult.OutputFolder = finalIso;   // beta 6: "Backup complete" names the ISO, not the deleted working folder
+                await VerifyOutput(finalIso, redumpApplies: false);
                 NotifyIfEnabled(config, true, opLabel, finalIso);
                 RecordHistory(opLabel, finalIso, lastSha1, lastMd5, lastRedumpMatch);
                 OnRipSucceeded(config);
@@ -3270,6 +3285,7 @@
                 AddLog($"[WARNING] No ISO was made: {failure} -- keeping the decrypted folder instead.");
                 trimMessage = "⚠ The ISO couldn't be built: the decrypted folder was kept as the backup";
                 lastOutputFolder = payloadRoot;
+                backupResult.OutputFolder = payloadRoot;
                 NotifyIfEnabled(config, false, opLabel, "ISO build failed, folder kept");
                 RecordHistory(opLabel, payloadRoot);
             }

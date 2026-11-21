@@ -88,7 +88,11 @@ following Friday when that's a holiday).
   Live log was squished on some window sizes; warning lines showed as
   errors in the log; a music CD without CD-Text couldn't get an album
   cover (🎨 Fetch Metadata & Artwork now searches iTunes for the artist
-  and album you type, and the CD remembers it).
+  and album you type, and the CD remembers it); a 4K Blu-ray (BD-100)
+  showed as "BD-128 Quad Layer" and its backup went into a BD-128
+  folder; "Backup complete" named the deleted working folder instead of
+  the ISO; a decrypted backup was reported as "No Redump match" (Redump
+  doesn't list decrypted backups, so it now says N/A).
 
 ⚠ Known issues: SRT subtitles are read by OCR, which can misread a letter
   now and then: check them, or use ✍ Exact. If Subtitle Edit has never

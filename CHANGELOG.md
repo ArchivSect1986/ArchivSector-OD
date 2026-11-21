@@ -38,6 +38,9 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **Two films with the same disc label shared one poster**, and the last one picked replaced the other (now each disc keeps its own, above).
 * **The Live log was squished** into a thin strip on some window sizes.
 * **A music CD without CD-Text got no album cover**, and **🎨 Fetch Metadata & Artwork** did nothing for it (most bought CDs have no CD-Text). It now opens the search window on iTunes, where you type the artist and album, and the cover you pick is remembered by the CD's track list, so it comes back by itself the next time the CD goes in.
+* **A 4K Blu-ray was given the wrong disc size:** an 89.8 GB BD-100 showed as "BD-128 Quad Layer" on the drive card, and its Full Backup went into a BD-128 folder. Sizes are now measured against what each disc really holds, so it's a BD-100, BD-66 appears for the smaller 4K discs, and a full BD-25 or BD-50 is no longer put one size too high.
+* **"Backup complete" named the deleted working folder** (`…\_temp_decrypt`) after a Blu-ray Full Backup or DVD Decrypted ISO, instead of the finished ISO. It now names the ISO.
+* **A Blu-ray Full Backup or DVD Decrypted ISO said "⚠ No Redump match found"**, which can never match: Redump lists exact raw dumps, and these backups are decrypted. Their checksums are still worked out and saved, and the Redump check now says it doesn't apply (N/A in History).
 * **A line the app marks as a warning showed as an error** in the log (amber, not red, now), such as Movie-Only's "couldn't precisely trim" note.
 
 ### ✅ Tested
@@ -50,6 +53,8 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **No artwork lookup for a generic label:** an Xbox 360 disc labelled DVD_ROM was skipped, with no unrelated cover.
 * **The desktop works while the app is minimized**, maximized first (the fix from Beta 5).
 * **Time left on rips:** a Blu-ray Full Backup said "about 25 min left" two minutes in and finished decrypting 21 minutes after it started (30.97 GB at 26.4 MB/s on average, as the log recorded), with the 📄 line following MakeMKV from file to file; a Movie-Only rip showed its speed and time left the same way.
+* **Blu-ray Full Backup of a 4K disc:** an 89.8 GB BD-100 was decrypted in 1 h 04 min (24.9 MB/s on average, in LibreDrive mode) and built into a single ISO in 4 minutes. Near the end the time left was right to the minute ("6 min left" at 21:36, done at 21:42).
+* **Album cover for a music CD without CD-Text:** a Disney CD showing only "Audio CD" got its cover from iTunes through 🎨 Fetch Metadata & Artwork, and it came back by itself when the CD was ejected and put back in.
 * **Closing during a rip asks first:** No kept the rip going; Yes closed the app and stopped MakeMKV with it.
 * **The Settings window fits its settings:** it opened tall enough to show all six programs in 🛠 Programs, Subtitle Edit and BurnerMAX included, with no scroll bar.
 
