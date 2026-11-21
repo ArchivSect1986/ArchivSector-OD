@@ -37,6 +37,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 ### 🐛 Fixed
 * **Two films with the same disc label shared one poster**, and the last one picked replaced the other (now each disc keeps its own, above).
 * **The Live log was squished** into a thin strip on some window sizes.
+* **A music CD without CD-Text got no album cover**, and **🎨 Fetch Metadata & Artwork** did nothing for it (most bought CDs have no CD-Text). It now opens the search window on iTunes, where you type the artist and album, and the cover you pick is remembered by the CD's track list, so it comes back by itself the next time the CD goes in.
 * **A line the app marks as a warning showed as an error** in the log (amber, not red, now), such as Movie-Only's "couldn't precisely trim" note.
 
 ### ✅ Tested

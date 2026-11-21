@@ -86,7 +86,9 @@ following Friday when that's a holiday).
   (live progress and Cancel) instead of ImgBurn.
 • 🐛 Fixed: two films with the same disc label shared one poster; the
   Live log was squished on some window sizes; warning lines showed as
-  errors in the log.
+  errors in the log; a music CD without CD-Text couldn't get an album
+  cover (🎨 Fetch Metadata & Artwork now searches iTunes for the artist
+  and album you type, and the CD remembers it).
 
 ⚠ Known issues: SRT subtitles are read by OCR, which can misread a letter
   now and then: check them, or use ✍ Exact. If Subtitle Edit has never

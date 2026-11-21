@@ -36,8 +36,9 @@ namespace ArchivSector_OD
 
             QueryBox.Text = initialQuery;
 
-            var sources = category == DiscCategory.Game
-                ? new[] { "RAWG", "SteamGridDB" }
+            // Beta 6: a music CD searches iTunes for its album cover.
+            var sources = category == DiscCategory.Game ? new[] { "RAWG", "SteamGridDB" }
+                : category == DiscCategory.Audio ? new[] { "iTunes" }
                 : new[] { "TMDB" };
             SourceCombo.ItemsSource = sources;
             // Start on the source chosen in Settings, when it's one of the options.
@@ -86,6 +87,11 @@ namespace ArchivSector_OD
                     linkText = "SteamGridDB";
                     url = "https://www.steamgriddb.com";
                     break;
+                case "iTunes":
+                    prefix = "Album artwork from ";
+                    linkText = "iTunes";
+                    url = "https://music.apple.com";
+                    break;
                 default:
                     prefix = "";
                     linkText = "";
@@ -111,9 +117,16 @@ namespace ArchivSector_OD
         private async Task RunSearch()
         {
             var query = QueryBox.Text.Trim();
-            if (string.IsNullOrEmpty(query)) return;
-
             var source = SourceCombo.SelectedItem as string ?? "";
+            if (string.IsNullOrEmpty(query))
+            {
+                // A music CD without CD-Text opens with an empty box.
+                StatusText.Text = source == "iTunes"
+                    ? "Type the artist and album, then press Enter or Search."
+                    : "Type a title, then press Enter or Search.";
+                return;
+            }
+
             UpdateAttribution(source);
             StatusText.Text = "Searching…";
             UseButton.IsEnabled = false;
@@ -127,7 +140,7 @@ namespace ArchivSector_OD
                     "SteamGridDB" => config.SteamGridDbApiKey,
                     _ => config.TmdbApiKey,
                 };
-                if (string.IsNullOrWhiteSpace(key))
+                if (source != "iTunes" && string.IsNullOrWhiteSpace(key))   // iTunes needs no key
                 {
                     StatusText.Text = $"No {source} API key set -- add a free one in Settings.";
                     return;
@@ -138,6 +151,7 @@ namespace ArchivSector_OD
                     "RAWG" => await MetadataFetchService.SearchRawg(query, config.RawgApiKey),
                     "SteamGridDB" => await MetadataFetchService.SearchSteamGridDb(query, config.SteamGridDbApiKey),
                     "TMDB" => await MetadataFetchService.SearchTmdb(query, config.TmdbApiKey),
+                    "iTunes" => await MetadataFetchService.SearchItunesAlbum(query),
                     _ => new List<MetadataFetchService.MetadataResult>(),
                 };
 

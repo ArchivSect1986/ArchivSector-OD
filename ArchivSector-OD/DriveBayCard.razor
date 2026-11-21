@@ -880,6 +880,7 @@
     private string? cdTextLine;   // v4.0 beta 4: "Album — Artist" from a music CD's CD-Text
     private string musicAlbum = "", musicArtist = "";   // beta 6: music CD album/artist, for album art
     private string? musicCacheKey;                       // beta 6: where a music CD's album art is cached
+    private string? audioDiscId;                         // beta 6: a music CD's own ID, from its track list
     private string? gameNameNote = null;
     private string? lastTitleId = null;   // v3.4: an Xbox 360 dump that couldn't be named automatically
     private string? lastGameFolder = null; // folder of the last finished game dump
@@ -962,6 +963,9 @@
     {
         get
         {
+            // A music CD has no file system and so no serial: its track list
+            // is its ID.
+            if (Category == DiscCategory.Audio && !string.IsNullOrEmpty(audioDiscId)) return audioDiscId;
             var vsn = ReadVolumeSerial(DriveLetter);
             if (vsn is not null)
             {
@@ -985,7 +989,7 @@
         get
         {
             var t = DiscTag;
-            if (t.StartsWith("VSN-", StringComparison.Ordinal)) return t;
+            if (t.StartsWith("VSN-", StringComparison.Ordinal) || t.StartsWith("CD-", StringComparison.Ordinal)) return t;
             if (!string.IsNullOrWhiteSpace(Serial) && t == Serial.Trim()) return t;
             return null;
         }
@@ -1148,26 +1152,45 @@
     // v4.0 beta 4: a music CD's CD-Text (read straight from the drive)
     // shows on the card, and "Artist - Album" goes in the name box for the
     // rip unless a name was already typed there.
+    // Beta 6: the CD's track list is read first and turned into an ID for the
+    // CD (audioDiscId), so its album cover can be found again even when the
+    // CD has no CD-Text, as most bought CDs don't.
     private async Task ReadCdTextAsync()
     {
         var letter = DriveLetter;
         ArchivSector_OD.Burning.CdText? text = null;
+        string? tocId = null;
         try
         {
-            text = await Task.Run(() =>
+            (text, tocId) = await Task.Run<(ArchivSector_OD.Burning.CdText?, string?)>(() =>
             {
-                if (ArchivSector_OD.Burning.BurnEngine.IsBusy(letter) || RipActivity.IsDriveBusy(letter)) return null;
+                if (ArchivSector_OD.Burning.BurnEngine.IsBusy(letter) || RipActivity.IsDriveBusy(letter)) return (null, null);
+                string? id = null;
+                try
+                {
+                    var toc = ArchivSector_OD.Burning.CdImageReader.ReadToc(letter, out _);
+                    if (toc is not null) id = AudioDiscId(toc);
+                }
+                catch { id = null; }
                 using var drive = ArchivSector_OD.Burning.ScsiDrive.Open(letter, out _);
-                return drive is null ? null : ArchivSector_OD.Burning.CdText.Read(drive);
+                return (drive is null ? null : ArchivSector_OD.Burning.CdText.Read(drive), id);
             });
         }
         catch { text = null; }
-        if (text is null || !MediaPresent || Category != DiscCategory.Audio || letter != DriveLetter) return;
+        if (!MediaPresent || Category != DiscCategory.Audio || letter != DriveLetter) return;
+
+        // A new CD: forget the last one's album and artist.
+        audioDiscId = tocId;
+        musicAlbum = "";
+        musicArtist = "";
+        musicCacheKey = null;
+
+        if (text is null) { await ShowAlbumArtByDiscId(); return; }
 
         string album = text.Get("TITLE", 0), artist = text.Get("PERFORMER", 0);
         cdTextLine = album.Length > 0 && artist.Length > 0 ? $"{album} — {artist}"
                    : album.Length > 0 ? album : artist.Length > 0 ? artist : null;
-        if (cdTextLine is null) return;
+        if (cdTextLine is null) { await ShowAlbumArtByDiscId(); return; }
         string suggestion = album.Length > 0 && artist.Length > 0 ? $"{artist} - {album}" : album;
         if (suggestion.Length > 0 && string.IsNullOrWhiteSpace(gameNameDraft))
         {
@@ -1184,11 +1207,77 @@
         if (!string.IsNullOrWhiteSpace(musicCacheKey))
         {
             cachedArt = MetadataFetchService.GetCachedArtResolved(musicCacheKey, DiscTag, MusicArtFolder);
+            // Picked by hand earlier under another name? This CD's ID finds it.
+            if (cachedArt is null && !string.IsNullOrEmpty(audioDiscId))
+                cachedArt = MetadataFetchService.FindCachedArtByDiscId(audioDiscId, MusicArtFolder);
             LoadCoverDataUri();
             if (!hasCachedCover && ConfigService.Load().AutoFetchMetadataArt)
                 _ = AutoFetchAlbumArt(album, artist, musicCacheKey);
         }
         await InvokeAsync(StateHasChanged);
+    }
+
+    // Beta 6: a music CD with no CD-Text has nothing to search by, but once
+    // its cover has been picked by hand (🎨 Fetch Metadata & Artwork), the
+    // CD's own ID finds it again on the next insert.
+    private async Task ShowAlbumArtByDiscId()
+    {
+        if (string.IsNullOrEmpty(audioDiscId)) return;
+        var found = MetadataFetchService.FindCachedArtByDiscId(audioDiscId, MusicArtFolder);
+        if (found is null) return;
+        cachedArt = found;
+        LoadCoverDataUri();
+        if (hasCachedCover) AddLog("Album art: found by this CD's track list.");
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // Beta 6: an ID for a music CD from its track list (how many tracks,
+    // where each starts and where the CD ends). Every copy of the same CD
+    // has the same track list, and different CDs almost never do, the same
+    // idea freedb and AccurateRip use. "CD-" marks it as this kind of ID.
+    private static string AudioDiscId(ArchivSector_OD.Burning.CdImageReader.Toc toc)
+    {
+        var list = string.Join(",", toc.Tracks.Select(t => t.StartLba)) + "/" + toc.LeadOutLba;
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(list)));
+        return $"CD-{toc.Tracks.Count:D2}-{toc.LeadOutLba}-{hash[..8]}";
+    }
+
+    // Beta 6: 🎨 Fetch Metadata & Artwork for a music CD opens the search
+    // window on iTunes, filled in from the CD-Text when there is any; without
+    // it, you type the artist and album. The cover is saved with this CD's
+    // ID, so it comes back by itself the next time the CD goes in.
+    private async Task FetchAlbumArtByHand()
+    {
+        var config = ConfigService.Load();
+        var query = ((musicArtist.Length > 0 ? musicArtist + " " : "") + musicAlbum).Trim();
+        var window = new MetadataSearchWindow(query, DiscCategory.Audio, config)
+        {
+            Owner = System.Windows.Application.Current.MainWindow
+        };
+        window.Show();
+        var chosen = await window.ResultTask;
+        if (chosen is null)
+        {
+            AddLog("Album art: search cancelled, nothing saved");
+            return;
+        }
+
+        // Saved as "Artist - Album": the artist is the first part of the
+        // result's detail line ("Artist · Genre · Year").
+        string artistOfResult = (chosen.Detail ?? "").Split(" · ")[0].Trim();
+        string name = !string.IsNullOrWhiteSpace(musicCacheKey) ? musicCacheKey!
+            : FileNamingService.SanitizeFilename(artistOfResult.Length > 0 ? $"{artistOfResult} - {chosen.Title}" : chosen.Title);
+        string key = MetadataFetchService.VersionedCacheKey(name, chosen.Year);
+
+        var previousDir = !string.IsNullOrEmpty(cachedArt?.CoverPath) ? Path.GetDirectoryName(cachedArt!.CoverPath) : null;
+        cachedArt = await MetadataFetchService.SaveArtworkAndMetadata(key, chosen, DiscTag, MusicArtFolder);
+        var newDir = !string.IsNullOrEmpty(cachedArt.CoverPath) ? Path.GetDirectoryName(cachedArt.CoverPath) : null;
+        if (previousDir is not null && newDir is not null && !string.IsNullOrWhiteSpace(DiscTag)
+            && !string.Equals(previousDir, newDir, StringComparison.OrdinalIgnoreCase))
+            MetadataFetchService.RemoveDiscTag(previousDir, DiscTag);
+        LoadCoverDataUri();
+        AddLog(hasCachedCover ? $"Album art: saved \"{chosen.Title}\" (iTunes)" : $"Album art: \"{chosen.Title}\" had no cover image.");
+        StateHasChanged();
     }
 
     private async Task TryAutoStart()
@@ -1352,13 +1441,7 @@
     {
         if (Category == DiscCategory.Audio)
         {
-            if (string.IsNullOrWhiteSpace(musicAlbum) && string.IsNullOrWhiteSpace(musicArtist))
-            {
-                AddLog("Album art: this disc has no CD-Text to search by.");
-                return;
-            }
-            await AutoFetchAlbumArt(musicAlbum, musicArtist,
-                musicCacheKey ?? FileNamingService.SanitizeFilename(musicArtist + " - " + musicAlbum));
+            await FetchAlbumArtByHand();
             return;
         }
 
