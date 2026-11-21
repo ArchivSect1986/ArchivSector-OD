@@ -18,10 +18,10 @@ namespace ArchivSector_OD
     // DetectGameSystem names the console (PlayStation 1/2/3/4, Xbox One, Original
     // Xbox, Xbox 360) for sorting game dumps into per-system folders.
     //
-    // ClassifyCapacity ports the Python app's size-ladder for
-    // labeling a disc's format from its real reported capacity (not
-    // the rounded marketing number) -- same boundaries, same
-    // fallback-to-smallest-fitting-tier logic.
+    // ClassifyCapacity labels a disc's format from its real reported
+    // capacity (not the rounded marketing number): the smallest disc
+    // the data fits on, as the Python app did. Beta 6 measures each
+    // disc's real size in bytes (see the method).
     public enum DiscCategory { Unknown, BluRay, Dvd, Game, Audio }
 
     public static class DiscDetectionService
@@ -250,16 +250,28 @@ namespace ArchivSector_OD
             }
         }
 
+        // Beta 6: the smallest disc the data fits on, measured against what
+        // each disc really holds in bytes. The old ladder compared the size in
+        // GiB with the discs' names (25, 50, 100...), which are in GB, so an
+        // 89.8 GiB 4K Blu-ray (a BD-100) was called "BD-128 Quad Layer", BD-66
+        // didn't exist, and a full BD-50 or BD-25 was put one size too high.
+        // The label also names the folder a Full Backup is sorted into.
+        private const long Dvd5Bytes = 4_700_372_992L;     // 2,295,104 sectors
+        private const long Dvd9Bytes = 8_543_666_176L;     // 4,171,712 sectors
+        private const long Bd25Bytes = 25_025_314_816L;    // 12,219,392 sectors
+        private const long Bd50Bytes = 50_050_629_632L;    // 24,438,784 sectors
+        private const long Bd66Bytes = 66_800_000_000L;    // Ultra HD Blu-ray, two 33.4 GB layers
+        private const long Bd100Bytes = 100_103_356_416L;  // 48,878,592 sectors
+
         public static string ClassifyCapacity(long totalBytes)
         {
-            var gb = totalBytes / Math.Pow(1024, 3);
-            if (gb > 119.0) return "BD-128 Quad Layer";
-            if (gb > 66.0) return "BD-128 Quad Layer";
-            if (gb > 50.0) return "BD-100 Triple Layer";
-            if (gb > 25.0) return "BD-50 Dual Layer";
-            if (gb > 8.5) return "BD-25 Single Layer";
-            if (gb > 4.7) return "DVD-9 Dual Layer";
-            if (gb > 1.0) return "DVD-5 Single Layer";
+            if (totalBytes > Bd100Bytes) return "BD-128 Quad Layer";
+            if (totalBytes > Bd66Bytes) return "BD-100 Triple Layer";
+            if (totalBytes > Bd50Bytes) return "BD-66 Dual Layer";
+            if (totalBytes > Bd25Bytes) return "BD-50 Dual Layer";
+            if (totalBytes > Dvd9Bytes) return "BD-25 Single Layer";
+            if (totalBytes > Dvd5Bytes) return "DVD-9 Dual Layer";
+            if (totalBytes > 1L << 30) return "DVD-5 Single Layer";
             return "CD-ROM";
         }
     }
