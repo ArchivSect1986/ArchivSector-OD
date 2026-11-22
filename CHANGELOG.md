@@ -58,6 +58,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **The desktop works while the app is minimized**, maximized first (the fix from Beta 5).
 * **Time left on rips:** a Blu-ray Full Backup said "about 25 min left" two minutes in and finished decrypting 21 minutes after it started (30.97 GB at 26.4 MB/s on average, as the log recorded), with the 📄 line following MakeMKV from file to file; a Movie-Only rip showed its speed and time left the same way.
 * **Blu-ray Full Backup of a 4K disc:** an 89.8 GB BD-100 was decrypted in 1 h 04 min (24.9 MB/s on average, in LibreDrive mode) and built into a single ISO in 4 minutes. Near the end the time left was right to the minute ("6 min left" at 21:36, done at 21:42).
+* **The fixed Full Backup, on a BD-50:** a 31 GB Blu-ray was sorted into the BD-50 folder, decrypted in 21 min (26.4 MB/s on average) and built into one ISO in 19 seconds; "Backup complete" named the .iso, and the Redump check said N/A with the checksums saved.
 * **Album cover for a music CD without CD-Text:** a Disney CD showing only "Audio CD" got its cover from iTunes through 🎨 Fetch Metadata & Artwork, and it came back by itself when the CD was ejected and put back in.
 * **Closing during a rip asks first:** No kept the rip going; Yes closed the app and stopped MakeMKV with it.
 * **The Settings window fits its settings:** it opened tall enough to show all six programs in 🛠 Programs, Subtitle Edit and BurnerMAX included, with no scroll bar.
