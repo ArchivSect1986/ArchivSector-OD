@@ -12,7 +12,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **🔓 DVD Decrypted ISO (via MakeMKV):** the DVD menu's MakeMKV button now makes a single decrypted `.iso` straight away (MakeMKV writes the finished DVD image itself), with a progress bar. The raw sector dump (Redumper) is still there for an exact copy.
 * **🔥 TargetFill Build & Burn:** a new button beside **Generate .ISO Image** builds the padded ISO and sends it straight to the Burn tab. A set that needs several discs sends every ISO, one after another.
 * **🔥 Burn this ISO** on the drive card after a Blu-ray Full Backup or a raw ISO dump: sends the finished ISO to the Burn tab's queue.
-* **📝 SRT subtitles after a Movie-Only rip.** A DVD's or Blu-ray's subtitles are pictures, so they're read with the OCR of **Subtitle Edit** (free, a separate download, set in **Settings → 🛠 Programs**). **📝 Make SRT subtitles** saves every subtitle track as an `.srt` next to the MKV (`Movie.eng.srt`, `Movie.eng.forced.srt`…), the names Plex, Jellyfin and VLC pick up; **✍ Exact: open in Subtitle Edit** opens the MKV in Subtitle Edit's own window, where its OCR asks about any letter it doesn't know. The MKV itself isn't changed. Needs MKVToolNix (mkvmerge and mkvextract) too.
+* **📝 SRT subtitles after a Movie-Only rip.** A DVD's or Blu-ray's subtitles are pictures, so they're read with the OCR of **Subtitle Edit** (free, a separate download, set in **Settings → 🛠 Programs**). **📝 Make SRT subtitles** saves every subtitle track as an `.srt` next to the MKV (`Movie.eng.srt`, `Movie.eng.forced.srt`…), the names Plex, Jellyfin and VLC pick up; **✍ Exact: open in Subtitle Edit** opens the MKV in Subtitle Edit's own window, where its OCR asks about any letter it doesn't know. The MKV itself isn't changed. Needs MKVToolNix (mkvmerge and mkvextract) too, and **Subtitle Edit 4.0.x** for Make SRT (its portable zip is fine): version 5 has no command line for it, so with 5 only ✍ Exact works.
 * **🎵 Album covers for music CDs**, found on iTunes from the CD-Text's album and artist.
 * **🎮 SteamGridDB for game covers**, as well as RAWG: add its free key in **Settings → 🌐 Online lookups** and choose which one is tried first (the other is the fallback). It's in the Fetch Metadata & Artwork window too.
 * **The film's year** beside its title on the drive card, and in the name of the ISO it makes ("Beauty and the Beast (2017).iso").
@@ -46,6 +46,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **"Backup complete" named the deleted working folder** (`…\_temp_decrypt`) after a Blu-ray Full Backup or DVD Decrypted ISO, instead of the finished ISO. It now names the ISO.
 * **A Blu-ray Full Backup or DVD Decrypted ISO said "⚠ No Redump match found"**, which can never match: Redump lists exact raw dumps, and these backups are decrypted. Their checksums are still worked out and saved, and the Redump check now says it doesn't apply (N/A in History).
 * **Odd characters in MakeMKV's track names:** a closed-caption subtitle showed as "CCâ†'Text English" in the track picker. MakeMKV's output is now read as UTF-8, so it shows "CC→Text English", and accented film and track names come through right.
+* **📝 Make SRT with Subtitle Edit 5 opened Subtitle Edit's own windows**, leaving the OCR and the saving to you: version 5 has no command line for it. The app now checks the version: with 5, Make SRT says to use Subtitle Edit 4.0.x (or ✍ Exact), and **Settings → 🛠 Programs** says so under its path.
 * **A line the app marks as a warning showed as an error** in the log (amber, not red, now), such as Movie-Only's "couldn't precisely trim" note.
 
 ### ✅ Tested
@@ -53,7 +54,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **TargetFill Build & Burn:** built the ISO and burned it from the Burn tab.
 * **Blu-ray Full Backup:** a 38.6 GB Blu-ray to one ISO, the temporary decrypted folder cleaned up.
 * **Artwork per disc:** four *Beauty and the Beast* discs (two 1991, two 2017) each came back with the right poster after restarts and re-inserts; a DVD_ROM game disc found its cover again by its ID.
-* **SRT subtitles:** a Blu-ray's two English PGS tracks read by Subtitle Edit's OCR and saved as `.eng.srt` and `.eng.2.srt` next to the MKV (about a minute each), and **✍ Exact** opened the MKV in Subtitle Edit. The buttons were still there after the disc was ejected.
+* **SRT subtitles:** a DVD's English VobSub track read by Subtitle Edit 4.0.16's Tesseract OCR, with no Subtitle Edit window opening, and saved as `Spooky Buddies (2011).eng.srt` next to the MKV (about 4 minutes); **✍ Exact** opened the MKV in Subtitle Edit. The buttons were still there after the disc was ejected.
 * **Burn queue summary card:** a 703 MB CD-RW burned from the queue, verified, and its summary copied.
 * **No artwork lookup for a generic label:** an Xbox 360 disc labelled DVD_ROM was skipped, with no unrelated cover.
 * **The desktop works while the app is minimized**, maximized first (the fix from Beta 5).
@@ -65,7 +66,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **The Settings window fits its settings:** it opened tall enough to show all six programs in 🛠 Programs, Subtitle Edit and BurnerMAX included, with no scroll bar.
 
 ### ⚠ Known issues
-* **SRT subtitles are read by OCR**, which can misread a letter now and then: check them, or use **✍ Exact**. Subtitle Edit's command line reads with the OCR language last picked in its own window; if it has never done OCR on the PC, open it once and OCR any subtitle with Tesseract first.
+* **SRT subtitles are read by OCR**, which can misread a letter now and then: check them, or use **✍ Exact**. Subtitle Edit 4's command line reads with the OCR language last picked in its own window; if it has never done OCR on the PC, open it once and OCR any subtitle with Tesseract first.
 * Everything listed for Beta 5 below still applies, except closing the app during a rip or burn: it now asks first (above).
 
 ---

@@ -31,8 +31,36 @@ namespace ArchivSector_OD
     //
     // "Exact" mode just opens the MKV in Subtitle Edit's own window, where its
     // OCR asks about each letter shape it doesn't know (much more accurate).
+    //
+    // Beta 6: the command line above is Subtitle Edit 4's. Subtitle Edit 5
+    // (the new version, built on Avalonia) has no /convert: given one, it
+    // opens its normal windows instead, so the "automatic" SRT turned into
+    // the user doing the OCR by hand. Make SRT therefore needs 4.0.x (its
+    // portable zip comes with Tesseract and English); Exact works with both.
     public static class SubtitleEditService
     {
+        /// <summary>SubtitleEdit.exe's main version (4, 5...), or null if it can't be read.</summary>
+        public static int? MajorVersion(string exePath)
+        {
+            try
+            {
+                var v = FileVersionInfo.GetVersionInfo(exePath);
+                if (v.FileMajorPart > 0) return v.FileMajorPart;
+                var p = (v.ProductVersion ?? "").Trim().TrimStart('v', 'V');
+                int dot = p.IndexOf('.');
+                return int.TryParse(dot > 0 ? p[..dot] : p, out var m) && m > 0 ? m : null;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Whether this Subtitle Edit can make an .srt by itself from the command
+        /// line: version 4 can, version 5 can't. An unknown version is given the
+        /// benefit of the doubt.
+        /// </summary>
+        public static bool CanConvertFromCommandLine(string exePath) =>
+            MajorVersion(exePath) is not int m || m < 5;
+
         public static string? FindExecutable(string? overridePath = null)
         {
             if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))

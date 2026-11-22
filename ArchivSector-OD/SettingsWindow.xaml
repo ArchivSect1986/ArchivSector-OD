@@ -347,7 +347,7 @@
                     <TextBlock x:Name="MkvmergeStatus" Style="{StaticResource Status}"/>
 
                     <TextBlock Style="{StaticResource Label}" Text="Subtitle Edit (SubtitleEdit.exe), optional"/>
-                    <TextBlock Style="{StaticResource Help}" Text="Free, from github.com/SubtitleEdit/subtitleedit. Turns a Movie-Only MKV's subtitles (pictures on DVD and Blu-ray) into .srt text files next to it, with its OCR. Needs mkvmerge too."/>
+                    <TextBlock Style="{StaticResource Help}" Text="Free, from github.com/SubtitleEdit/subtitleedit: use version 4.0.x (the portable zip is fine). Turns a Movie-Only MKV's subtitles (pictures on DVD and Blu-ray) into .srt text files next to it, with its OCR. Version 5 can't do that on its own, only ✍ Exact. Needs mkvmerge too."/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>

@@ -50,7 +50,8 @@ following Friday when that's a holiday).
   raw ISO dump, sends the ISO to the Burn tab's queue.
 • 📝 SRT subtitles after a Movie-Only rip: every subtitle track becomes
   an .srt next to the MKV (Movie.eng.srt...), read by the OCR of your
-  own copy of Subtitle Edit (free, set it in Settings → 🛠 Programs).
+  own copy of Subtitle Edit 4.0.x (free, set it in Settings → 🛠
+  Programs; version 5 can't do it on its own, only ✍ Exact).
   ✍ Exact opens the MKV in Subtitle Edit for its letter-by-letter OCR.
   The MKV keeps its own subtitles.
 • 🎵 Album covers for music CDs, found on iTunes from the CD-Text.
@@ -599,7 +600,7 @@ following Friday when that's a holiday).
 
 📝 SRT Subtitles (Movie-Only MKV)
 • Every subtitle track of the MKV saved as an .srt next to it, read by
-  the OCR of your own copy of Subtitle Edit, or opened in Subtitle Edit
+  the OCR of your own copy of Subtitle Edit 4.0.x, or opened in Subtitle Edit
   for its exact, letter-by-letter OCR.
 
 🔔 Notifications & Convenience

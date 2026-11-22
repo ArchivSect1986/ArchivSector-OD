@@ -246,6 +246,11 @@ namespace ArchivSector_OD
             ToolStatus(ImgBurnStatus, ImgBurnPathBox.Text, ImgBurnService.FindExecutable, "Not installed. That's fine unless you need it for the things above.", required: false);
             ToolStatus(MkvmergeStatus, MkvmergePathBox.Text, MkvmergeService.FindExecutable, "Not installed. Install MKVToolNix to use it.", required: false);
             ToolStatus(SubtitleEditStatus, SubtitleEditPathBox.Text, SubtitleEditService.FindExecutable, "Not installed. Only needed for SRT subtitles after a Movie-Only rip.", required: false);
+            // Beta 6: version 5 is found but can't make SRTs by itself.
+            string seTyped = CleanPath(SubtitleEditPathBox.Text);
+            string? seUsed = seTyped.Length > 0 && File.Exists(seTyped) ? seTyped : SubtitleEditService.FindExecutable(null);
+            if (seUsed is not null && !SubtitleEditService.CanConvertFromCommandLine(seUsed))
+                SetStatus(SubtitleEditStatus, false, $"⚠ Subtitle Edit {SubtitleEditService.MajorVersion(seUsed)} found: from version 5 it can't make SRTs on its own. Pick Subtitle Edit 4.0.x for 📝 Make SRT; ✍ Exact works with either.");
 
             string bm = CleanPath(BurnerMaxPathBox.Text);
             if (bm.Length == 0)

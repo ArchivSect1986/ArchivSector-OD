@@ -2055,6 +2055,16 @@
         }
         var seExe = FindOrAskSubtitleEdit(config);
         if (seExe is null) return;
+        // Beta 6: Subtitle Edit 5 has no command line for this; given one, it
+        // opens its own windows and leaves the OCR to you.
+        if (!SubtitleEditService.CanConvertFromCommandLine(seExe))
+        {
+            srtMessage = $"⚠ This Subtitle Edit is version {SubtitleEditService.MajorVersion(seExe)}, which can't make SRTs on its own (from version 5 it opens its own windows instead). " +
+                         "Install Subtitle Edit 4.0.x (the portable zip is fine) and pick it in Settings → Programs, or use ✍ Exact with this one.";
+            srtColour = "var(--amber)";
+            AddLog("[WARNING] SRT: " + srtMessage);
+            return;
+        }
 
         var mkvs = movieOnlyMkvs.ToList();
         wasCancelled = false;
