@@ -35,6 +35,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **The film's description** sits under its **Show details** link, beside the poster instead of under it.
 * **The Movie-Only title picker names every title:** a title MakeMKV gives no name (every title on a DVD) shows as "Title 1", "Title 2"… instead of "(unnamed title)", and the longest is marked "· likely the film".
 * **A Movie-Only MKV is named after the film the card shows:** the name box starts with its TMDB title and year ("Escape Plan - The Extractors (2019)") instead of the disc's label ("VVS_LE_TOMBEAU_3_3072_SCN (2019)"). A colon, which Windows doesn't allow in a file name, becomes " - ", the way Plex and Jellyfin like film names. The name can still be changed before the rip starts.
+* **A Blu-ray Full Backup, DVD Decrypted ISO or DVD raw dump of a film is named the same way:** "Escape Plan - The Extractors (2019).iso" instead of "ESCAPE PLAN EXTRACTORS (2019).iso", in a folder of the same name. The ISO's own volume label stays the disc's label. Games are named as before.
 * **The version number is on the status bar** at the bottom of the window ("Active Bays: 4 • Discs Loaded: 4/4 • Active Jobs: 0 • v3.9.96"), so a screenshot or bug report shows which version it was.
 
 ### 🐛 Fixed

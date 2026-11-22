@@ -2774,7 +2774,10 @@
             AddLog($"Destination: {categoryDir}");
         }
         var fallbackName = $"{folderPrefix}_{DriveLetter}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
-        var isoName = WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
+        // Beta 6: a DVD movie's raw dump is named after the film the card
+        // shows (TMDB), like a Movie-Only MKV; games keep their own naming.
+        var isoName = FilmNameFromArtwork()
+            ?? WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
 
         if (folderPrefix == "Game")
         {
@@ -3026,7 +3029,10 @@
             AddLog($"Destination: {categoryDir}");
         }
         var fallbackName = $"{DriveLetter}_{folderTag}_{DateTime.Now:yyyyMMdd_HHmmssfff}";
-        var baseName = WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
+        // Beta 6: named after the film the card shows (its TMDB title and
+        // year), like a Movie-Only MKV, instead of the disc's label.
+        var baseName = FilmNameFromArtwork()
+            ?? WithFetchedYear(FileNamingService.BuildOutputName(VolumeTitle, fallbackName));
 
         if (config.UnattendedAutoStart)
         {
