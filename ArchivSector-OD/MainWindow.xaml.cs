@@ -86,6 +86,9 @@ namespace ArchivSector_OD
                 // (index.html sends them with postMessageWithAdditionalObjects).
                 try { e.WebView.CoreWebView2.WebMessageReceived += OnWebMessage; }
                 catch { }
+                // Beta 6: kept for the window's own drag and drop (below).
+                try { pageCore = e.WebView.CoreWebView2; }
+                catch { }
                 // Beta 5: the page has loaded, so the web view can be seen.
                 try { e.WebView.CoreWebView2.NavigationCompleted += (_, _) => Dispatcher.BeginInvoke(new Action(ShowPage)); }
                 catch { ShowPage(); }
@@ -94,6 +97,68 @@ namespace ArchivSector_OD
             services.AddBlazorWebViewDeveloperTools();
 #endif
             blazorWebView.Services = services.BuildServiceProvider();
+
+            // Beta 6: drag and drop from Explorer. Since .NET 10 the page is
+            // drawn by WebView2's composition control, which doesn't receive
+            // Explorer's drops by itself, so the burn queue's "drop them here"
+            // stopped working in Beta 5. The window takes the drop instead,
+            // asks the page which drop zone is under the pointer, and hands
+            // the files to it (FileDrop), as the page did before.
+            AllowDrop = true;
+            PreviewDragEnter += OnWindowDragOver;
+            PreviewDragOver += OnWindowDragOver;
+            PreviewDragLeave += (_, _) => _ = DropZoneAtAsync(new Point(-1, -1), highlight: true);
+            PreviewDrop += OnWindowDrop;
+        }
+
+        // ---- Drag and drop (beta 6) ----
+
+        private CoreWebView2? pageCore;
+        private DateTime lastDragMark;
+
+        private static string[]? DroppedFiles(DragEventArgs e)
+        {
+            try { return e.Data.GetDataPresent(DataFormats.FileDrop) ? e.Data.GetData(DataFormats.FileDrop) as string[] : null; }
+            catch { return null; }
+        }
+
+        private void OnWindowDragOver(object sender, DragEventArgs e)
+        {
+            if (DroppedFiles(e) is not { Length: > 0 }) return;
+            // Copy is shown everywhere; a drop outside a drop zone is ignored.
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+            // Highlight the zone under the pointer, a few times a second at most.
+            if ((DateTime.UtcNow - lastDragMark).TotalMilliseconds < 120) return;
+            lastDragMark = DateTime.UtcNow;
+            _ = DropZoneAtAsync(e.GetPosition(blazorWebView), highlight: true);
+        }
+
+        private async void OnWindowDrop(object sender, DragEventArgs e)
+        {
+            var files = DroppedFiles(e);
+            if (files is not { Length: > 0 }) return;
+            e.Handled = true;
+            var at = e.GetPosition(blazorWebView);
+            string zone = await DropZoneAtAsync(at, highlight: false);
+            _ = DropZoneAtAsync(new Point(-1, -1), highlight: true);   // clear the highlight
+            if (zone.Length > 0) FileDrop.Raise(zone, files);
+        }
+
+        // The data-file-drop name of the zone at this point of the web view
+        // ("" when there's none); with highlight, the page also marks it.
+        private async System.Threading.Tasks.Task<string> DropZoneAtAsync(Point at, bool highlight)
+        {
+            if (pageCore is null) return "";
+            try
+            {
+                string js = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "window.archivsectorDropZoneAt ? window.archivsectorDropZoneAt({0}, {1}, {2}, {3}) : ''",
+                    at.X, at.Y, blazorWebView.ActualWidth, highlight ? "true" : "false");
+                string result = await pageCore.ExecuteScriptAsync(js);
+                return System.Text.Json.JsonSerializer.Deserialize<string>(result) ?? "";
+            }
+            catch { return ""; }
         }
 
         // Beta 5 (.NET 10): Windows can show the new window for a moment,

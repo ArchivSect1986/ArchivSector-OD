@@ -12,9 +12,19 @@ namespace ArchivSector_OD
     {
         public static event Action<string, IReadOnlyList<string>>? Dropped;
 
+        // Beta 6: a drop can now arrive two ways (the page, or the window
+        // itself on .NET 10), so the same files dropped on the same zone
+        // within two seconds are only taken once.
+        private static string lastDrop = "";
+        private static DateTime lastDropAt;
+
         internal static void Raise(string target, IReadOnlyList<string> paths)
         {
             if (paths.Count == 0) return;
+            string key = target + "|" + string.Join("|", paths);
+            if (key == lastDrop && (DateTime.UtcNow - lastDropAt).TotalSeconds < 2) return;
+            lastDrop = key;
+            lastDropAt = DateTime.UtcNow;
             try { Dropped?.Invoke(target, paths); } catch { }
         }
     }

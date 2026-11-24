@@ -47,6 +47,7 @@ The sixth test version of v4.0, being worked on. Everything below is new since B
 * **A Blu-ray Full Backup or DVD Decrypted ISO said "⚠ No Redump match found"**, which can never match: Redump lists exact raw dumps, and these backups are decrypted. Their checksums are still worked out and saved, and the Redump check now says it doesn't apply (N/A in History).
 * **Odd characters in MakeMKV's track names:** a closed-caption subtitle showed as "CCâ†'Text English" in the track picker. MakeMKV's output is now read as UTF-8, so it shows "CC→Text English", and accented film and track names come through right.
 * **📝 Make SRT with Subtitle Edit 5 opened Subtitle Edit's own windows**, leaving the OCR and the saving to you: version 5 has no command line for it. The app now checks the version: with 5, Make SRT says to use Subtitle Edit 4.0.x (or ✍ Exact), and **Settings → 🛠 Programs** says so under its path.
+* **Dragging ISOs from Explorer onto the burn queue did nothing** (since Beta 5): on .NET 10 the app's page is drawn in a way that doesn't receive drops by itself. The window now takes the drop and hands the files to the burn queue (or the Music CD list) under the pointer, which lights up as before.
 * **A line the app marks as a warning showed as an error** in the log (amber, not red, now), such as Movie-Only's "couldn't precisely trim" note.
 
 ### ✅ Tested

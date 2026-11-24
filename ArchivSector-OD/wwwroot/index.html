@@ -40,6 +40,21 @@
                 mark(z);
             });
             window.addEventListener('dragleave', function (e) { if (!e.relatedTarget) mark(null); });
+            // Beta 6 (.NET 10): WebView2's composition control doesn't get
+            // Explorer's drag and drop itself, so the window (MainWindow)
+            // takes the drop and asks here which drop zone is under the
+            // pointer. x and y are in the window's units (w = the web view's
+            // width in them); highlight marks the zone, x < 0 clears it.
+            window.archivsectorDropZoneAt = function (x, y, w, highlight) {
+                var z = null;
+                if (x >= 0 && y >= 0) {
+                    var s = w > 0 ? window.innerWidth / w : 1;
+                    var el = document.elementFromPoint(x * s, y * s);
+                    z = el && el.closest ? el.closest('[data-file-drop]') : null;
+                }
+                if (highlight) mark(z);
+                return z ? z.getAttribute('data-file-drop') : '';
+            };
             window.addEventListener('drop', function (e) {
                 if (!hasFiles(e)) return;
                 e.preventDefault();
